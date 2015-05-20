@@ -176,6 +176,11 @@ int main (int argc, const char *argv[])
 			print_help (1);
 		}
 	}
+	
+	if (!listfilename) {
+		fprintf(stderr, "Error: Missing a list file!\n");
+		print_help (1);			
+	}
 
 	/* checking the parameters */
 	if (p.nmm < 0) {
