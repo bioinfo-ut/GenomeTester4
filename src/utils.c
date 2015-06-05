@@ -98,7 +98,7 @@ void hybridInPlaceRadixSort256 (unsigned long long *begin, unsigned long long *e
 	size_t bins[256];	/* for counts */
 	size_t positions[256]; /* for starting positions */
 	size_t binsize[256]; /* for counting the filled positions */
-	int i;
+	unsigned long long i;
 
 	if (end - begin <= 32) {
 		insertionSort (begin, end, begfreq);
