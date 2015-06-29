@@ -693,7 +693,7 @@ print_help (int exit_value)
 	fprintf (stdout, "    -mm, --mismatch   NUMBER - specify number of mismatches (default 0, can be used with -diff and -ddiff)\n");
 	fprintf (stdout, "    -c, --cutoff NUMBER      - specify frequency cut-off (default 1)\n");
 	fprintf (stdout, "    -o, --outputname STRING  - specify output name (default \"out\")\n");
-	fprintf (stdout, "    -r, --rule STRING        - specify rule how final frequencies are calculated (default, add, subtract, min, max, first, second)\n");
+	fprintf (stdout, "    -r, --rule STRING        - specify rule how final frequencies are calculated (default, add, subtract, min, max, first, second, 1, 2)\n");
 	fprintf (stdout, "                               NOTE: rules min, subtract, first and second can only be used with finding the intersection.\n");
 	fprintf (stdout, "    --count_only             - output count of k-mers instead of k-mers themself\n");
 	fprintf (stdout, "    -D                       - increase debug level\n");
