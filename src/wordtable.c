@@ -103,13 +103,15 @@ wordtable_ensure_size (wordtable *table, unsigned long long size, unsigned long 
 	return 0;
 }
 
+#define WORDTABLE_MIN_SIZE 20000000
+
 int 
 wordtable_enlarge (wordtable *table)
 {
 	unsigned long long nslots;
 	int v;
-	if (table->nwordslots < 10000000 && table->nfreqslots < 10000000) {
-		nslots = 10000000;
+	if (table->nwordslots < WORDTABLE_MIN_SIZE && table->nfreqslots < WORDTABLE_MIN_SIZE) {
+		nslots = WORDTABLE_MIN_SIZE;
 	} else {
 		nslots = (table->nwordslots > table->nfreqslots ? table->nwordslots : table->nfreqslots) * 2;
 	}

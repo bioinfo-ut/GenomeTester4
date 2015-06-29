@@ -39,7 +39,7 @@
 
 #define DEFAULT_NUM_THREADS 8
 #define DEFAULT_TABLE_SIZE 500000000
-#define DEFAULT_MAX_TABLES 16
+#define DEFAULT_MAX_TABLES 32
 
 /* Main thread loop */
 static void * process (void *arg);
@@ -158,7 +158,7 @@ main (int argc, const char *argv[])
 				print_help (1);
 			}
 			argidx += 1;
-		} else if (!strcmp (argv[argidx], "-d")) {
+		} else if (!strcmp (argv[argidx], "-D")) {
 			debug += 1;
 		} else {
 			fprintf (stderr, "Error: Unknown argument: %s\n", argv[argidx]);

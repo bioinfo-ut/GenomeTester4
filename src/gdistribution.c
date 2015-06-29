@@ -88,7 +88,8 @@ get_distribution (wordmap *maps[2])
       float freq;
       c0 = MAP_COUNT(maps[0], i0);
       c1 = MAP_COUNT(maps[1], i1);
-      freq = (float) c1 / c0;
+      /* freq = (float) c1 / c0; */
+      freq = (float) c1;
       flist[fidx++] = freq;
       if (debug > 1) fprintf (stderr, "%llu %u %llu %u Freq %.2f\n", MAP_WORD(maps[0], i0), c0, MAP_WORD(maps[1], i1), c1, freq);
       i0 += 1;
