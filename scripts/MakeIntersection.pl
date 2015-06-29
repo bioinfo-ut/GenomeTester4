@@ -1,8 +1,16 @@
 #!/usr/bin/perl
 use strict;
 
+#
 # Front-end for making intersection of more than two list files
-# Maarja Lepamets
+# Copyright (C) Maarja Lepamets and University of Tartu
+# You can modify and distribute this script and derivateive works freely
+#
+# Usage:
+# MakeIntersection.pl LIST1 LIST2 LIST3...
+#
+# NB! Please set the path to executables
+#
 
 use File::Basename;
 
@@ -11,7 +19,13 @@ my $list1;
 my $list2;
 my $out = "intrs";
 
+my $xpath = ".";
 
+if (!(-x "$xpath/glistcompare")) {
+  printf stderr "No glistcompare binary at %s\n", $xpath;
+  printf stderr "Please set the xpath variable in script code\n";
+  exit(1);
+}
 
 my $k = 1;
 while ($nlists != 1) {
@@ -31,8 +45,8 @@ while ($nlists != 1) {
       }
       $list2 = $ARGV[$i + 1];
   
-      print STDERR "/mambakodu/maarjalepamets/programs/glistcompare $list1 $list2 -o ${out}_${k}/$i"."_".($i + 1)." -i\n";
-      system "/mambakodu/maarjalepamets/programs/glistcompare $list1 $list2 -o ${out}_${k}/$i"."_".($i + 1)." -i";  
+      print STDERR "$xpath/glistcompare $list1 $list2 -o ${out}_${k}/$i"."_".($i + 1)." -i\n";
+      system "$xpath/glistcompare $list1 $list2 -o ${out}_${k}/$i"."_".($i + 1)." -i";  
   
       $i += 2;
       
@@ -50,8 +64,8 @@ while ($nlists != 1) {
     if ($nlists == 2) {
       $list1 = $files[$i];
       $list2 = $files[$i + 1];
-      print STDERR "/mambakodu/maarjalepamets/programs/glistcompare $list1 $list2 -o intrs -i\n";
-      system "/mambakodu/maarjalepamets/programs/glistcompare $list1 $list2 -o intrs -i";
+      print STDERR "$xpath/glistcompare $list1 $list2 -o intrs -i\n";
+      system "$xpath/glistcompare $list1 $list2 -o intrs -i";
       #system "rm -r -f ${out}_".($k - 1);
       last;
     }
@@ -68,8 +82,8 @@ while ($nlists != 1) {
       }
       $list2 = $files[$i + 1];
       
-      print STDERR "/mambakodu/maarjalepamets/programs/glistcompare $list1 $list2 -o ${out}_${k}/$i"."_".($i + 1)." -i\n";
-      system "/mambakodu/maarjalepamets/programs/glistcompare $list1 $list2 -o ${out}_${k}/$i"."_".($i + 1)." -i";
+      print STDERR "$xpath/glistcompare $list1 $list2 -o ${out}_${k}/$i"."_".($i + 1)." -i\n";
+      system "$xpath/glistcompare $list1 $list2 -o ${out}_${k}/$i"."_".($i + 1)." -i";
       $i += 2;
       
     }
