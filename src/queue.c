@@ -76,6 +76,13 @@ queue_get_largest_table (Queue *queue)
 }
 
 wordtable *
+queue_get_sorted (Queue *queue)
+{
+	queue->nsorted -= 1;
+	return queue->sorted[queue->nsorted];
+}
+
+wordtable *
 queue_get_smallest_sorted (Queue *queue)
 {
 	unsigned int i, min;

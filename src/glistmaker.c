@@ -41,14 +41,24 @@
 #define DEFAULT_TABLE_SIZE 500000000
 #define DEFAULT_MAX_TABLES 32
 
+#define BSIZE 100000
+
+#define MAX_MERGED_TABLES 256
+
+#define TIME_READ 0
+#define TIME_SORT 1
+#define TIME_MERGE 2
+#define TIME_FF 3
+
 /* Main thread loop */
 static void * process (void *arg);
 
 /* Merge two tables directly to disk */
-static void merge_write (wordtable *table, wordtable *other, const char *filename);
+static void merge_write (wordtable *table, wordtable *other, const char *filename, unsigned int cutoff);
+static void merge_write_multi (wordtable **t, unsigned int ntables, const char *filename, unsigned int cutoff);
 
 /* */
-int process_word (FastaReader *reader, void *data);
+int process_word (FastaReader *reader, unsigned long long word, void *data);
 
 /* Print usage and help menu */
 void print_help (int exitvalue);
@@ -81,7 +91,7 @@ main (int argc, const char *argv[])
 
 		} else if (argidx == 1) {
 			/* get the locations of the input files */
-			if (argv[argidx][0] == '-') {
+			if ((argv[argidx][0] == '-') && (argv[argidx][1] != 0)) {
 				fprintf (stderr, "Error: No FastA/FastQ file specified!\n");
 				print_help (1);
 			}
@@ -213,13 +223,15 @@ main (int argc, const char *argv[])
 			queue_add_file (&queue, argv[argidx]);
 		}		
 
-	        /* Initialize main mutex */
+	        /* Initialize main mutex and cond */
 	        pthread_mutex_init (&queue.mutex, NULL);
+	        pthread_cond_init (&queue.cond, NULL);
 	        /* Lock the mutex */
 	        pthread_mutex_lock (&queue.mutex);
 	        queue.nthreads = 0;
 	        queue.wordlen = wordlength;
 	        queue.tablesize = tablesize;
+	        queue.cutoff = cutoff;
 
 		if (debug) {
 			fprintf (stderr, "Num threads is %d\n", nthreads);
@@ -252,7 +264,15 @@ main (int argc, const char *argv[])
                 	wordtable_write_to_file (queue.sorted[0], outputname, cutoff);
 		}
 
+		pthread_cond_destroy (&queue.cond);
                 pthread_mutex_destroy (&queue.mutex);
+
+                if (debug) {
+                	fprintf (stderr, "Read %.2f\n", queue.d_d[TIME_READ]);
+                	fprintf (stderr, "Sort %.2f\n", queue.d_d[TIME_SORT]);
+                	fprintf (stderr, "Collate %.2f\n", queue.d_d[TIME_FF]);
+                	fprintf (stderr, "Merge %.2f\n", queue.d_d[TIME_MERGE]);
+                }
 
         } else {
 		/* CASE: ONE THREAD */
@@ -266,18 +286,26 @@ main (int argc, const char *argv[])
 		temptable = wordtable_new (wordlength, 20000);
 		
 		for (argidx = firstfasta; argidx <= firstfasta + nfasta - 1; argidx++) {
-
-			ff = mmap_by_filename (argv[argidx], &fsize);
-			if (!ff) {
-				fprintf (stderr, "Error: Cannot read file %s!\n", argv[argidx]);
-				return 1;
-			}
+			FastaReader reader;
 
 			temptable->wordlength = wordlength;
 
+			if (!strcmp (argv[argidx], "-")) {
+				/* stdin */
+				fasta_reader_init_from_file (&reader, wordlength, 1, stdin);
+			} else {
+				ff = mmap_by_filename (argv[argidx], &fsize);
+				if (!ff) {
+					fprintf (stderr, "Error: Cannot read file %s!\n", argv[argidx]);
+					return 1;
+				}
+				fasta_reader_init_from_data (&reader, wordlength, 1, (const unsigned char *) ff, fsize);
+			}
+
 			/* reading words from FastA/FastQ */
-			v = fasta_reader_read (ff, fsize, wordlength, (void *) temptable, 1, 0, NULL, NULL, process_word);
+			v = fasta_reader_read_nwords (&reader, 0xffffffffffffffffULL, NULL, NULL, NULL, NULL, process_word, (void *) temptable);
 			if (v) return print_error_message (v);
+			fasta_reader_release (&reader);
 
 			/* radix sorting */
 			wordtable_sort (temptable, 0);
@@ -317,6 +345,7 @@ process (void *arg)
         Queue *queue;
         int idx = -1;
         unsigned int finished;
+        double s_t, e_t, d_t;
 
         queue = (Queue *) arg;
 
@@ -324,6 +353,8 @@ process (void *arg)
         
         /* Do work */
         while (!finished) {
+        	unsigned int has_files, has_unsorted, has_unmerged, sorted_tables;
+        	
                 /* Get exclusive lock on queue */
                 pthread_mutex_lock (&queue->mutex);
                 if (idx < 0) {
@@ -333,8 +364,51 @@ process (void *arg)
                         if (debug > 1) fprintf (stderr, "Thread %d started (total %d)\n", idx, queue->nthreads);
                 }
 
-                if (debug > 1) fprintf (stderr, "Thread %d: FileTasks %u Unsorted %u Sorted %u\n", idx, queue->nfiletasks, queue->nunsorted, queue->nsorted);
+                if (debug > 1) fprintf (stderr, "Thread %d: FileTasks %u Unsorted %u Sorted %u\n", idx, queue->ntasks[TASK_READ], queue->nunsorted, queue->nsorted);
+                
+                has_files = queue->files || queue->ntasks[TASK_READ];
+                has_unsorted = queue->nunsorted || queue->ntasks[TASK_SORT];
+                has_unmerged = queue->ntasks[TASK_MERGE];
+                sorted_tables = queue->nsorted + queue->ntasks[TASK_MERGE];
 
+                /* If all files have been read and sorted and there is small enough number of sorted files */
+                if (!has_files && !has_unsorted && sorted_tables && (sorted_tables <= MAX_MERGED_TABLES)) {
+                	if (!has_unmerged) {
+                		/* Merge to disk */
+                		wordtable *t[MAX_MERGED_TABLES];
+                		unsigned int ntables;
+                		char c[1024];
+                		ntables = 0;
+                		while (queue->nsorted) {
+                			t[ntables++] = queue_get_sorted (queue);
+				}
+				wordtable_build_filename (t[0], c, 1024, outputname);
+				queue->ntasks[TASK_MERGE] += 1;
+				if (debug) {
+                			unsigned int i;
+                			fprintf (stderr, "Merging %u tables: %s", ntables, t[0]->id);
+                			for (i = 1; i < ntables; i++) {
+                				fprintf (stderr, ",%s", t[i]->id);
+					}
+					fprintf (stderr, " to %s\n", c);
+				}
+				/* Now we can release mutex */
+				pthread_mutex_unlock (&queue->mutex);
+				/* merge_write (table, other, c, queue->cutoff); */
+				merge_write_multi (t, ntables, c, queue->cutoff);
+				pthread_mutex_lock (&queue->mutex);
+				queue->ntasks[TASK_MERGE] -= 1;
+				pthread_cond_broadcast (&queue->cond);
+				pthread_mutex_unlock (&queue->mutex);
+				finished = 1;
+			} else {
+				/* Waiting merging to finish */
+                        	if (debug > 1) fprintf (stderr, "Thread %d: Waiting merging to finish\n", idx);
+                        	pthread_cond_wait (&queue->cond, &queue->mutex);
+                        	pthread_mutex_unlock (&queue->mutex);
+			}
+			continue;
+                }
                 if (queue->nsorted > 1) {
                 	/* Task 1 - merge sorted tables */
                         wordtable *table, *other;
@@ -350,23 +424,32 @@ process (void *arg)
                         	table = other;
                         	other = t;
                         }
-                        /* Now we can release mutex */
-                        queue->ntasks += 1;
-                        pthread_mutex_unlock (&queue->mutex);
-                        if (!queue->files && !queue->nfiletasks && !queue->nunsorted && !queue->nsorted && (queue->ntasks == 1)) {
+                        queue->ntasks[TASK_MERGE] += 1;
+                        if (!has_files && !has_unsorted && !has_unmerged && !queue->nsorted) {
                         	/* Merge to disk */
                         	char c[1024];
+                        	wordtable *t[256];
                         	wordtable_build_filename (table, c, 1024, outputname);
                         	if (debug > 0) fprintf (stderr, "Thread %d: Doing final merge %s (%llu/%llu) + %s (%llu/%llu) to %s\n", idx, table->id, table->nwords, table->nwordslots, other->id, other->nwords, other->nwordslots, c);
+                        	t[0] = table;
+                        	t[1] = other;
+	                        /* Now we can release mutex */
                         	pthread_mutex_unlock (&queue->mutex);
-                        	merge_write (table, other, c);
+                        	/* merge_write (table, other, c, queue->cutoff); */
+                        	merge_write_multi (t, 2, c, queue->cutoff);
 	                        pthread_mutex_lock (&queue->mutex);
-	                        queue->ntasks -= 1;
+	                        queue->ntasks[TASK_MERGE] -= 1;
+	                        pthread_cond_broadcast (&queue->cond);
                         	pthread_mutex_unlock (&queue->mutex);
                         	continue;
                         }
+                        /* Now we can release mutex */
+                        pthread_mutex_unlock (&queue->mutex);
                         if (debug > 0) fprintf (stderr, "Thread %d: Merging tables %s (%llu/%llu) + %s (%llu/%llu) -> %s\n", idx, table->id, table->nwords, table->nwordslots, other->id, other->nwords, other->nwordslots, table->id);
+                        s_t = get_time ();
 			result = wordtable_merge (table, other);
+			e_t = get_time ();
+			d_t = e_t - s_t;
                         /* fixme: Error processing */
 			if (result) {
 			        print_error_message (result);
@@ -378,8 +461,10 @@ process (void *arg)
                         wordtable_empty (other);
                         other->wordlength = queue->wordlen;
                         queue->available[queue->navailable++] = other;
+                        queue->d_d[TIME_MERGE] += d_t;
                         /* Release mutex */
-                        queue->ntasks -= 1;
+                        queue->ntasks[TASK_MERGE] -= 1;
+                        pthread_cond_broadcast (&queue->cond);
                         pthread_mutex_unlock (&queue->mutex);
                         if (debug > 0) fprintf (stderr, "Thread %d: Finished merging %s (%llu/%llu)\n", idx, table->id, table->nwords, table->nwordslots);
                 } else if (queue->nunsorted > 0) {
@@ -389,11 +474,16 @@ process (void *arg)
                         
                         table = queue->unsorted[--queue->nunsorted];
                         /* Now we can release mutex */
-                        queue->ntasks += 1;
+                        queue->ntasks[TASK_SORT] += 1;
                         pthread_mutex_unlock (&queue->mutex);
                         if (debug > 0) fprintf (stderr, "Thread %d: Sorting table %s (%llu/%llu)\n", idx, table->id, table->nwords, table->nwordslots);
+                        s_t = get_time ();
                         wordtable_sort (table, 0);
+                        e_t = get_time ();
+                        d_t = e_t - s_t;
+                        s_t = get_time ();
                         result = wordtable_find_frequencies (table);
+                        e_t = get_time ();
                         /* fixme: Error processing */
                         if (result) {
                                 print_error_message (result);
@@ -402,11 +492,15 @@ process (void *arg)
                         pthread_mutex_lock (&queue->mutex);
                         /* Add sorted table to sorted list */
                         queue->sorted[queue->nsorted++] = table;
+                        queue->d_d[TIME_SORT] += d_t;
+                        d_t = e_t - s_t;
+                        queue->d_d[TIME_FF] += d_t;
                         /* Release mutex */
-                        queue->ntasks -= 1;
+                        queue->ntasks[TASK_SORT] -= 1;
+                        pthread_cond_broadcast (&queue->cond);
                         pthread_mutex_unlock (&queue->mutex);
                         if (debug > 0) fprintf (stderr, "Thread %d: Finished sorting %s (%llu/%llu)\n", idx, table->id, table->nwords, table->nwordslots);
-                } else if (queue->files && (queue->nfiletasks < MAX_FILES) && (queue->navailable || (queue->ntablescreated < ntables))) {
+                } else if (queue->files && (queue->ntasks[TASK_READ] < MAX_FILES) && (queue->navailable || (queue->ntablescreated < ntables))) {
                         /* Task 3 - read input file */
                         TaskFile *task;
                         wordtable *table;
@@ -415,7 +509,7 @@ process (void *arg)
 
                         task = queue->files;
                         queue->files = task->next;
-                        queue->nfiletasks += 1;
+                        queue->ntasks[TASK_READ] += 1;
                         if (queue->navailable > 0) {
                                 /* Has to create new word table */
                                 table = queue_get_largest_table (queue);
@@ -426,26 +520,35 @@ process (void *arg)
                                 if (debug > 0) fprintf (stderr, "Thread %d: Created table %s\n", idx, table->id);
                         }
                         /* Now we can release mutex */
-                        queue->ntasks += 1;
                         pthread_mutex_unlock (&queue->mutex);
                         
                         /* Process file reader task */
                         if (debug > 1) fprintf (stderr, "Thread %d: Processign file %s (%llu) -> %s (%llu)\n", idx, task->filename, (unsigned long long) task->reader.cpos, table->id, table->nwordslots);
-                        if (!task->reader.cdata) {
-                                const char *cdata;
-                                size_t csize;
+                        if (!task->reader.wordlength) {
+                        	/* Initialize reader */
                                 if (debug > 0) fprintf (stderr, "Thread %d: Creating FastaReader for %s -> %s\n", idx, task->filename, table->id);
-                                cdata = mmap_by_filename (task->filename, &csize);
-                                if (cdata) {
-                                        fasta_reader_init (&task->reader, cdata, csize, queue->wordlen, 1, 0);
-                                } else {
-                                        /* Cannot mmap file */
-                                        /* fixme: Error procesing */
+                        	if (!strcmp (task->filename, "-")) {
+                        		fasta_reader_init_from_file (&task->reader, queue->wordlen, 1, stdin);
+                        	} else {
+                                	const unsigned char *cdata;
+                                	size_t csize;
+                                	cdata = (const unsigned char *) mmap_by_filename (task->filename, &csize);
+                                	if (cdata) {
+                                		task->cdata = cdata;
+                                		task->csize = csize;
+                                		fasta_reader_init_from_data (&task->reader, queue->wordlen, 1, cdata, csize);
+					} else {
+                                        	/* Cannot mmap file */
+                                        	/* fixme: Error procesing */
+					}
                                 }
                         }
                         readsize = (queue->tablesize < table->nwordslots) ? table->nwordslots : queue->tablesize;
-                        if (debug > 0) fprintf (stderr, "Thread %d: Reading %lld bytes from %s, position %llu/%llu\n", idx, readsize, task->filename, (unsigned long long) task->reader.cpos, (unsigned long long) task->reader.csize);
-                        result = fasta_reader_read_nwords (&task->reader, readsize, table, 0, NULL, NULL, process_word);
+                        if (debug > 0) fprintf (stderr, "Thread %d: Reading %lld bytes from %s, position %llu/%llu\n", idx, readsize, task->filename, (unsigned long long) task->reader.cpos, (unsigned long long) task->csize);
+                        s_t = get_time ();
+                        result = fasta_reader_read_nwords (&task->reader, readsize,  NULL, NULL, NULL, NULL, process_word, table);
+                        e_t = get_time ();
+			d_t = e_t - s_t;
                         if (result) {
                                 /* fixme: Error processing */
 		                print_error_message (result);
@@ -454,32 +557,38 @@ process (void *arg)
                         pthread_mutex_lock (&queue->mutex);
                         /* Add generated table to unsorted list */
                         queue->unsorted[queue->nunsorted++] = table;
-                        if (task->reader.cpos >= task->reader.csize) {
+                        if (task->reader.in_eof) {
                                 /* Finished this task */
                                 if (debug > 0) fprintf (stderr, "Thread %d: FastaReader for %s finished\n", idx, task->filename);
-                                munmap ((void *) task->reader.cdata, task->reader.csize);
+                                if (task->cdata) {
+                                	munmap ((void *) task->cdata, task->csize);
+				}
                                 free (task);
                         } else {
                                 /* Reshedule task */
                                 task->next = queue->files;
                                 queue->files = task;
                         }
-                        queue->nfiletasks -= 1;
+                        queue->ntasks[TASK_READ] -= 1;
+                        queue->d_d[TIME_READ] += d_t;
                         /* Release mutex */
-                        queue->ntasks -= 1;
+                        pthread_cond_broadcast (&queue->cond);
                         pthread_mutex_unlock (&queue->mutex);
                         if (debug > 0) fprintf (stderr, "Thread %d: Finished reading %s (%llu/%llu)\n", idx, table->id, table->nwords, table->nwordslots);
-                } else if (!queue->files && !queue->nfiletasks && !queue->nunsorted && (queue->nsorted < 2)) {
+                } else if (!has_files && !queue->nunsorted && (queue->nsorted < 2)) {
                         /* Nothing to do */
                         /* Release mutex */
+                        pthread_cond_broadcast (&queue->cond);
                         pthread_mutex_unlock (&queue->mutex);
                         finished = 1;
                 } else {
                         if (debug > 1) fprintf (stderr, "Thread %d: Waiting\n", idx);
                         /* Release mutex */
-                        pthread_mutex_unlock (&queue->mutex);
+                        /* pthread_mutex_unlock (&queue->mutex); */
                         /* fixme: Semaphore */
-                        sleep (1);
+                        /* sleep (1); */
+                        pthread_cond_wait (&queue->cond, &queue->mutex);
+                        pthread_mutex_unlock (&queue->mutex);
                 }
         }
 
@@ -487,6 +596,7 @@ process (void *arg)
         pthread_mutex_lock (&queue->mutex);
         queue->nthreads -= 1;
         if (debug > 1) fprintf (stderr, "Thread %u exiting (remaining %d)\n", idx, queue->nthreads);
+        pthread_cond_broadcast (&queue->cond);
         pthread_mutex_unlock (&queue->mutex);
 
         /* pthread_exit (NULL); */
@@ -494,20 +604,23 @@ process (void *arg)
 }
 
 int 
-process_word (FastaReader *reader, void *data)
+process_word (FastaReader *reader, unsigned long long word, void *data)
 {
 	wordtable *table = (wordtable *) data;
-	wordtable_add_word_nofreq (table, reader->currentword, reader->wordlength);
+#if 1
+	wordtable_add_word_nofreq (table, word, reader->wordlength);
+#endif
 	return 0;
 }
 
 static void
-merge_write (wordtable *t0, wordtable *t1, const char *filename)
+merge_write (wordtable *t0, wordtable *t1, const char *filename, unsigned int cutoff)
 {
 	unsigned long long i0, i1;
 	header h;
 	FILE *ofs;
-	char *b;
+	char b[BSIZE + 12];
+	unsigned int bp;
 	unsigned long long word;
 	unsigned int freq;
 	double start, mid, end;
@@ -517,11 +630,13 @@ merge_write (wordtable *t0, wordtable *t1, const char *filename)
 	h.wordlength = t0->wordlength;
 	h.nwords = 0;
 	h.totalfreq = 0;
-	b = malloc (1024 * 1024);
+
 	ofs = fopen (filename, "w");
-	setbuffer (ofs, b, 1024 * 1024);
+	/* setvbuf (ofs, b, _IOFBF, 1024 * 1024); */
 	start = get_time ();
 	fwrite (&h, sizeof (header), 1, ofs);
+
+	bp = 0;
 	i0 = 0;
 	i1 = 0;
 	while ((i0 < t0->nwords) || (i1 < t1->nwords)) {
@@ -542,12 +657,23 @@ merge_write (wordtable *t0, wordtable *t1, const char *filename)
 			freq = t1->frequencies[i1];
 			i1 += 1;
 		}
-		fwrite (&word, sizeof (word), 1, ofs);
-		/* memcpy (&w2, &word, sizeof (word)); */
-		fwrite (&freq, sizeof (freq), 1, ofs);
-		/* memcpy (&f2, &freq, sizeof (freq)); */
-		h.nwords += 1;
-		h.totalfreq += freq;
+		if (freq >= cutoff) {
+			/* fwrite (&word, sizeof (word), 1, ofs); */
+			memcpy (b + bp, &word, 8);
+			bp += 8;
+			/* fwrite (&freq, sizeof (freq), 1, ofs); */
+			memcpy (b + bp, &freq, 4);
+			bp += 4;
+			if (bp >= BSIZE) {
+				fwrite (b, 1, bp, ofs);
+				bp = 0;
+			}
+			h.nwords += 1;
+			h.totalfreq += freq;
+		}
+	}
+	if (bp) {
+		fwrite (b, 1, bp, ofs);
 	}
 	mid = get_time ();
 	fseek (ofs, 0, SEEK_SET);
@@ -555,6 +681,92 @@ merge_write (wordtable *t0, wordtable *t1, const char *filename)
 	fclose (ofs);
 	end = get_time ();
 	if (debug > 0) fprintf (stderr, "Writing array %.2f, writing header %.2f\n", mid - start, end - mid);
+}
+
+static void
+merge_write_multi (wordtable **t, unsigned int ntables, const char *filename, unsigned int cutoff)
+{
+	unsigned long long i[MAX_MERGED_TABLES];
+	unsigned int nfinished;
+
+	header h;
+
+	FILE *ofs;
+	char b[BSIZE + 12];
+	unsigned int bp;
+
+	unsigned long long word;
+	unsigned int freq;
+	double t_s, t_e;
+
+	h.code = glistmaker_code_match;
+	h.version_major = VERSION_MAJOR;
+	h.version_minor = VERSION_MINOR;
+	h.wordlength = t[0]->wordlength;
+	h.nwords = 0;
+	h.totalfreq = 0;
+
+	ofs = fopen (filename, "w");
+
+	t_s = get_time ();
+	fwrite (&h, sizeof (header), 1, ofs);
+
+	bp = 0;
+	nfinished = 0;
+	memset (i, 0, sizeof (i));
+	
+	while (nfinished < ntables) {
+		unsigned int j;
+		word = 0xffffffffffffffff;
+		freq = 0;
+		/* Find smalles word and total freq */
+		for (j = 0; j < ntables; j++) {
+			if (i[j] < t[j]->nwords) {
+				/* This table is not finished */
+				if (t[j]->words[i[j]] < word) {
+					/* This table has smaller word */
+					word = t[j]->words[i[j]];
+					freq = t[j]->frequencies[i[j]];
+				} else if (t[j]->words[i[j]] == word) {
+					/* This table has equal word */
+					freq += t[j]->frequencies[i[j]];
+				}
+			}
+		}
+		/* Now we have word and freq */
+		if (freq >= cutoff) {
+			memcpy (b + bp, &word, 8);
+			bp += 8;
+			memcpy (b + bp, &freq, 4);
+			bp += 4;
+			if (bp >= BSIZE) {
+				fwrite (b, 1, bp, ofs);
+				bp = 0;
+			}
+			h.nwords += 1;
+			h.totalfreq += freq;
+		}
+		/* Update pointers */
+		for (j = 0; j < ntables; j++) {
+			if (i[j] < t[j]->nwords) {
+				/* This table is not finished */
+				if (t[j]->words[i[j]] == word) {
+					i[j] += 1;
+					if (i[j] >= t[j]->nwords) {
+						nfinished += 1;
+					}
+				}
+			}
+		}
+	}
+	if (bp) {
+		fwrite (b, 1, bp, ofs);
+	}
+	fseek (ofs, 0, SEEK_SET);
+	fwrite (&h, sizeof (header), 1, ofs);
+	fclose (ofs);
+	t_e = get_time ();
+	if (debug > 0) fprintf (stderr, "Writing %d tables with merging %.2f\n", ntables, t_e - t_s);
 }
 
 void 

@@ -25,57 +25,61 @@
  */
 
 #include <stdlib.h>
+#include <stdio.h>
+
 #include "buffer.h"
 
 #define MAX_NAME_SIZE 1000
-#define MAX_WORDS_READ_PER_ROUND 1000
+
+#define FASTA_READER_STATE_NONE 0
+#define FASTA_READER_STATE_NAME 1
+#define FASTA_READER_STATE_SEQUENCE 2
+#define FASTA_READER_STATE_QUALITY 3
 
 typedef struct _FastaReader {
-	const char *filename;
+	/* Read settings */
 	unsigned int wordlength;
 	unsigned long long mask;
-	int canonize;
-	
-	/* Sequence data */
-	const char *cdata;
-	size_t csize;
+	unsigned int canonize;
+
+	/* I/O */
+	/* 0 - EOF, negative - error */
+	int (* read) (void *data);
+	void (* free_io_data) (void *data);
+	void *read_data;
+	unsigned int in_eof;
 	
 	/* State */
-	size_t cpos;
-	unsigned long long currentword;
-	
-	/* Sequence and word info */
-	char seqname[MAX_NAME_SIZE];
-	unsigned long long seqstart;
+	unsigned int state;
+	/* Current character, nucleotide and word number */
+	unsigned long long cpos;
+	unsigned long long npos;
+	unsigned long long wpos;
+	/* Name */
+	unsigned char name[MAX_NAME_SIZE + 1];
+	unsigned int name_length;
+	/* Words */
 	unsigned long long wordfw;
 	unsigned long long wordrv;
 	unsigned int currentlength;
-	
-	/* Buffer for sequence characters */
-	SequenceBuffer *sbuffer;
-	int noword;
-	
-	/* Counters */
-	unsigned long long ncharinseq;
-	unsigned long long nwhitespaceinseq; /* white-space characters */
-	unsigned long long nmaskedinseq; /* all non-nucleotide and non-white-space characters */
-	unsigned long long nnuclinseq;	/* A, C, G, T characters */
 } FastaReader;
 
 /* Set up FastA reader structure */
-int fasta_reader_init (FastaReader *reader, const char *cdata, size_t csize, unsigned int wordlength, int canonize, int usebuffer);
-/* Allocate new fasta reader and initialize it */
-FastaReader *fasta_reader_new (const char *cdata, size_t csize, unsigned int wordlength, int canonize, int usebuffer);
+int fasta_reader_init (FastaReader *reader, unsigned int wordlength, unsigned int canonize, int (* read) (void *), void *read_data);
+int fasta_reader_release (FastaReader *reader);
+
+int fasta_reader_init_from_data (FastaReader *reader, unsigned int wordlength, unsigned int canonize, const unsigned char *cdata, unsigned long long csize);
+int fasta_reader_init_from_file (FastaReader *reader, unsigned int wordlength, unsigned int canonize, FILE *ifs);
 
 /* Read maximum of nwords words from FastA or fastQ file starting from position cpos */
-int fasta_reader_read_nwords (FastaReader *reader, unsigned long long maxwords, void *data, int usebuffer,
-	int (*start_sequence) (FastaReader *reader, void *data),
-	int (*end_sequence) (FastaReader *reader, void *data),
-	int (*process_sequence) (FastaReader *reader, void *data));
+int fasta_reader_read_nwords (FastaReader *reader, unsigned long long maxwords,
+	/* Called as soon as the full sequence name is known */
+	int (*start_sequence) (FastaReader *, void *),
+	/* Called when the full sequence has been parsed */
+	int (*end_sequence) (FastaReader *, void *),
+	int (*read_character) (FastaReader *, unsigned int character, void *),
+	int (*read_nucleotide) (FastaReader *, unsigned int nucleotide, void *),
+	int (*read_word) (FastaReader *, unsigned long long word, void *),
+	void *data);
                 
-/* Read words from FastA or FastQ to the end of the file, starting from position cpos */
-int fasta_reader_read (const char *fasta, size_t fsize, unsigned int wordlength, void *data, int canonize, int usebuffer,
-		int (*start_sequence) (FastaReader *reader, void *data), int (*end_sequence) (FastaReader *reader, void *data),
-		int (*process_sequence) (FastaReader *reader, void *data));
-
 #endif /* FASTA_H_ */

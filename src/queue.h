@@ -31,6 +31,11 @@
 
 #define MAX_TABLES 256
 
+#define TASK_READ 0
+#define TASK_SORT 1
+#define TASK_MERGE 2
+#define NUM_TASK_TYPES 3
+
 /*
  * Possible tasks are:
  *   - read segment from FastA file and build table
@@ -45,6 +50,8 @@ typedef struct _TaskFile TaskFile;
 struct _TaskFile {
         TaskFile *next;
         const char *filename;
+        const unsigned char *cdata;
+        unsigned long long csize;
         FastaReader reader;
 };
 
@@ -52,15 +59,16 @@ typedef struct _Queue Queue;
 struct _Queue {
         /* Number of threads running */
         int nthreads;
-        /* Single mutex for queue management */
+        /* Single mutex and cond for queue management */
         pthread_mutex_t mutex;
+        pthread_cond_t cond;
         /* Parameters */
         unsigned int wordlen;
         unsigned long long tablesize;
+        unsigned int cutoff;
         /* Number of worker tasks */
-        unsigned int ntasks;
+        unsigned int ntasks[NUM_TASK_TYPES];
         /* Input files unread or partially read  */
-        unsigned int nfiletasks;
         TaskFile *files;
         /* Total number of tables created */
         unsigned int ntablescreated;
@@ -73,17 +81,21 @@ struct _Queue {
         /* Available tables */
         unsigned int navailable;
         wordtable *available[MAX_TABLES];
+        /* Debug */
+        int i_d[32];
+        double d_d[32];
 };
 
 /* Add new file task to queue (not thread-safe) */
 void queue_add_file (Queue *queue, const char *filename);
 /* Get smallest table */
-wordtable * queue_get_smallest_table (Queue *queue);
+wordtable *queue_get_smallest_table (Queue *queue);
 /* Get largest table */
-wordtable * queue_get_largest_table (Queue *queue);
+wordtable *queue_get_largest_table (Queue *queue);
 
-wordtable * queue_get_smallest_sorted (Queue *queue);
-wordtable * queue_get_mostavailable_sorted (Queue *queue);
+wordtable *queue_get_sorted (Queue *queue);
+wordtable *queue_get_smallest_sorted (Queue *queue);
+wordtable *queue_get_mostavailable_sorted (Queue *queue);
 
 
 #endif /* SEQUENCE_H_ */

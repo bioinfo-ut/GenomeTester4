@@ -68,7 +68,8 @@ frequencies in the first list.
 GenomeTester4 is written in standard C. The only external dependency should
 be pthreads library that is standard in all Linux systems.
 Binaries compiled with full optimization are included in directory "bin".
-If you for whatever reason have to compile these manually, just enter:
+If you for whatever reason have to compile these manually, just enter into
+src subdirectory and type:
 
 make clean
 make

@@ -45,7 +45,7 @@ void search_one_query_string (wordmap *map, const char *querystring, parameters 
 int search_n_query_strings (wordmap *map, const char *queryfile, parameters *p, unsigned int minfreq, unsigned int maxfreq, int printall);
 int search_fasta (wordmap *map, const char *seqfilename, parameters *p, unsigned int minfreq, unsigned int maxfreq, int printall);
 int search_list (wordmap *map, const char *querylistfilename, parameters *p, unsigned int minfreq, unsigned int maxfreq, int printall);
-int process_word (FastaReader *reader, void *data);
+int process_word (FastaReader *reader, unsigned long long word, void *data);
 int print_full_map (wordmap *map);
 void get_statistics (wordmap *map);
 void print_help (int exitvalue);
@@ -323,6 +323,7 @@ int search_fasta (wordmap *map, const char *seqfilename, parameters *p, unsigned
 	size_t size;
 	querystructure qs = {0};
 	int v;
+	FastaReader r;
 
 	qs.map = map;
 	qs.p = p;
@@ -331,7 +332,10 @@ int search_fasta (wordmap *map, const char *seqfilename, parameters *p, unsigned
 	qs.printall = printall;
 	ff = mmap_by_filename (seqfilename, &size);
 
-	v = fasta_reader_read (ff, size, p->wordlength, (void *) &qs, 0, 0, NULL, NULL, process_word);
+	fasta_reader_init_from_data (&r, p->wordlength, 0, (const unsigned char *) ff, size);
+	v = fasta_reader_read_nwords (&r, size, NULL, NULL, NULL, NULL, process_word, (void *) &qs);
+	/* v = fasta_reader_read_nwords (ff, size, p->wordlength, (void *) &qs, 0, 0, NULL, NULL, process_word); */
+	fasta_reader_release (&r);
 	if (v) return v;
 	return 0;
 }
@@ -354,12 +358,12 @@ int search_list (wordmap *map, const char *querylistfilename, parameters *p, uns
 	return 0;
 }
 
-int process_word (FastaReader *reader, void *data)
+int process_word (FastaReader *reader, unsigned long long word, void *data)
 {
 	unsigned int freq = 0;
 	querystructure *qs = (querystructure *) data;
-	freq = wordmap_search_query (qs->map, reader->currentword, qs->p, qs->printall, 0, 0, NULL);
-	if (!qs->printall && freq >= qs->minfreq && freq <= qs->maxfreq) fprintf (stdout, "%s\t%u\n", word_to_string (reader->currentword, reader->wordlength), freq);
+	freq = wordmap_search_query (qs->map, word, qs->p, qs->printall, 0, 0, NULL);
+	if (!qs->printall && freq >= qs->minfreq && freq <= qs->maxfreq) fprintf (stdout, "%s\t%u\n", word_to_string (word, reader->wordlength), freq);
 	return 0;
 }
 

@@ -155,9 +155,11 @@ wordtable_add_word (wordtable *table, unsigned long long word, unsigned int freq
 int 
 wordtable_add_word_nofreq (wordtable *table, unsigned long long word, unsigned int wordlength)
 {
+#if 0
 	if (table->wordlength != wordlength) {
 		return GT_INCOMPATIBLE_WORDLENGTH_ERROR;
 	}
+#endif
 	if (table->nwords >= table->nwordslots) {
 		int v;
 		v = wordtable_enlarge_nofreq (table);
@@ -172,7 +174,7 @@ int
 wordtable_merge (wordtable *table, wordtable *other)
 {
 	long long i = 0L, j = 0L, k;
-	unsigned long long nnew, nequals;
+	unsigned long long nnew, incr, nequals;
 	int v;
 
 	if (table->wordlength != other->wordlength) return GT_INCOMPATIBLE_WORDLENGTH_ERROR;
@@ -193,9 +195,14 @@ wordtable_merge (wordtable *table, wordtable *other)
 		}
 	}
 	nnew = other->nwords - nequals;
-	if (nnew == 0) return 0;
+	/* if (nnew == 0) return 0; */
+	incr = nnew;
+	if ((table->nwords + incr) > table->nwordslots) {
+		unsigned long long step = (table->nwordslots + 7) >> 3;
+		if (incr < step) incr = step;
+	}
 
-	v = wordtable_ensure_size (table, table->nwords + nnew, table->nwords + nnew);
+	v = wordtable_ensure_size (table, table->nwords + incr, table->nwords + incr);
 	if (v > 0) return v;
 
 	i = table->nwords - 1;
@@ -312,6 +319,8 @@ wordtable_count_unique (wordtable *table)
 	return count;
 }
 
+#define BSIZE 10000
+
 void 
 wordtable_write_to_file (wordtable *table, const char *outputname, unsigned int cutoff)
 {
@@ -319,6 +328,8 @@ wordtable_write_to_file (wordtable *table, const char *outputname, unsigned int 
 	char fname[256]; /* the length of the output name is limited and checked in main(..) method */
 	FILE *f;
 	header h;
+	char b[BSIZE + 12];
+	unsigned int bp;
 	if (table->nwords == 0) return;
 
 	memset (&h, 0, sizeof (header));
@@ -329,17 +340,35 @@ wordtable_write_to_file (wordtable *table, const char *outputname, unsigned int 
 		fprintf (stderr, "Cannot open output file %s\n", fname);
 		exit (1);
 	}
+#if 0
+	b = malloc (1024 * 1024);
+	setvbuf (f, b, _IOFBF, 1024 * 1024);
+#endif
 	fwrite (&h, sizeof (header), 1, f);
 
 	count = 0;
 	totalfreq = 0;
+	bp = 0;
 	for (i = 0; i < table->nwords; i++) {
 		if (table->frequencies[i] >= cutoff) {
+			memcpy (b + bp, &table->words[i], 8);
+			bp += 8;
+			memcpy (b + bp, &table->frequencies[i], 4);
+			bp += 4;
+			if (bp >= BSIZE) {
+				fwrite (b, 1, bp, f);
+				bp = 0;
+			}
+#if 0
 			fwrite (&table->words[i], sizeof (table->words[i]), 1, f);
 			fwrite (&table->frequencies[i], sizeof (table->frequencies[i]), 1, f);
+#endif
 			count += 1;
 			totalfreq += table->frequencies[i];
 		}
+	}
+	if (bp) {
+		fwrite (b, 1, bp, f);
 	}
 
 	h.code = glistmaker_code_match;
@@ -351,6 +380,9 @@ wordtable_write_to_file (wordtable *table, const char *outputname, unsigned int 
 	fseek (f, 0, SEEK_SET);
 	fwrite (&h, sizeof (header), 1, f);
 	fclose (f);
+#if 0
+	free (b);
+#endif
 	return;
 }
 
