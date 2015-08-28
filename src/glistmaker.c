@@ -41,7 +41,7 @@
 #define DEFAULT_TABLE_SIZE 500000000
 #define DEFAULT_MAX_TABLES 32
 
-#define BSIZE 100000
+#define BSIZE 10000000
 
 #define MAX_MERGED_TABLES 256
 
@@ -53,8 +53,7 @@
 /* Main thread loop */
 static void * process (void *arg);
 
-/* Merge two tables directly to disk */
-static void merge_write (wordtable *table, wordtable *other, const char *filename, unsigned int cutoff);
+/* Merge tables directly to disk */
 static void merge_write_multi (wordtable **t, unsigned int ntables, const char *filename, unsigned int cutoff);
 
 /* */
@@ -211,7 +210,7 @@ main (int argc, const char *argv[])
 	if (nthreads < 1) nthreads = 1;
 	if (nthreads > 256) nthreads = 256;
 	
-	if (nthreads > 1) {
+	if (nthreads > 0) {
 		/* CASE: SEVERAL THREADS */
 		Queue queue = { 0 };
 	        pthread_t threads[256];
@@ -414,9 +413,6 @@ process (void *arg)
                         wordtable *table, *other;
                         int result;
 
-                        /* table = queue->sorted[--queue->nsorted];
-                        other = queue->sorted[--queue->nsorted];
-                        */
                         other = queue_get_smallest_sorted (queue);
                         table = queue_get_mostavailable_sorted (queue);
                         if (table->nwordslots < other->nwordslots) {
@@ -425,24 +421,6 @@ process (void *arg)
                         	other = t;
                         }
                         queue->ntasks[TASK_MERGE] += 1;
-                        if (!has_files && !has_unsorted && !has_unmerged && !queue->nsorted) {
-                        	/* Merge to disk */
-                        	char c[1024];
-                        	wordtable *t[256];
-                        	wordtable_build_filename (table, c, 1024, outputname);
-                        	if (debug > 0) fprintf (stderr, "Thread %d: Doing final merge %s (%llu/%llu) + %s (%llu/%llu) to %s\n", idx, table->id, table->nwords, table->nwordslots, other->id, other->nwords, other->nwordslots, c);
-                        	t[0] = table;
-                        	t[1] = other;
-	                        /* Now we can release mutex */
-                        	pthread_mutex_unlock (&queue->mutex);
-                        	/* merge_write (table, other, c, queue->cutoff); */
-                        	merge_write_multi (t, 2, c, queue->cutoff);
-	                        pthread_mutex_lock (&queue->mutex);
-	                        queue->ntasks[TASK_MERGE] -= 1;
-	                        pthread_cond_broadcast (&queue->cond);
-                        	pthread_mutex_unlock (&queue->mutex);
-                        	continue;
-                        }
                         /* Now we can release mutex */
                         pthread_mutex_unlock (&queue->mutex);
                         if (debug > 0) fprintf (stderr, "Thread %d: Merging tables %s (%llu/%llu) + %s (%llu/%llu) -> %s\n", idx, table->id, table->nwords, table->nwordslots, other->id, other->nwords, other->nwordslots, table->id);
@@ -614,86 +592,17 @@ process_word (FastaReader *reader, unsigned long long word, void *data)
 }
 
 static void
-merge_write (wordtable *t0, wordtable *t1, const char *filename, unsigned int cutoff)
-{
-	unsigned long long i0, i1;
-	header h;
-	FILE *ofs;
-	char b[BSIZE + 12];
-	unsigned int bp;
-	unsigned long long word;
-	unsigned int freq;
-	double start, mid, end;
-	h.code = glistmaker_code_match;
-	h.version_major = VERSION_MAJOR;
-	h.version_minor = VERSION_MINOR;
-	h.wordlength = t0->wordlength;
-	h.nwords = 0;
-	h.totalfreq = 0;
-
-	ofs = fopen (filename, "w");
-	/* setvbuf (ofs, b, _IOFBF, 1024 * 1024); */
-	start = get_time ();
-	fwrite (&h, sizeof (header), 1, ofs);
-
-	bp = 0;
-	i0 = 0;
-	i1 = 0;
-	while ((i0 < t0->nwords) || (i1 < t1->nwords)) {
-		if ((i0 < t0->nwords) && (i1 < t1->nwords) && (t0->words[i0] == t1->words[i1])) {
-			word = t0->words[i0];
-			freq = t0->frequencies[i0] + t1->frequencies[i1];
-			i0 += 1;
-			i1 += 1;
-		} else if ((i1 >= t1->nwords) || ((i0 < t0->nwords) && (t0->words[i0] < t1->words[i1]))) {
-			word = t0->words[i0];
-			freq = t0->frequencies[i0];
-			i0 += 1;
-			if (i0 > t0->nwords) {
-				//fprintf (stderr, "i0 %lld i1 %lld word %llu\n", i0, i1, word);
-			}
-		} else {
-			word = t1->words[i1];
-			freq = t1->frequencies[i1];
-			i1 += 1;
-		}
-		if (freq >= cutoff) {
-			/* fwrite (&word, sizeof (word), 1, ofs); */
-			memcpy (b + bp, &word, 8);
-			bp += 8;
-			/* fwrite (&freq, sizeof (freq), 1, ofs); */
-			memcpy (b + bp, &freq, 4);
-			bp += 4;
-			if (bp >= BSIZE) {
-				fwrite (b, 1, bp, ofs);
-				bp = 0;
-			}
-			h.nwords += 1;
-			h.totalfreq += freq;
-		}
-	}
-	if (bp) {
-		fwrite (b, 1, bp, ofs);
-	}
-	mid = get_time ();
-	fseek (ofs, 0, SEEK_SET);
-	fwrite (&h, sizeof (header), 1, ofs);
-	fclose (ofs);
-	end = get_time ();
-	if (debug > 0) fprintf (stderr, "Writing array %.2f, writing header %.2f\n", mid - start, end - mid);
-}
-
-static void
 merge_write_multi (wordtable **t, unsigned int ntables, const char *filename, unsigned int cutoff)
 {
+	unsigned long long nwords[MAX_MERGED_TABLES];
 	unsigned long long i[MAX_MERGED_TABLES];
 	unsigned int nfinished;
 
 	header h;
 
 	FILE *ofs;
-	char b[BSIZE + 12];
-	unsigned int bp;
+	char *b;
+	unsigned int bp, j;
 
 	unsigned long long word;
 	unsigned int freq;
@@ -706,6 +615,8 @@ merge_write_multi (wordtable **t, unsigned int ntables, const char *filename, un
 	h.nwords = 0;
 	h.totalfreq = 0;
 
+	b = (char *) malloc (BSIZE + 12);
+	
 	ofs = fopen (filename, "w");
 
 	t_s = get_time ();
@@ -713,15 +624,20 @@ merge_write_multi (wordtable **t, unsigned int ntables, const char *filename, un
 
 	bp = 0;
 	nfinished = 0;
+	for (j = 0; j < ntables; j++) {
+		i[j] = 0;
+		nwords[j] = t[j]->nwords;
+		if (!nwords[j]) nfinished += 1;
+	}
+		
 	memset (i, 0, sizeof (i));
 	
 	while (nfinished < ntables) {
-		unsigned int j;
 		word = 0xffffffffffffffff;
 		freq = 0;
 		/* Find smalles word and total freq */
 		for (j = 0; j < ntables; j++) {
-			if (i[j] < t[j]->nwords) {
+			if (i[j] < nwords[j]) {
 				/* This table is not finished */
 				if (t[j]->words[i[j]] < word) {
 					/* This table has smaller word */
@@ -731,6 +647,8 @@ merge_write_multi (wordtable **t, unsigned int ntables, const char *filename, un
 					/* This table has equal word */
 					freq += t[j]->frequencies[i[j]];
 				}
+				__builtin_prefetch (&t[j]->words[i[j]] + 16);
+				__builtin_prefetch (&t[j]->frequencies[i[j]] + 16);
 			}
 		}
 		/* Now we have word and freq */
@@ -748,11 +666,11 @@ merge_write_multi (wordtable **t, unsigned int ntables, const char *filename, un
 		}
 		/* Update pointers */
 		for (j = 0; j < ntables; j++) {
-			if (i[j] < t[j]->nwords) {
+			if (i[j] < nwords[j]) {
 				/* This table is not finished */
 				if (t[j]->words[i[j]] == word) {
 					i[j] += 1;
-					if (i[j] >= t[j]->nwords) {
+					if (i[j] >= nwords[j]) {
 						nfinished += 1;
 					}
 				}
@@ -767,6 +685,8 @@ merge_write_multi (wordtable **t, unsigned int ntables, const char *filename, un
 	fclose (ofs);
 	t_e = get_time ();
 	if (debug > 0) fprintf (stderr, "Writing %d tables with merging %.2f\n", ntables, t_e - t_s);
+	
+	free (b);
 }
 
 void 
