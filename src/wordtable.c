@@ -377,6 +377,7 @@ wordtable_write_to_file (wordtable *table, const char *outputname, unsigned int 
 	h.wordlength = table->wordlength;
 	h.nwords = count;
 	h.totalfreq = totalfreq;
+	h.padding = sizeof (header);
 	fseek (f, 0, SEEK_SET);
 	fwrite (&h, sizeof (header), 1, f);
 	fclose (f);

@@ -592,7 +592,7 @@ process_word (FastaReader *reader, unsigned long long word, void *data)
 }
 
 static void
-merge_write_multi (wordtable **t, unsigned int ntables, const char *filename, unsigned int cutoff)
+merge_write_multi (wordtable *t[], unsigned int ntables, const char *filename, unsigned int cutoff)
 {
 	unsigned long long nwords[MAX_MERGED_TABLES];
 	unsigned long long i[MAX_MERGED_TABLES];
@@ -614,6 +614,7 @@ merge_write_multi (wordtable **t, unsigned int ntables, const char *filename, un
 	h.wordlength = t[0]->wordlength;
 	h.nwords = 0;
 	h.totalfreq = 0;
+	h.padding = sizeof (header);
 
 	b = (char *) malloc (BSIZE + 12);
 	

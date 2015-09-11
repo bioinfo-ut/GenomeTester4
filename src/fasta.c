@@ -183,7 +183,7 @@ fasta_reader_read_nwords (FastaReader *reader, unsigned long long maxwords,
 			} else {
 				/* Process */
 				unsigned int nuclval = c2n[cval];
-				if (nuclval != 0xff) {
+				if (nuclval != 0xffffffff) {
 					/* Is nucleotide */
 					if (read_nucleotide) {
 						int result = read_nucleotide (reader, nuclval, data);
