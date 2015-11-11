@@ -12,9 +12,21 @@ LISTMAKER_SOURCES = \
 	fasta.c \
 	buffer.c \
 	sequence.c \
-	queue.c \
+	queue.c queue.h \
 	common.c \
 	utils.c
+
+LISTMAKER2_SOURCES = \
+	glistmaker2.c \
+	wordtable.c \
+	wordmap.c \
+	fasta.c \
+	buffer.c \
+	sequence.c \
+	queue.c \
+	common.c \
+	utils.c \
+	trie.c
 
 LISTQUERY_SOURCES = \
 	glistquery.c \
@@ -51,6 +63,9 @@ all: all-before $(BINS) all-after
 
 glistmaker: $(LISTMAKER_SOURCES)
 	$(CXX) $(LISTMAKER_SOURCES) -o glistmaker $(LIBS) $(CXXFLAGS)
+
+glistmaker2: $(LISTMAKER2_SOURCES)
+	$(CXX) $(LISTMAKER2_SOURCES) -o glistmaker2 $(LIBS) $(DEBUGFLAGS) -Wall
 
 glistquery: $(LISTQUERY_SOURCES)
 	$(CXX) $(LISTQUERY_SOURCES) -o glistquery $(LIBS) $(CXXFLAGS)

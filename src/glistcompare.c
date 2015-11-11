@@ -43,47 +43,54 @@ enum Rules {
   RULE_TWO
 };
 
+enum SubsetMethods {
+  RAND_ALL,
+  RAND_UNIQUE
+};
+
 static int compare_wordmap_headers (header *h1, header *h2);
 static int compare_wordmaps (wordmap *map1, wordmap *map2, int find_union, int find_intrsec, int find_diff, int find_ddiff, int subtract, int countonly, const char *out, unsigned int cutoff, int rule);
+static unsigned int union_multi (wordmap *m[], unsigned int nmaps, const char *filename, unsigned int cutoff, unsigned int countonly);
+static unsigned int subset (wordmap *map, unsigned int subset_method, unsigned long long subset_size, const char *filename);
 static int compare_wordmaps_mm (wordmap *map1, wordmap *map2, int find_diff, int find_ddiff, int subtract, int countonly, const char *out, unsigned int cutoff, unsigned int nmm, int rule);
 static unsigned long long fetch_relevant_words (wordtable *table, wordmap *map, wordmap *querymap, unsigned int cutoff, unsigned int nmm, FILE *f, int subtract, int countonly, unsigned long long *totalfreq);
 static void print_help (int exitvalue);
+
+#define MAX_FILES 1024
 
 int debug = 0;
 
 int main (int argc, const char *argv[])
 {
 	int arg_idx, v;
-	const char *listname1 = NULL, *listname2 = NULL;
+	const char *fnames[MAX_FILES];
+	unsigned int nfiles = 0;
 	char *end;
 	int rule = RULE_DEFAULT;
 
 	/* default values */
 	unsigned int cutoff = 1, nmm = 0;
 	int find_union = 0, find_intrsec = 0, find_diff = 0, find_ddiff = 0, subtraction = 0, countonly = 0;
+	int find_subset = 0;
+	int subset_method = RAND_ALL;
+	unsigned long long subset_size = 0;
 	const char *outputname = "out";
-	wordmap *map1, *map2;
 
 	for (arg_idx = 1; arg_idx < argc; arg_idx++) {
+		if (argv[arg_idx][0] != '-') {
+			/* File name */
+			if (nfiles >= MAX_FILES) {
+				fprintf (stderr, "Too many file arguments (max %d)\n", MAX_FILES);
+				print_help (1);
+			}
+			fnames[nfiles++] = argv[arg_idx];
+			continue;
+		}
 		if (!strcmp(argv[arg_idx], "-v") || !strcmp(argv[arg_idx], "--version")) {
-
 			fprintf (stdout, "glistcompare v%d.%d\n", VERSION_MAJOR, VERSION_MINOR);
 			return 0;
 		} else if (!strcmp (argv[arg_idx], "-h") || !strcmp (argv[arg_idx], "--help") || !strcmp (argv[arg_idx], "-?")) {
 			print_help (0);
-
-		} else if (arg_idx == 1) {
-			if (argv[arg_idx][0] == '-') {
-				fprintf (stderr, "Error: No list files specified!\n");
-				print_help (1);
-			}
-			listname1 = argv[arg_idx];
-		} else if (arg_idx == 2) {
-			if (argv[arg_idx][0] == '-') {
-				fprintf (stderr, "Error: No list files specified!\n");
-				print_help (1);
-			}
-			listname2 = argv[arg_idx];
 		} else if (!strcmp (argv[arg_idx], "-o") || !strcmp (argv[arg_idx], "--outputname")) {
 			if (!argv[arg_idx + 1] || argv[arg_idx + 1][0] == '-') {
 				fprintf (stderr, "Warning: No output name specified!\n");
@@ -152,6 +159,28 @@ int main (int argc, const char *argv[])
                         } else if (!strcmp (argv[arg_idx], "2")) {
 			  rule = RULE_TWO;			  
                         }
+		} else if (!strcmp (argv[arg_idx], "-ss") || !strcmp (argv[arg_idx], "-subset")) {
+			find_subset = 1;
+			arg_idx += 1;
+			if (arg_idx >= argc) {
+				print_help (1);
+			}
+			if (!strcmp (argv[arg_idx], "rand_all")) {
+				subset_method = RAND_ALL;
+			} else if (!strcmp (argv[arg_idx], "rand_unique")) {
+				subset_method = RAND_UNIQUE;
+			} else {
+				print_help (1);
+			}
+			arg_idx += 1;
+			if (arg_idx >= argc) {
+				print_help (1);
+			}
+			subset_size = strtoll (argv[arg_idx], &end, 10);
+			if (*end != 0) {
+				fprintf (stderr, "Error: Invalid subset size: %s! Must be an integer.\n", argv[arg_idx]);
+				print_help (1);
+			}
 		} else if (!strcmp (argv[arg_idx], "-D")) {
 			debug += 1;
 		} else {
@@ -159,16 +188,42 @@ int main (int argc, const char *argv[])
 			print_help (1);
 		}
 	}
-	if (debug) {
-		fprintf (stderr, "Rule is %d\n", rule);
-	}
+	if (debug) fprintf (stderr, "Rule: %d\n", rule);
 
 	debug_wordmap = debug;
 	
 	/* check list files */
-	if (!listname1 || !listname2) {
-		fprintf(stderr, "Error: Missing one or both list files!\n");
-		print_help (1);
+	if (debug) fprintf (stderr, "Num files: %d\n", nfiles);
+	if (nfiles < 2) {
+		if (find_subset) {
+			wordmap *map;
+			char c[2048];
+			map = wordmap_new (fnames[0]);
+			if (!map) {
+				fprintf (stderr, "Error: Creating the wordmap failed!\n");
+				return 1;
+			}
+			sprintf (c, "%s_subset", outputname);
+			v = subset (map, subset_method, subset_size, c);
+			return 0;
+		} else {
+			fprintf(stderr, "Error: Missing one or both list files!\n");
+			print_help (1);
+		}
+	}
+	if (nfiles > 2) {
+		if (!find_union || find_intrsec || find_diff || find_ddiff) {
+			fprintf(stderr, "Error: Algorithm incompatible with multiple files!\n");
+			print_help (1);
+		}
+		if (nmm) {
+			fprintf(stderr, "Error: Multiple files are not compatible with mismatches!\n");
+			print_help (1);
+		}
+		if (rule != RULE_DEFAULT) {
+			fprintf(stderr, "Error: Explicit rule incompatible with multiple files!\n");
+			print_help (1);
+		}
 	}
 
 	/* both differences */
@@ -187,27 +242,50 @@ int main (int argc, const char *argv[])
 		return 1;
 	}
 
-	map1 = wordmap_new (listname1);
-	map2 = wordmap_new (listname2);
-	if (!map1 || !map2) {
-		fprintf (stderr, "Error: Creating the wordmap failed!\n");
-		return 1;
-	}
-	
-	if (map1->header->version_major > VERSION_MAJOR || map1->header->version_minor > VERSION_MINOR) {
-		fprintf (stderr, "Error: %s is created with a newer glistmaker version.\n", map1->filename);
-		return 1;
-	}	
-	if (map2->header->version_major > VERSION_MAJOR || map2->header->version_minor > VERSION_MINOR) {
-		fprintf (stderr, "Error: %s is created with a newer glistmaker version.\n", map2->filename);
-		return 1;
-	}	
-
-	if (nmm && find_diff) {
-		/* Difference with mismatches requires special treatment */
-		v = compare_wordmaps_mm (map1, map2, find_diff, find_ddiff, subtraction, countonly, outputname, cutoff, nmm, rule);
+	if (nfiles == 2) {
+		wordmap *map1, *map2;
+		map1 = wordmap_new (fnames[0]);
+		map2 = wordmap_new (fnames[1]);
+		if (!map1 || !map2) {
+			fprintf (stderr, "Error: Creating the wordmap failed!\n");
+			return 1;
+		}
+		if (map1->header->version_major > VERSION_MAJOR || map1->header->version_minor > VERSION_MINOR) {
+			fprintf (stderr, "Error: %s is created with a newer glistmaker version.\n", map1->filename);
+			return 1;
+		}	
+		if (map2->header->version_major > VERSION_MAJOR || map2->header->version_minor > VERSION_MINOR) {
+			fprintf (stderr, "Error: %s is created with a newer glistmaker version.\n", map2->filename);
+			return 1;
+		}	
+		if (nmm && find_diff) {
+			/* Difference with mismatches requires special treatment */
+			v = compare_wordmaps_mm (map1, map2, find_diff, find_ddiff, subtraction, countonly, outputname, cutoff, nmm, rule);
+		} else {
+			v = compare_wordmaps (map1, map2, find_union, find_intrsec, find_diff, find_ddiff, subtraction, countonly, outputname, cutoff, rule);
+		}
 	} else {
-		v = compare_wordmaps (map1, map2, find_union, find_intrsec, find_diff, find_ddiff, subtraction, countonly, outputname, cutoff, rule);
+		wordmap *maps[MAX_FILES];
+		unsigned int i;
+		char c[2048];
+		for (i = 0; i < nfiles; i++) {
+			if (debug > 1) fprintf (stderr, "Trying to mmap %s\n", fnames[i]);
+			maps[i] = wordmap_new (fnames[i]);
+			if (debug > 1) fprintf (stderr, "Result %p\n", maps[i]);
+			if (!maps[i]) {
+				fprintf (stderr, "Error: Cannot mmap %s\n", fnames[i]);
+				exit (1);
+			}
+			if (maps[i]->header->version_major > VERSION_MAJOR || maps[i]->header->version_minor > VERSION_MINOR) {
+				fprintf (stderr, "Error: List %s is created with newer glistmaker version\n", fnames[i]);
+				exit (1);
+			}
+		}
+		sprintf (c, "%s_%d_union.list", outputname, maps[0]->header->wordlength);
+		if (debug > 1) {
+			fprintf (stderr, "Combining %d lists into %s\n", nfiles, c);
+		}
+		v = union_multi (maps, nfiles, c, cutoff, countonly);
 	}
 	if (v) return print_error_message (v);
 
@@ -469,6 +547,139 @@ compare_wordmaps (wordmap *map1, wordmap *map2, int find_union, int find_intrsec
 	return 0;
 }
 
+#define BSIZE 100000
+
+static unsigned int
+union_multi (wordmap *m[], unsigned int nmaps, const char *filename, unsigned int cutoff, unsigned int countonly)
+{
+	unsigned long long nwords[MAX_FILES];
+	unsigned long long i[MAX_FILES];
+	unsigned int nfinished;
+
+	header h;
+
+	FILE *ofs;
+	char *b;
+	unsigned int bp, j;
+
+	unsigned long long word;
+	unsigned int freq;
+	double t_s, t_e;
+
+	h.code = glistmaker_code_match;
+	h.version_major = VERSION_MAJOR;
+	h.version_minor = VERSION_MINOR;
+	h.wordlength = m[0]->header->wordlength;
+	h.nwords = 0;
+	h.totalfreq = 0;
+
+	b = (char *) malloc (BSIZE + 12);
+	
+	ofs = fopen (filename, "w");
+
+	t_s = get_time ();
+	fwrite (&h, sizeof (header), 1, ofs);
+
+	bp = 0;
+	nfinished = 0;
+	for (j = 0; j < nmaps; j++) {
+		i[j] = 0;
+		nwords[j] = m[j]->header->nwords;
+		if (!nwords[j]) nfinished += 1;
+	}
+		
+	memset (i, 0, sizeof (i));
+	
+	while (nfinished < nmaps) {
+		word = 0xffffffffffffffff;
+		freq = 0;
+		/* Find smalles word and total freq */
+		for (j = 0; j < nmaps; j++) {
+			if (i[j] < nwords[j]) {
+				/* This table is not finished */
+				if (WORDMAP_WORD(m[j], i[j]) < word) {
+					/* This table has smaller word */
+					word = WORDMAP_WORD(m[j], i[j]);
+					freq = WORDMAP_FREQ(m[j], i[j]);
+				} else if (WORDMAP_WORD(m[j], i[j]) == word) {
+					/* This table has equal word */
+					freq += WORDMAP_FREQ(m[j], i[j]);
+				}
+				__builtin_prefetch (&WORDMAP_WORD(m[j], i[j]) + 16);
+				__builtin_prefetch (&WORDMAP_FREQ(m[j], i[j]) + 16);
+			}
+		}
+		/* Now we have word and freq */
+		if (freq >= cutoff) {
+			memcpy (b + bp, &word, 8);
+			bp += 8;
+			memcpy (b + bp, &freq, 4);
+			bp += 4;
+			if (bp >= BSIZE) {
+				fwrite (b, 1, bp, ofs);
+				bp = 0;
+			}
+			h.nwords += 1;
+			h.totalfreq += freq;
+			if (debug && !(h.nwords % 100000000)) {
+				fprintf (stderr, "Words written: %llu\n", h.nwords);
+			}
+		}
+		/* Update pointers */
+		for (j = 0; j < nmaps; j++) {
+			if (i[j] < nwords[j]) {
+				/* This table is not finished */
+				if (WORDMAP_WORD(m[j], i[j]) == word) {
+					i[j] += 1;
+					if (i[j] >= nwords[j]) {
+						nfinished += 1;
+					}
+				}
+			}
+		}
+	}
+	if (bp) {
+		fwrite (b, 1, bp, ofs);
+	}
+	fseek (ofs, 0, SEEK_SET);
+	fwrite (&h, sizeof (header), 1, ofs);
+	fclose (ofs);
+	t_e = get_time ();
+	if (debug > 0) fprintf (stderr, "Combining %d maps: %.2f\n", nmaps, t_e - t_s);
+	
+	free (b);
+	
+	return 0;
+}
+
+static unsigned int
+subset (wordmap *map, unsigned int subset_method, unsigned long long subset_size, const char *filename)
+{
+	wordtable *wt;
+	unsigned long long i;
+	double nreq, nrem;
+	wt = wordtable_new (map->header->wordlength, subset_size);
+	nreq = subset_size;
+	nrem = map->header->nwords;
+	for (i = 0; i < (map->header->nwords - 1); i++) {
+		double prob = nreq / nrem;
+		double r = (rand () + 1.0) / RAND_MAX;
+		if (r <= prob) {
+			wordtable_add_word_nofreq (wt, WORDMAP_WORD(map, i), map->header->wordlength);
+			nreq -= 1;
+		}
+		nrem -= 1;
+	}
+	if (nreq > 0) {
+		wordtable_add_word_nofreq (wt, WORDMAP_WORD(map, map->header->nwords - 1), map->header->wordlength);
+	}
+	wordtable_sort (wt, 0);
+	wordtable_find_frequencies (wt);
+	wordtable_write_to_file (wt, filename, 1);
+	wordtable_delete (wt);
+	return 0;
+}
+
 static int
 compare_wordmaps_mm (wordmap *map1, wordmap *map2, int find_diff, int find_ddiff, int subtract, int countonly, const char *out, unsigned int cutoff, unsigned int nmm, int rule)
 {
@@ -695,6 +906,7 @@ print_help (int exit_value)
 	fprintf (stdout, "    -o, --outputname STRING  - specify output name (default \"out\")\n");
 	fprintf (stdout, "    -r, --rule STRING        - specify rule how final frequencies are calculated (default, add, subtract, min, max, first, second, 1, 2)\n");
 	fprintf (stdout, "                               NOTE: rules min, subtract, first and second can only be used with finding the intersection.\n");
+	fprintf (stdout, "    -ss --subset METHOD SIZE - make subset with given method (rand_unique)\n");
 	fprintf (stdout, "    --count_only             - output count of k-mers instead of k-mers themself\n");
 	fprintf (stdout, "    -D                       - increase debug level\n");
 	exit (exit_value);
