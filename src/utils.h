@@ -24,6 +24,8 @@
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
+#include <stdlib.h>
+
 /* memory-map a given file */
 const char * mmap_by_filename (const char *filename, size_t *size);
 
