@@ -29,6 +29,25 @@
 #include "wordtable.h"
 #include "fasta.h"
 
+/*
+ * Queue stub
+ *
+ */
+
+#define NUM_ID_TOKENS 32
+
+typedef struct _Queue Queue;
+struct _Queue {
+        /* Number of threads running */
+        int nthreads;
+        /* Single mutex and cond for queue management */
+        pthread_mutex_t mutex;
+        pthread_cond_t cond;
+        /* Debug */
+        int i_d[NUM_ID_TOKENS];
+        double d_d[NUM_ID_TOKENS];
+};
+
 #define MAX_TABLES 256
 
 #define TASK_READ 0
@@ -47,21 +66,11 @@
 /* These form linked list */
 
 typedef struct _TaskFile TaskFile;
-struct _TaskFile {
-        TaskFile *next;
-        const char *filename;
-        const unsigned char *cdata;
-        unsigned long long csize;
-        FastaReader reader;
-};
+typedef struct _MakerQueue MakerQueue;
 
-typedef struct _Queue Queue;
-struct _Queue {
-        /* Number of threads running */
-        int nthreads;
-        /* Single mutex and cond for queue management */
-        pthread_mutex_t mutex;
-        pthread_cond_t cond;
+struct _MakerQueue {
+        Queue queue;
+
         /* Parameters */
         unsigned int wordlen;
         unsigned long long tablesize;
@@ -81,21 +90,29 @@ struct _Queue {
         /* Available tables */
         unsigned int navailable;
         wordtable *available[MAX_TABLES];
-        /* Debug */
-        int i_d[32];
-        double d_d[32];
+};
+
+void maker_queue_setup (MakerQueue *mq);
+void maker_queue_release (MakerQueue *mq);
+
+struct _TaskFile {
+        TaskFile *next;
+        const char *filename;
+        const unsigned char *cdata;
+        unsigned long long csize;
+        FastaReader reader;
 };
 
 /* Add new file task to queue (not thread-safe) */
-void queue_add_file (Queue *queue, const char *filename);
+void maker_queue_add_file (MakerQueue *mq, const char *filename);
 /* Get smallest table */
-wordtable *queue_get_smallest_table (Queue *queue);
+wordtable *queue_get_smallest_table (MakerQueue *queue);
 /* Get largest table */
-wordtable *queue_get_largest_table (Queue *queue);
+wordtable *queue_get_largest_table (MakerQueue *queue);
 
-wordtable *queue_get_sorted (Queue *queue);
-wordtable *queue_get_smallest_sorted (Queue *queue);
-wordtable *queue_get_mostavailable_sorted (Queue *queue);
+wordtable *queue_get_sorted (MakerQueue *queue);
+wordtable *queue_get_smallest_sorted (MakerQueue *queue);
+wordtable *queue_get_mostavailable_sorted (MakerQueue *queue);
 
 
 #endif /* SEQUENCE_H_ */

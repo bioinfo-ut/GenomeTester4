@@ -143,7 +143,7 @@ fasta_reader_read_nwords (FastaReader *reader, unsigned long long maxwords,
 		/* Proper character */
 		switch (reader->state) {
 		case FASTA_READER_STATE_NONE:
-			if (cval == '>') {
+			if ((cval == '>') || (cval == '@')) {
 				reader->state = FASTA_READER_STATE_NAME;
 				reader->name_length = 0;
 			}

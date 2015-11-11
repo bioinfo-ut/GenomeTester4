@@ -212,67 +212,64 @@ main (int argc, const char *argv[])
 	
 	if (nthreads > 0) {
 		/* CASE: SEVERAL THREADS */
-		Queue queue = { 0 };
+		MakerQueue mq;
 	        pthread_t threads[256];
 	        int rc;
 	        unsigned int t;
 	        unsigned int finished = 0;
-		
+
+		maker_queue_setup (&mq);
+
 		for (argidx = firstfasta + nfasta - 1; argidx >= firstfasta; argidx--) {
-			queue_add_file (&queue, argv[argidx]);
+			maker_queue_add_file (&mq, argv[argidx]);
 		}		
 
-	        /* Initialize main mutex and cond */
-	        pthread_mutex_init (&queue.mutex, NULL);
-	        pthread_cond_init (&queue.cond, NULL);
 	        /* Lock the mutex */
-	        pthread_mutex_lock (&queue.mutex);
-	        queue.nthreads = 0;
-	        queue.wordlen = wordlength;
-	        queue.tablesize = tablesize;
-	        queue.cutoff = cutoff;
+	        pthread_mutex_lock (&mq.queue.mutex);
+	        mq.queue.nthreads = 0;
+	        mq.wordlen = wordlength;
+	        mq.tablesize = tablesize;
+	        mq.cutoff = cutoff;
 
 		if (debug) {
 			fprintf (stderr, "Num threads is %d\n", nthreads);
 			fprintf (stderr, "Num tables is %d\n", ntables);
-			fprintf (stderr, "Table size is %lld\n", queue.tablesize);
+			fprintf (stderr, "Table size is %lld\n", mq.tablesize);
 		}
 			  
 	        for (t = 1; t < nthreads; t++){
 	                if (debug > 1) fprintf (stderr, "Creating thread %u\n", t);
-	                rc = pthread_create (&threads[t], NULL, process, &queue);
+	                rc = pthread_create (&threads[t], NULL, process, &mq);
 	                if (rc) {
                                 fprintf (stderr, "ERROR; return code from pthread_create() is %d\n", rc);
                                 exit (-1);
                         }
                 }
 
-                pthread_mutex_unlock (&queue.mutex);
+                pthread_mutex_unlock (&mq.queue.mutex);
 
-                process (&queue);
+                process (&mq);
 
                 while (!finished) {
-                        pthread_mutex_lock (&queue.mutex);
-                        if (queue.nthreads < 1) finished = 1;
-                        pthread_mutex_unlock (&queue.mutex);
+                        pthread_mutex_lock (&mq.queue.mutex);
+                        if (mq.queue.nthreads < 1) finished = 1;
+                        pthread_mutex_unlock (&mq.queue.mutex);
                         sleep (1);
                 }
-                if (queue.nsorted > 0) {
+                if (mq.nsorted > 0) {
                 	/* write the final list into a file */
                 	if (debug > 0) fprintf (stderr, "Writing list %s\n", outputname);
-                	wordtable_write_to_file (queue.sorted[0], outputname, cutoff);
+                	wordtable_write_to_file (mq.sorted[0], outputname, cutoff);
 		}
 
-		pthread_cond_destroy (&queue.cond);
-                pthread_mutex_destroy (&queue.mutex);
-
                 if (debug) {
-                	fprintf (stderr, "Read %.2f\n", queue.d_d[TIME_READ]);
-                	fprintf (stderr, "Sort %.2f\n", queue.d_d[TIME_SORT]);
-                	fprintf (stderr, "Collate %.2f\n", queue.d_d[TIME_FF]);
-                	fprintf (stderr, "Merge %.2f\n", queue.d_d[TIME_MERGE]);
+                	fprintf (stderr, "Read %.2f\n", mq.queue.d_d[TIME_READ]);
+                	fprintf (stderr, "Sort %.2f\n", mq.queue.d_d[TIME_SORT]);
+                	fprintf (stderr, "Collate %.2f\n", mq.queue.d_d[TIME_FF]);
+                	fprintf (stderr, "Merge %.2f\n", mq.queue.d_d[TIME_MERGE]);
                 }
 
+                maker_queue_release (&mq);
         } else {
 		/* CASE: ONE THREAD */
 		const char *ff;
@@ -341,12 +338,12 @@ main (int argc, const char *argv[])
 static void *
 process (void *arg)
 {
-        Queue *queue;
+        MakerQueue *mq;
         int idx = -1;
         unsigned int finished;
         double s_t, e_t, d_t;
 
-        queue = (Queue *) arg;
+        mq = (MakerQueue *) arg;
 
         finished = 0;
         
@@ -355,20 +352,20 @@ process (void *arg)
         	unsigned int has_files, has_unsorted, has_unmerged, sorted_tables;
         	
                 /* Get exclusive lock on queue */
-                pthread_mutex_lock (&queue->mutex);
+                pthread_mutex_lock (&mq->queue.mutex);
                 if (idx < 0) {
                         /* Thread is started, increase counter and get idx */
-                        queue->nthreads += 1;
-                        idx = queue->nthreads;
-                        if (debug > 1) fprintf (stderr, "Thread %d started (total %d)\n", idx, queue->nthreads);
+                        mq->queue.nthreads += 1;
+                        idx = mq->queue.nthreads;
+                        if (debug > 1) fprintf (stderr, "Thread %d started (total %d)\n", idx, mq->queue.nthreads);
                 }
 
-                if (debug > 1) fprintf (stderr, "Thread %d: FileTasks %u Unsorted %u Sorted %u\n", idx, queue->ntasks[TASK_READ], queue->nunsorted, queue->nsorted);
+                if (debug > 1) fprintf (stderr, "Thread %d: FileTasks %u Unsorted %u Sorted %u\n", idx, mq->ntasks[TASK_READ], mq->nunsorted, mq->nsorted);
                 
-                has_files = queue->files || queue->ntasks[TASK_READ];
-                has_unsorted = queue->nunsorted || queue->ntasks[TASK_SORT];
-                has_unmerged = queue->ntasks[TASK_MERGE];
-                sorted_tables = queue->nsorted + queue->ntasks[TASK_MERGE];
+                has_files = mq->files || mq->ntasks[TASK_READ];
+                has_unsorted = mq->nunsorted || mq->ntasks[TASK_SORT];
+                has_unmerged = mq->ntasks[TASK_MERGE];
+                sorted_tables = mq->nsorted + mq->ntasks[TASK_MERGE];
 
                 /* If all files have been read and sorted and there is small enough number of sorted files */
                 if (!has_files && !has_unsorted && sorted_tables && (sorted_tables <= MAX_MERGED_TABLES)) {
@@ -378,11 +375,11 @@ process (void *arg)
                 		unsigned int ntables;
                 		char c[1024];
                 		ntables = 0;
-                		while (queue->nsorted) {
-                			t[ntables++] = queue_get_sorted (queue);
+                		while (mq->nsorted) {
+                			t[ntables++] = queue_get_sorted (mq);
 				}
 				wordtable_build_filename (t[0], c, 1024, outputname);
-				queue->ntasks[TASK_MERGE] += 1;
+				mq->ntasks[TASK_MERGE] += 1;
 				if (debug) {
                 			unsigned int i;
                 			fprintf (stderr, "Merging %u tables: %s", ntables, t[0]->id);
@@ -392,37 +389,37 @@ process (void *arg)
 					fprintf (stderr, " to %s\n", c);
 				}
 				/* Now we can release mutex */
-				pthread_mutex_unlock (&queue->mutex);
+				pthread_mutex_unlock (&mq->queue.mutex);
 				/* merge_write (table, other, c, queue->cutoff); */
-				merge_write_multi (t, ntables, c, queue->cutoff);
-				pthread_mutex_lock (&queue->mutex);
-				queue->ntasks[TASK_MERGE] -= 1;
-				pthread_cond_broadcast (&queue->cond);
-				pthread_mutex_unlock (&queue->mutex);
+				merge_write_multi (t, ntables, c, mq->cutoff);
+				pthread_mutex_lock (&mq->queue.mutex);
+				mq->ntasks[TASK_MERGE] -= 1;
+				pthread_cond_broadcast (&mq->queue.cond);
+				pthread_mutex_unlock (&mq->queue.mutex);
 				finished = 1;
 			} else {
 				/* Waiting merging to finish */
                         	if (debug > 1) fprintf (stderr, "Thread %d: Waiting merging to finish\n", idx);
-                        	pthread_cond_wait (&queue->cond, &queue->mutex);
-                        	pthread_mutex_unlock (&queue->mutex);
+                        	pthread_cond_wait (&mq->queue.cond, &mq->queue.mutex);
+                        	pthread_mutex_unlock (&mq->queue.mutex);
 			}
 			continue;
                 }
-                if (queue->nsorted > 1) {
+                if (mq->nsorted > 1) {
                 	/* Task 1 - merge sorted tables */
                         wordtable *table, *other;
                         int result;
 
-                        other = queue_get_smallest_sorted (queue);
-                        table = queue_get_mostavailable_sorted (queue);
+                        other = queue_get_smallest_sorted (mq);
+                        table = queue_get_mostavailable_sorted (mq);
                         if (table->nwordslots < other->nwordslots) {
                         	wordtable *t = table;
                         	table = other;
                         	other = t;
                         }
-                        queue->ntasks[TASK_MERGE] += 1;
+                        mq->ntasks[TASK_MERGE] += 1;
                         /* Now we can release mutex */
-                        pthread_mutex_unlock (&queue->mutex);
+                        pthread_mutex_unlock (&mq->queue.mutex);
                         if (debug > 0) fprintf (stderr, "Thread %d: Merging tables %s (%llu/%llu) + %s (%llu/%llu) -> %s\n", idx, table->id, table->nwords, table->nwordslots, other->id, other->nwords, other->nwordslots, table->id);
                         s_t = get_time ();
 			result = wordtable_merge (table, other);
@@ -433,27 +430,27 @@ process (void *arg)
 			        print_error_message (result);
                         }
                         /* Lock mutex */
-                        pthread_mutex_lock (&queue->mutex);
+                        pthread_mutex_lock (&mq->queue.mutex);
                         /* Add merged table to sorted list */
-                        queue->sorted[queue->nsorted++] = table;
+                        mq->sorted[mq->nsorted++] = table;
                         wordtable_empty (other);
-                        other->wordlength = queue->wordlen;
-                        queue->available[queue->navailable++] = other;
-                        queue->d_d[TIME_MERGE] += d_t;
+                        other->wordlength = mq->wordlen;
+                        mq->available[mq->navailable++] = other;
+                        mq->queue.d_d[TIME_MERGE] += d_t;
                         /* Release mutex */
-                        queue->ntasks[TASK_MERGE] -= 1;
-                        pthread_cond_broadcast (&queue->cond);
-                        pthread_mutex_unlock (&queue->mutex);
+                        mq->ntasks[TASK_MERGE] -= 1;
+                        pthread_cond_broadcast (&mq->queue.cond);
+                        pthread_mutex_unlock (&mq->queue.mutex);
                         if (debug > 0) fprintf (stderr, "Thread %d: Finished merging %s (%llu/%llu)\n", idx, table->id, table->nwords, table->nwordslots);
-                } else if (queue->nunsorted > 0) {
+                } else if (mq->nunsorted > 0) {
                         /* Task 2 - sort table */
                         wordtable *table;
                         int result;
                         
-                        table = queue->unsorted[--queue->nunsorted];
+                        table = mq->unsorted[--mq->nunsorted];
                         /* Now we can release mutex */
-                        queue->ntasks[TASK_SORT] += 1;
-                        pthread_mutex_unlock (&queue->mutex);
+                        mq->ntasks[TASK_SORT] += 1;
+                        pthread_mutex_unlock (&mq->queue.mutex);
                         if (debug > 0) fprintf (stderr, "Thread %d: Sorting table %s (%llu/%llu)\n", idx, table->id, table->nwords, table->nwordslots);
                         s_t = get_time ();
                         wordtable_sort (table, 0);
@@ -467,38 +464,38 @@ process (void *arg)
                                 print_error_message (result);
                         }
                         /* Lock mutex */
-                        pthread_mutex_lock (&queue->mutex);
+                        pthread_mutex_lock (&mq->queue.mutex);
                         /* Add sorted table to sorted list */
-                        queue->sorted[queue->nsorted++] = table;
-                        queue->d_d[TIME_SORT] += d_t;
+                        mq->sorted[mq->nsorted++] = table;
+                        mq->queue.d_d[TIME_SORT] += d_t;
                         d_t = e_t - s_t;
-                        queue->d_d[TIME_FF] += d_t;
+                        mq->queue.d_d[TIME_FF] += d_t;
                         /* Release mutex */
-                        queue->ntasks[TASK_SORT] -= 1;
-                        pthread_cond_broadcast (&queue->cond);
-                        pthread_mutex_unlock (&queue->mutex);
+                        mq->ntasks[TASK_SORT] -= 1;
+                        pthread_cond_broadcast (&mq->queue.cond);
+                        pthread_mutex_unlock (&mq->queue.mutex);
                         if (debug > 0) fprintf (stderr, "Thread %d: Finished sorting %s (%llu/%llu)\n", idx, table->id, table->nwords, table->nwordslots);
-                } else if (queue->files && (queue->ntasks[TASK_READ] < MAX_FILES) && (queue->navailable || (queue->ntablescreated < ntables))) {
+                } else if (mq->files && (mq->ntasks[TASK_READ] < MAX_FILES) && (mq->navailable || (mq->ntablescreated < ntables))) {
                         /* Task 3 - read input file */
                         TaskFile *task;
                         wordtable *table;
                         int result;
                         unsigned long long readsize;
 
-                        task = queue->files;
-                        queue->files = task->next;
-                        queue->ntasks[TASK_READ] += 1;
-                        if (queue->navailable > 0) {
+                        task = mq->files;
+                        mq->files = task->next;
+                        mq->ntasks[TASK_READ] += 1;
+                        if (mq->navailable > 0) {
                                 /* Has to create new word table */
-                                table = queue_get_largest_table (queue);
+                                table = queue_get_largest_table (mq);
                         } else {
-                                table = wordtable_new (queue->wordlen, 10000000);
-                                table->wordlength = queue->wordlen;
-                                queue->ntablescreated += 1;
+                                table = wordtable_new (mq->wordlen, 10000000);
+                                table->wordlength = mq->wordlen;
+                                mq->ntablescreated += 1;
                                 if (debug > 0) fprintf (stderr, "Thread %d: Created table %s\n", idx, table->id);
                         }
                         /* Now we can release mutex */
-                        pthread_mutex_unlock (&queue->mutex);
+                        pthread_mutex_unlock (&mq->queue.mutex);
                         
                         /* Process file reader task */
                         if (debug > 1) fprintf (stderr, "Thread %d: Processign file %s (%llu) -> %s (%llu)\n", idx, task->filename, (unsigned long long) task->reader.cpos, table->id, table->nwordslots);
@@ -506,7 +503,7 @@ process (void *arg)
                         	/* Initialize reader */
                                 if (debug > 0) fprintf (stderr, "Thread %d: Creating FastaReader for %s -> %s\n", idx, task->filename, table->id);
                         	if (!strcmp (task->filename, "-")) {
-                        		fasta_reader_init_from_file (&task->reader, queue->wordlen, 1, stdin);
+                        		fasta_reader_init_from_file (&task->reader, mq->wordlen, 1, stdin);
                         	} else {
                                 	const unsigned char *cdata;
                                 	size_t csize;
@@ -514,14 +511,14 @@ process (void *arg)
                                 	if (cdata) {
                                 		task->cdata = cdata;
                                 		task->csize = csize;
-                                		fasta_reader_init_from_data (&task->reader, queue->wordlen, 1, cdata, csize);
+                                		fasta_reader_init_from_data (&task->reader, mq->wordlen, 1, cdata, csize);
 					} else {
                                         	/* Cannot mmap file */
                                         	/* fixme: Error procesing */
 					}
                                 }
                         }
-                        readsize = (queue->tablesize < table->nwordslots) ? table->nwordslots : queue->tablesize;
+                        readsize = (mq->tablesize < table->nwordslots) ? table->nwordslots : mq->tablesize;
                         if (debug > 0) fprintf (stderr, "Thread %d: Reading %lld bytes from %s, position %llu/%llu\n", idx, readsize, task->filename, (unsigned long long) task->reader.cpos, (unsigned long long) task->csize);
                         s_t = get_time ();
                         result = fasta_reader_read_nwords (&task->reader, readsize,  NULL, NULL, NULL, NULL, process_word, table);
@@ -532,9 +529,9 @@ process (void *arg)
 		                print_error_message (result);
                         }
                         /* Lock mutex */
-                        pthread_mutex_lock (&queue->mutex);
+                        pthread_mutex_lock (&mq->queue.mutex);
                         /* Add generated table to unsorted list */
-                        queue->unsorted[queue->nunsorted++] = table;
+                        mq->unsorted[mq->nunsorted++] = table;
                         if (task->reader.in_eof) {
                                 /* Finished this task */
                                 if (debug > 0) fprintf (stderr, "Thread %d: FastaReader for %s finished\n", idx, task->filename);
@@ -544,38 +541,38 @@ process (void *arg)
                                 free (task);
                         } else {
                                 /* Reshedule task */
-                                task->next = queue->files;
-                                queue->files = task;
+                                task->next = mq->files;
+                                mq->files = task;
                         }
-                        queue->ntasks[TASK_READ] -= 1;
-                        queue->d_d[TIME_READ] += d_t;
+                        mq->ntasks[TASK_READ] -= 1;
+                        mq->queue.d_d[TIME_READ] += d_t;
                         /* Release mutex */
-                        pthread_cond_broadcast (&queue->cond);
-                        pthread_mutex_unlock (&queue->mutex);
+                        pthread_cond_broadcast (&mq->queue.cond);
+                        pthread_mutex_unlock (&mq->queue.mutex);
                         if (debug > 0) fprintf (stderr, "Thread %d: Finished reading %s (%llu/%llu)\n", idx, table->id, table->nwords, table->nwordslots);
-                } else if (!has_files && !queue->nunsorted && (queue->nsorted < 2)) {
+                } else if (!has_files && !mq->nunsorted && (mq->nsorted < 2)) {
                         /* Nothing to do */
                         /* Release mutex */
-                        pthread_cond_broadcast (&queue->cond);
-                        pthread_mutex_unlock (&queue->mutex);
+                        pthread_cond_broadcast (&mq->queue.cond);
+                        pthread_mutex_unlock (&mq->queue.mutex);
                         finished = 1;
                 } else {
                         if (debug > 1) fprintf (stderr, "Thread %d: Waiting\n", idx);
                         /* Release mutex */
-                        /* pthread_mutex_unlock (&queue->mutex); */
+                        /* pthread_mutex_unlock (&mq->queue.mutex); */
                         /* fixme: Semaphore */
                         /* sleep (1); */
-                        pthread_cond_wait (&queue->cond, &queue->mutex);
-                        pthread_mutex_unlock (&queue->mutex);
+                        pthread_cond_wait (&mq->queue.cond, &mq->queue.mutex);
+                        pthread_mutex_unlock (&mq->queue.mutex);
                 }
         }
 
         /* Exit if everything is done */
-        pthread_mutex_lock (&queue->mutex);
-        queue->nthreads -= 1;
-        if (debug > 1) fprintf (stderr, "Thread %u exiting (remaining %d)\n", idx, queue->nthreads);
-        pthread_cond_broadcast (&queue->cond);
-        pthread_mutex_unlock (&queue->mutex);
+        pthread_mutex_lock (&mq->queue.mutex);
+        mq->queue.nthreads -= 1;
+        if (debug > 1) fprintf (stderr, "Thread %u exiting (remaining %d)\n", idx, mq->queue.nthreads);
+        pthread_cond_broadcast (&mq->queue.cond);
+        pthread_mutex_unlock (&mq->queue.mutex);
 
         /* pthread_exit (NULL); */
         return 0;

@@ -12,7 +12,7 @@ LISTMAKER_SOURCES = \
 	fasta.c \
 	buffer.c \
 	sequence.c \
-	queue.c \
+	queue.c queue.h \
 	common.c \
 	utils.c
 
@@ -68,7 +68,7 @@ RELEASEFLAGS = -O3
 DEBUGFLAGS = -O0 -g
 LIBS = -lm -lpthread
 INCS = -I.
-BINS  = glistmaker glistquery glistcompare snpcaller
+BINS  = glistmaker glistquery glistcompare
 
 #CXXFLAGS = $(INCS) $(DEBUGFLAGS) -Wall 
 CXXFLAGS = $(INCS) $(RELEASEFLAGS) -Wall 
@@ -81,7 +81,7 @@ glistmaker: $(LISTMAKER_SOURCES)
 	$(CXX) $(LISTMAKER_SOURCES) -o glistmaker $(LIBS) $(CXXFLAGS)
 
 glistmaker2: $(LISTMAKER2_SOURCES)
-	$(CXX) $(LISTMAKER2_SOURCES) -o glistmaker2 $(LIBS) $(CXXFLAGS)
+	$(CXX) $(LISTMAKER2_SOURCES) -o glistmaker2 $(LIBS) $(DEBUGFLAGS) -Wall
 
 glistquery: $(LISTQUERY_SOURCES)
 	$(CXX) $(LISTQUERY_SOURCES) -o glistquery $(LIBS) $(CXXFLAGS)

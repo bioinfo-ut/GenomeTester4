@@ -25,18 +25,33 @@
 #include "queue.h"
 
 void
-queue_add_file (Queue *queue, const char *filename)
+maker_queue_setup (MakerQueue *mq)
+{
+	memset (mq, 0, sizeof (MakerQueue));
+	pthread_mutex_init (&mq->queue.mutex, NULL);
+	pthread_cond_init (&mq->queue.cond, NULL);
+}
+
+void
+maker_queue_release (MakerQueue *mq)
+{
+	pthread_cond_destroy (&mq->queue.cond);
+	pthread_mutex_destroy (&mq->queue.mutex);
+}
+
+void
+maker_queue_add_file (MakerQueue *mq, const char *filename)
 {
         TaskFile *task;
         task = (TaskFile *) malloc (sizeof (TaskFile));
         memset (task, 0, sizeof (TaskFile));
         task->filename = filename;
-        task->next = queue->files;
-        queue->files = task;
+        task->next = mq->files;
+        mq->files = task;
 }
 
 wordtable *
-queue_get_smallest_table (Queue *queue)
+queue_get_smallest_table (MakerQueue *queue)
 {
 	unsigned int i, min;
 	unsigned long long minslots;
@@ -56,7 +71,7 @@ queue_get_smallest_table (Queue *queue)
 }
 
 wordtable *
-queue_get_largest_table (Queue *queue)
+queue_get_largest_table (MakerQueue *queue)
 {
 	unsigned int i, max;
 	unsigned long long maxslots;
@@ -76,14 +91,14 @@ queue_get_largest_table (Queue *queue)
 }
 
 wordtable *
-queue_get_sorted (Queue *queue)
+queue_get_sorted (MakerQueue *queue)
 {
 	queue->nsorted -= 1;
 	return queue->sorted[queue->nsorted];
 }
 
 wordtable *
-queue_get_smallest_sorted (Queue *queue)
+queue_get_smallest_sorted (MakerQueue *queue)
 {
 	unsigned int i, min;
 	unsigned long long minwords;
@@ -103,7 +118,7 @@ queue_get_smallest_sorted (Queue *queue)
 }
 
 wordtable *
-queue_get_mostavailable_sorted (Queue *queue)
+queue_get_mostavailable_sorted (MakerQueue *queue)
 {
 	unsigned int i, max;
 	unsigned long long maxavail;
