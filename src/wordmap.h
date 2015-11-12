@@ -59,7 +59,7 @@ typedef struct _wordmap {
 #define WORDMAP_WORD(w,i) (*((unsigned long long *) ((w)->wordlist + 12 * (i))))
 #define WORDMAP_FREQ(w,i) (*((unsigned int *) ((w)->wordlist + 12 * (i) + 8)))
 
-wordmap * wordmap_new (const char *listfilename);
+wordmap *wordmap_new (const char *listfilename, unsigned int scout);
 
 void wordmap_delete (wordmap *map);
 

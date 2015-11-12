@@ -36,6 +36,7 @@ LISTQUERY_SOURCES = \
 	buffer.c \
 	sequence.c \
 	common.c \
+	queue.c queue.h \
 	utils.c
 
 LISTCOMPARE_SOURCES = \
@@ -46,6 +47,7 @@ LISTCOMPARE_SOURCES = \
 	buffer.c \
 	sequence.c \
 	common.c \
+	queue.c queue.h \
 	utils.c
 
 SNPCALLER_SOURCES = \
@@ -56,6 +58,7 @@ SNPCALLER_SOURCES = \
 	wordtable.c wordtable.h \
 	fasta.c fasta.h \
 	thread-pool.c thread-pool.h \
+	queue.c queue.h \
 	utils.c utils.h
 
 NIPT_SOURCES = \

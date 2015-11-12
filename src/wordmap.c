@@ -32,6 +32,7 @@
 #include "sequence.h"
 #include "common.h"
 #include "utils.h"
+#include "queue.h"
 
 unsigned int debug_wordmap = 0;
 
@@ -39,7 +40,7 @@ unsigned int glistmaker_code_match = 'G' << 24 | 'T' << 16 | '4' << 8 | 'C';
 
 
 wordmap * 
-wordmap_new (const char *listfilename)
+wordmap_new (const char *listfilename, unsigned int scout)
 {
 	const char *content;
 	size_t size;
@@ -54,7 +55,6 @@ wordmap_new (const char *listfilename)
 		wordmap_delete (map);
 		return NULL;
 	}
-	
 	map->header = (header *) content;
 	if (map->header->code != glistmaker_code_match || size != sizeof (header) + map->header->nwords * 12) {
 		free ((void *) content);
@@ -62,6 +62,9 @@ wordmap_new (const char *listfilename)
 		return NULL;
 	}
 	map->wordlist = content + sizeof (header);
+	if (scout) {
+		scout_mmap ((const unsigned char *) content, size);
+	}
 	return map;
 }
 

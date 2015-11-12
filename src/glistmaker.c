@@ -509,6 +509,7 @@ process (void *arg)
                                 	size_t csize;
                                 	cdata = (const unsigned char *) mmap_by_filename (task->filename, &csize);
                                 	if (cdata) {
+                                		scout_mmap (cdata, csize);
                                 		task->cdata = cdata;
                                 		task->csize = csize;
                                 		fasta_reader_init_from_data (&task->reader, mq->wordlen, 1, cdata, csize);

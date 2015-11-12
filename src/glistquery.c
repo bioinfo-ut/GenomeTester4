@@ -200,7 +200,7 @@ int main (int argc, const char *argv[])
 		print_help (1);	  
 	}
 
-	map = wordmap_new (listfilename);
+	map = wordmap_new (listfilename, !getstat);
 	if (!map) {
 		fprintf (stderr, "Error: Could not make wordmap from file %s!\n", listfilename);
 		return 1;
@@ -208,17 +208,17 @@ int main (int argc, const char *argv[])
 	
 	if (map->header->version_major > VERSION_MAJOR || map->header->version_minor > VERSION_MINOR) {
 		fprintf (stderr, "Error: %s is created with a newer glistmaker version.", map->filename);
-		return 1;
+		exit (1);
 	}
 
 	if (map->header->code != glistmaker_code_match) {
 		fprintf (stderr, "Error: %s is not a glistmaker v.4 file.\n", map->filename);
-		return 1;
+		exit (1);
 	}
 	
 	if (getstat) {
 		get_statistics (map);
-		return 0;
+		exit (0);
 	}
 
 	p.wordlength = map->header->wordlength;
@@ -254,7 +254,7 @@ int main (int argc, const char *argv[])
 
 		print_full_map (map);
 	}
-	return 0;
+	exit (0);
 }
 
 /* print the whole list */
@@ -346,7 +346,7 @@ int search_list (wordmap *map, const char *querylistfilename, parameters *p, uns
 	unsigned long long i, word = 0L;
 	unsigned int freq;
 	
-	qmap = wordmap_new (querylistfilename);
+	qmap = wordmap_new (querylistfilename, 1);
 	
 	if (map->header->wordlength != qmap->header->wordlength) return GT_INCOMPATIBLE_WORDLENGTH_ERROR;
 	

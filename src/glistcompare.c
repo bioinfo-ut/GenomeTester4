@@ -30,6 +30,7 @@
 #include "common.h"
 #include "utils.h"
 #include "sequence.h"
+#include "queue.h"
 
 enum Rules {
   RULE_DEFAULT,
@@ -198,14 +199,14 @@ int main (int argc, const char *argv[])
 		if (find_subset) {
 			wordmap *map;
 			char c[2048];
-			map = wordmap_new (fnames[0]);
+			map = wordmap_new (fnames[0], 1);
 			if (!map) {
 				fprintf (stderr, "Error: Creating the wordmap failed!\n");
-				return 1;
+				exit (1);
 			}
 			sprintf (c, "%s_subset", outputname);
 			v = subset (map, subset_method, subset_size, c);
-			return 0;
+			exit (0);
 		} else {
 			fprintf(stderr, "Error: Missing one or both list files!\n");
 			print_help (1);
@@ -234,29 +235,29 @@ int main (int argc, const char *argv[])
 	if (!find_diff && subtraction) fprintf(stderr, "Warning: Subtraction is not used!\n");
 	if (strlen (outputname) > 200) {
 		fprintf (stderr, "Error: Output name exceeds the 200 character limit.\n");
-		return 1;
+		exit (1);
 	}
 	
 	if (!find_intrsec && (rule == RULE_SUBTRACT || rule == RULE_MIN || rule == RULE_FIRST || rule == RULE_SECOND)) {
 		fprintf (stderr, "Error: Rules min, subtract, fist and second can only be used with finding the intersection.\n");
-		return 1;
+		exit (1);
 	}
 
 	if (nfiles == 2) {
 		wordmap *map1, *map2;
-		map1 = wordmap_new (fnames[0]);
-		map2 = wordmap_new (fnames[1]);
+		map1 = wordmap_new (fnames[0], 1);
+		map2 = wordmap_new (fnames[1], 1);
 		if (!map1 || !map2) {
 			fprintf (stderr, "Error: Creating the wordmap failed!\n");
-			return 1;
+			exit (1);
 		}
 		if (map1->header->version_major > VERSION_MAJOR || map1->header->version_minor > VERSION_MINOR) {
 			fprintf (stderr, "Error: %s is created with a newer glistmaker version.\n", map1->filename);
-			return 1;
+			exit (1);
 		}	
 		if (map2->header->version_major > VERSION_MAJOR || map2->header->version_minor > VERSION_MINOR) {
 			fprintf (stderr, "Error: %s is created with a newer glistmaker version.\n", map2->filename);
-			return 1;
+			exit (1);
 		}	
 		if (nmm && find_diff) {
 			/* Difference with mismatches requires special treatment */
@@ -270,7 +271,7 @@ int main (int argc, const char *argv[])
 		char c[2048];
 		for (i = 0; i < nfiles; i++) {
 			if (debug > 1) fprintf (stderr, "Trying to mmap %s\n", fnames[i]);
-			maps[i] = wordmap_new (fnames[i]);
+			maps[i] = wordmap_new (fnames[i], 1);
 			if (debug > 1) fprintf (stderr, "Result %p\n", maps[i]);
 			if (!maps[i]) {
 				fprintf (stderr, "Error: Cannot mmap %s\n", fnames[i]);
@@ -289,6 +290,8 @@ int main (int argc, const char *argv[])
 	}
 	if (v) return print_error_message (v);
 
+	delete_scouts ();
+	
 	return 0;
 }
 

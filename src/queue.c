@@ -136,3 +136,35 @@ queue_get_mostavailable_sorted (MakerQueue *queue)
 	queue->nsorted -= 1;
 	return t;
 }
+
+static unsigned int finish = 0;
+
+static void *
+scout_map (void *arg)
+{
+  MapData *map = (MapData *) arg;
+  unsigned long long i, val = 0;
+  for (i = 0; i < map->csize; i += 1000) {
+    val += map->cdata[i];
+    if (finish) break;
+  }
+  free (map);
+  return (void *) val;
+}
+
+void
+scout_mmap (const unsigned char *cdata, unsigned long long csize)
+{
+  pthread_t thread;
+  MapData *map = (MapData *) malloc (sizeof (MapData));
+  map->cdata = cdata;
+  map->csize = csize;
+  pthread_create (&thread, NULL, scout_map, map);
+}
+
+void
+delete_scouts () {
+  finish = 1;
+}
+
+

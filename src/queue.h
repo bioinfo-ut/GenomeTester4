@@ -100,6 +100,7 @@ struct _TaskFile {
         const char *filename;
         const unsigned char *cdata;
         unsigned long long csize;
+        unsigned int has_reader;
         FastaReader reader;
 };
 
@@ -114,5 +115,16 @@ wordtable *queue_get_sorted (MakerQueue *queue);
 wordtable *queue_get_smallest_sorted (MakerQueue *queue);
 wordtable *queue_get_mostavailable_sorted (MakerQueue *queue);
 
+/* MMap scouting */
+
+typedef struct _MapData MapData;
+struct _MapData {
+  const unsigned char *cdata;
+  unsigned long long csize;
+};
+
+/* Create new thread that reads mmap into resident memory */
+void scout_mmap (const unsigned char *cdata, unsigned long long csize);
+void delete_scouts ();
 
 #endif /* SEQUENCE_H_ */
