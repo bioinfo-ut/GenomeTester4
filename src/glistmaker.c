@@ -25,6 +25,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <sys/mman.h>
+#include <sys/stat.h>
 #include <pthread.h>
 #include <unistd.h>
 
@@ -209,6 +210,13 @@ main (int argc, const char *argv[])
 	}
 	if (nthreads < 1) nthreads = 1;
 	if (nthreads > 256) nthreads = 256;
+	for (argidx = firstfasta; argidx < firstfasta + nfasta; argidx += 1) {
+		struct stat s;
+		if (stat (argv[argidx], &s)) {
+			fprintf (stderr, "Error: Cannot stat %s\n", argv[argidx]);
+			exit (1);
+		}
+	}
 	
 	if (nthreads > 0) {
 		/* CASE: SEVERAL THREADS */
@@ -263,10 +271,10 @@ main (int argc, const char *argv[])
 		}
 
                 if (debug) {
-                	fprintf (stderr, "Read %.2f\n", mq.queue.d_d[TIME_READ]);
-                	fprintf (stderr, "Sort %.2f\n", mq.queue.d_d[TIME_SORT]);
-                	fprintf (stderr, "Collate %.2f\n", mq.queue.d_d[TIME_FF]);
-                	fprintf (stderr, "Merge %.2f\n", mq.queue.d_d[TIME_MERGE]);
+                	fprintf (stderr, "Read %.2f\n", mq.queue.tokens[TIME_READ].dval);
+                	fprintf (stderr, "Sort %.2f\n", mq.queue.tokens[TIME_SORT].dval);
+                	fprintf (stderr, "Collate %.2f\n", mq.queue.tokens[TIME_FF].dval);
+                	fprintf (stderr, "Merge %.2f\n", mq.queue.tokens[TIME_MERGE].dval);
                 }
 
                 maker_queue_release (&mq);
@@ -436,7 +444,7 @@ process (void *arg)
                         wordtable_empty (other);
                         other->wordlength = mq->wordlen;
                         mq->available[mq->navailable++] = other;
-                        mq->queue.d_d[TIME_MERGE] += d_t;
+                        mq->queue.tokens[TIME_MERGE].dval += d_t;
                         /* Release mutex */
                         mq->ntasks[TASK_MERGE] -= 1;
                         pthread_cond_broadcast (&mq->queue.cond);
@@ -467,9 +475,9 @@ process (void *arg)
                         pthread_mutex_lock (&mq->queue.mutex);
                         /* Add sorted table to sorted list */
                         mq->sorted[mq->nsorted++] = table;
-                        mq->queue.d_d[TIME_SORT] += d_t;
+                        mq->queue.tokens[TIME_SORT].dval += d_t;
                         d_t = e_t - s_t;
-                        mq->queue.d_d[TIME_FF] += d_t;
+                        mq->queue.tokens[TIME_FF].dval += d_t;
                         /* Release mutex */
                         mq->ntasks[TASK_SORT] -= 1;
                         pthread_cond_broadcast (&mq->queue.cond);
@@ -546,7 +554,7 @@ process (void *arg)
                                 mq->files = task;
                         }
                         mq->ntasks[TASK_READ] -= 1;
-                        mq->queue.d_d[TIME_READ] += d_t;
+                        mq->queue.tokens[TIME_READ].dval += d_t;
                         /* Release mutex */
                         pthread_cond_broadcast (&mq->queue.cond);
                         pthread_mutex_unlock (&mq->queue.mutex);
