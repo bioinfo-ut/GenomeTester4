@@ -34,6 +34,12 @@
  *
  */
 
+typedef union _QValue QValue;
+union _QValue {
+  unsigned long long lval;
+  double dval;
+};
+
 #define NUM_ID_TOKENS 32
 
 typedef struct _Queue Queue;
@@ -44,9 +50,17 @@ struct _Queue {
         pthread_mutex_t mutex;
         pthread_cond_t cond;
         /* Debug */
-        int i_d[NUM_ID_TOKENS];
-        double d_d[NUM_ID_TOKENS];
+        QValue tokens[NUM_ID_TOKENS];
 };
+
+/* Initialize/destroy mutexes and conds */
+/* Return 0 on success */
+unsigned int queue_init (Queue *queue);
+unsigned int queue_finalize (Queue *queue);
+unsigned int queue_lock (Queue *queue);
+unsigned int queue_unlock (Queue *queue);
+unsigned int queue_wait (Queue *queue);
+unsigned int queue_broadcast (Queue *queue);
 
 #define MAX_TABLES 256
 
@@ -95,6 +109,8 @@ struct _MakerQueue {
 void maker_queue_setup (MakerQueue *mq);
 void maker_queue_release (MakerQueue *mq);
 
+/* File parsing tasks */
+
 struct _TaskFile {
         TaskFile *next;
         const char *filename;
@@ -103,6 +119,19 @@ struct _TaskFile {
         unsigned int has_reader;
         FastaReader reader;
 };
+
+TaskFile *task_file_new (const char *filename);
+void task_file_delete (TaskFile *tf);
+/* Frontend to mmap and FastaReader */
+unsigned int task_file_read_nwords (TaskFile *tf, unsigned long long maxwords, unsigned int wordsize,
+	/* Called as soon as the full sequence name is known */
+	int (*start_sequence) (FastaReader *, void *),
+	/* Called when the full sequence has been parsed */
+	int (*end_sequence) (FastaReader *, void *),
+	int (*read_character) (FastaReader *, unsigned int character, void *),
+	int (*read_nucleotide) (FastaReader *, unsigned int nucleotide, void *),
+	int (*read_word) (FastaReader *, unsigned long long word, void *),
+	void *data);
 
 /* Add new file task to queue (not thread-safe) */
 void maker_queue_add_file (MakerQueue *mq, const char *filename);

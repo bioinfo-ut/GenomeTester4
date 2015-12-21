@@ -32,6 +32,8 @@
 #include "sequence.h"
 #include "queue.h"
 
+#define USE_SCOUTS use_scouts
+
 enum Rules {
   RULE_DEFAULT,
   RULE_ADD,
@@ -60,6 +62,8 @@ static void print_help (int exitvalue);
 #define MAX_FILES 1024
 
 int debug = 0;
+
+unsigned int use_scouts = 1;
 
 int main (int argc, const char *argv[])
 {
@@ -182,6 +186,8 @@ int main (int argc, const char *argv[])
 				fprintf (stderr, "Error: Invalid subset size: %s! Must be an integer.\n", argv[arg_idx]);
 				print_help (1);
 			}
+		} else if (!strcmp (argv[arg_idx], "--disable_scouts")) {
+			use_scouts = 0;
 		} else if (!strcmp (argv[arg_idx], "-D")) {
 			debug += 1;
 		} else {
@@ -199,7 +205,7 @@ int main (int argc, const char *argv[])
 		if (find_subset) {
 			wordmap *map;
 			char c[2048];
-			map = wordmap_new (fnames[0], 1);
+			map = wordmap_new (fnames[0], USE_SCOUTS);
 			if (!map) {
 				fprintf (stderr, "Error: Creating the wordmap failed!\n");
 				exit (1);
@@ -245,8 +251,8 @@ int main (int argc, const char *argv[])
 
 	if (nfiles == 2) {
 		wordmap *map1, *map2;
-		map1 = wordmap_new (fnames[0], 1);
-		map2 = wordmap_new (fnames[1], 1);
+		map1 = wordmap_new (fnames[0], USE_SCOUTS);
+		map2 = wordmap_new (fnames[1], USE_SCOUTS);
 		if (!map1 || !map2) {
 			fprintf (stderr, "Error: Creating the wordmap failed!\n");
 			exit (1);
@@ -271,7 +277,7 @@ int main (int argc, const char *argv[])
 		char c[2048];
 		for (i = 0; i < nfiles; i++) {
 			if (debug > 1) fprintf (stderr, "Trying to mmap %s\n", fnames[i]);
-			maps[i] = wordmap_new (fnames[i], 1);
+			maps[i] = wordmap_new (fnames[i], USE_SCOUTS);
 			if (debug > 1) fprintf (stderr, "Result %p\n", maps[i]);
 			if (!maps[i]) {
 				fprintf (stderr, "Error: Cannot mmap %s\n", fnames[i]);
@@ -911,6 +917,7 @@ print_help (int exit_value)
 	fprintf (stdout, "                               NOTE: rules min, subtract, first and second can only be used with finding the intersection.\n");
 	fprintf (stdout, "    -ss --subset METHOD SIZE - make subset with given method (rand_unique)\n");
 	fprintf (stdout, "    --count_only             - output count of k-mers instead of k-mers themself\n");
+	fprintf (stdout, "    --disable_scouts         - disable list read-ahead in background thread\n");
 	fprintf (stdout, "    -D                       - increase debug level\n");
 	exit (exit_value);
 }

@@ -237,7 +237,7 @@ wordtable_sort (wordtable *table, int sortfreqs)
 	if (table->nwords == 0) return;
 
 	/* calculate the number of shifted positions for making radix sort faster (no need to sort digits that are all zeros)*/
-	while (firstshift + 8 < table->wordlength * 2 && firstshift + 8 <= 64) {
+	while (firstshift + 8 < table->wordlength * 2) {
 		firstshift += 8;
 	}
 

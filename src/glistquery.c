@@ -52,6 +52,8 @@ void print_help (int exitvalue);
 
 int debug = 0;
 
+unsigned int use_scouts = 1;
+
 int main (int argc, const char *argv[])
 {
 
@@ -171,6 +173,8 @@ int main (int argc, const char *argv[])
 			printall = 1;
 		} else if (!strcmp(argv[argidx], "-stat")) {	
 			getstat = 1;
+		} else if (!strcmp(argv[argidx], "--disable_scouts")) {	
+			use_scouts = 0;
 		} else {
 			fprintf(stderr, "Error: Unknown argument: %s!\n", argv[argidx]);
 			print_help (1);
@@ -200,7 +204,7 @@ int main (int argc, const char *argv[])
 		print_help (1);	  
 	}
 
-	map = wordmap_new (listfilename, !getstat);
+	map = wordmap_new (listfilename, !getstat && use_scouts);
 	if (!map) {
 		fprintf (stderr, "Error: Could not make wordmap from file %s!\n", listfilename);
 		return 1;
@@ -346,7 +350,7 @@ int search_list (wordmap *map, const char *querylistfilename, parameters *p, uns
 	unsigned long long i, word = 0L;
 	unsigned int freq;
 	
-	qmap = wordmap_new (querylistfilename, 1);
+	qmap = wordmap_new (querylistfilename, use_scouts);
 	
 	if (map->header->wordlength != qmap->header->wordlength) return GT_INCOMPATIBLE_WORDLENGTH_ERROR;
 	

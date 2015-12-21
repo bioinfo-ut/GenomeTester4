@@ -22,7 +22,57 @@
  */
 
 #include <string.h>
+#include <sys/mman.h>
+
+#include "utils.h"
 #include "queue.h"
+
+/* Initialize/destroy mutexes and conds */
+/* Return 0 on success */
+
+unsigned int
+queue_init (Queue *queue)
+{
+  pthread_mutex_init (&queue->mutex, NULL);
+  pthread_cond_init (&queue->cond, NULL);
+  return 0;
+}
+
+unsigned int
+queue_finalize (Queue *queue)
+{
+  pthread_cond_destroy (&queue->cond);
+  pthread_mutex_destroy (&queue->mutex);
+  return 0;
+}
+
+unsigned int
+queue_lock (Queue *queue)
+{
+  pthread_mutex_lock (&queue->mutex);
+  return 0;
+}
+
+unsigned int
+queue_unlock (Queue *queue)
+{
+  pthread_mutex_unlock (&queue->mutex);
+  return 0;
+}
+
+unsigned int
+queue_wait (Queue *queue)
+{
+  pthread_cond_wait (&queue->cond, &queue->mutex);
+  return 0;
+}
+
+unsigned int
+queue_broadcast (Queue *queue)
+{
+  pthread_cond_broadcast (&queue->cond);
+  return 0;
+}
 
 void
 maker_queue_setup (MakerQueue *mq)
@@ -167,4 +217,55 @@ delete_scouts () {
   finish = 1;
 }
 
+/* File parsing tasks */
+
+TaskFile *
+task_file_new (const char *filename)
+{
+  TaskFile *tf = (TaskFile *) malloc (sizeof (TaskFile));
+  memset (tf, 0, sizeof (TaskFile));
+  tf->filename = filename;
+  return tf;
+}
+
+void
+task_file_delete (TaskFile *tf)
+{
+  if (tf->has_reader) {
+    fasta_reader_release (&tf->reader);
+  }
+  if (tf->cdata) {
+    munmap ((void *) tf->cdata, tf->csize);
+  }
+  free (tf);
+}
+
+/* Frontend to mmap and FastaReader */
+
+unsigned int
+task_file_read_nwords (TaskFile *tf, unsigned long long maxwords, unsigned int wordsize,
+  /* Called as soon as the full sequence name is known */
+  int (*start_sequence) (FastaReader *, void *),
+  /* Called when the full sequence has been parsed */
+  int (*end_sequence) (FastaReader *, void *),
+  int (*read_character) (FastaReader *, unsigned int character, void *),
+  int (*read_nucleotide) (FastaReader *, unsigned int nucleotide, void *),
+  int (*read_word) (FastaReader *, unsigned long long word, void *),
+  void *data)
+{
+  if (!tf->cdata) {
+    size_t csize;
+    tf->cdata = (const unsigned char *) mmap_by_filename ((const char *) tf->filename, &csize);
+    if (!tf->cdata) {
+      fprintf (stderr, "Cannot mmap %s\n", tf->filename);
+      return 1;
+    }
+    tf->csize = csize;
+    scout_mmap (tf->cdata, tf->csize);
+    fasta_reader_init_from_data (&tf->reader, wordsize, 1, tf->cdata, tf->csize);
+    tf->has_reader = 1;
+  }
+  fasta_reader_read_nwords (&tf->reader, maxwords, start_sequence, end_sequence, read_character, read_nucleotide, read_word, data);
+  return 0;
+}
 
