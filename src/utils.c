@@ -170,3 +170,46 @@ get_time (void)
 	double dtval = (tv.tv_sec + tv.tv_usec / 1000000.0);
 	return dtval;
 }
+
+unsigned int
+split_line (const unsigned char *cdata, unsigned long long csize, const unsigned char *tokenz[], unsigned int lengths[], unsigned int max_tokens)
+{
+  unsigned int i = 0;
+  unsigned long long s = 0;
+  while ((i < max_tokens) && (cdata[s] != '\n')) {
+    unsigned long long e = s;
+    tokenz[i] = cdata + s;
+    while ((e < csize) && (cdata[e] >= ' ')) e += 1;
+    lengths[i] = e - s;
+    i += 1;
+    s = e + 1;
+  }
+  return i;
+}
+
+unsigned int
+number_to_binary (char buf[], unsigned long long number, unsigned int ndigits)
+{
+  unsigned int pos;
+  if (!ndigits == 0) {
+    if (number) {
+      unsigned long long tmp = number;
+      while (tmp) {
+        ndigits += 1;
+        tmp = tmp >> 1;
+      }
+    } else {
+      ndigits = 1;
+    }
+  } else if (ndigits > 64) {
+    ndigits = 64;
+  }
+  buf[ndigits + 1] = 0;
+  pos = ndigits;
+  while (pos) {
+    buf[pos] = '0' + (char) (number & 1);
+    number = number >> 1;
+    pos -= 1;
+  }
+  return ndigits;
+}

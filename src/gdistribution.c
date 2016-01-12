@@ -27,6 +27,7 @@
 
 #include <malloc.h>
 #include <stdio.h>
+#include <stdlib.h>
 
 #include "wordmap.h"
 
@@ -41,20 +42,30 @@ typedef struct {
 
 static void get_distribution (wordmap *maps[2]);
 
+static void
+print_usage (FILE *ofs) {
+  fprintf (ofs, "gdistribution LIST LIST2\n");
+}
+
 int
 main (int argc, const char *argv[])
 {
   const char *names[2];
   wordmap *maps[2];
   Freq *freqs;
+  
+  if (argc < 3) {
+    print_usage (stderr);
+    exit (1);
+  }
 
   names[0] = argv[1];
   names[1] = argv[2];
 
   if (debug) fprintf (stderr, "%s %s\n", names[0], names[1]);
   
-  maps[0] = wordmap_new (names[0]);
-  maps[1] = wordmap_new (names[1]);
+  maps[0] = wordmap_new (names[0], 1);
+  maps[1] = wordmap_new (names[1], 1);
   
   get_distribution (maps);
   
@@ -70,11 +81,12 @@ static int compare (const void *lhs, const void *rhs) {
 static void
 get_distribution (wordmap *maps[2])
 {
-  unsigned int size, i0, i1, j, fidx, count;
+  unsigned long long size, i0, i1, fidx;
+  unsigned int j, count;
   float *flist, current;
   
   size = maps[0]->header->nwords + maps[1]->header->nwords;
-  if (debug) fprintf (stderr, "Total size %u\n", size);
+  if (debug) fprintf (stderr, "Total size %llu\n", size);
   flist = (float *) malloc (size * sizeof (float));
 
   i0 = 0;
@@ -101,7 +113,7 @@ get_distribution (wordmap *maps[2])
       i1 += 1;
     }
   }
-  if (debug) fprintf (stderr, "Size %u\n", fidx);
+  if (debug) fprintf (stderr, "Size %llu\n", fidx);
   if (fidx == 0) {
     return;
   }

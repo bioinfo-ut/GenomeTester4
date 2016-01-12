@@ -38,4 +38,13 @@ void hybridInPlaceRadixSort256 (unsigned long long *begin, unsigned long long *e
 
 double get_time (void);
 
+/* Split line into tokens */
+/* Line ends with \n (or at csize), tokens end with \t */
+/* Return number of tokens */
+unsigned int split_line (const unsigned char *cdata, unsigned long long csize, const unsigned char *tokenz[], unsigned int lengths[], unsigned int max_tokens);
+
+/* Print number as binary with given number of digits (0 - start from leftmost 1) */
+/* Returns the length of string (not counting terminating 0) */
+unsigned int number_to_binary (char buf[], unsigned long long number, unsigned int ndigits);
+
 #endif /* UTILS_H_ */

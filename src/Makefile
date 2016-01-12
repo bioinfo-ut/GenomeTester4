@@ -50,8 +50,8 @@ LISTCOMPARE_SOURCES = \
 	queue.c queue.h \
 	utils.c
 
-SNPCALLER_SOURCES = \
-	snpcaller.c \
+GMERCOUNTER_SOURCES = \
+	gmercounter.c \
 	trie.c trie.h \
 	wordmap.c wordmap.h \
 	sequence.c sequence.h \
@@ -59,7 +59,17 @@ SNPCALLER_SOURCES = \
 	fasta.c fasta.h \
 	thread-pool.c thread-pool.h \
 	queue.c queue.h \
-	utils.c utils.h
+	utils.c utils.h \
+	database.c database.h
+
+GDISTRIBUTION_SOURCES = \
+	gdistribution.c \
+	wordmap.c wordmap.h \
+	wordtable.c wordtable.h \
+	utils.c utils.h \
+	queue.c queue.h \
+	fasta.c fasta.h \
+	sequence.c sequence.h
 
 NIPT_SOURCES = \
 	binomial.c binomial.h \
@@ -92,9 +102,12 @@ glistquery: $(LISTQUERY_SOURCES)
 glistcompare: $(LISTCOMPARE_SOURCES)
 	$(CXX) $(LISTCOMPARE_SOURCES) -o glistcompare $(LIBS) $(CXXFLAGS)
 
-snpcaller: $(SNPCALLER_SOURCES)
-	$(CXX) $(SNPCALLER_SOURCES) -o snpcaller $(LIBS) $(DEBUGFLAGS) -Wall
+gmercounter: $(GMERCOUNTER_SOURCES)
+	$(CXX) $(GMERCOUNTER_SOURCES) -o gmercounter $(LIBS) $(DEBUGFLAGS) -Wall
 
+gdistribution: $(GDISTRIBUTION_SOURCES)
+	$(CXX) $(GDISTRIBUTION_SOURCES) -o gdistribution $(LIBS) $(DEBUGFLAGS) -Wall
+	
 nipt: $(NIPT_SOURCES)
 	$(CXX) $(NIPT_SOURCES) -o nipt $(LIBS) $(DEBUGFLAGS) -Wall
 	
