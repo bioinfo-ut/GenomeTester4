@@ -21,13 +21,17 @@ struct _KMerDB {
   unsigned int wordsize;
   unsigned int node_bits;
   unsigned int kmer_bits;
+  unsigned int count_bits;
   unsigned long long n_nodes;
   unsigned long long n_kmers;
   unsigned long long names_size;
   /* Table of nodes */
   Node *nodes;
   /* Table of kmer counts */
-  unsigned short *kmers;
+  union {
+    unsigned short *kmers_16;
+    unsigned int *kmers_32;
+  };
   /* Table of names */
   char *names;
   /* Trie mapping kmers to nodes/counts */
@@ -35,7 +39,7 @@ struct _KMerDB {
 };
 
 /* Return number of nodes successfully read */
-unsigned int read_db_from_text (KMerDB *db, const unsigned char *cdata, unsigned long long csize, unsigned int max_kmers_per_node);
+unsigned int read_db_from_text (KMerDB *db, const unsigned char *cdata, unsigned long long csize, unsigned int max_kmers_per_node, unsigned int count_bits);
 
 /*
  * Binary representation
@@ -57,7 +61,7 @@ unsigned int read_db_from_text (KMerDB *db, const unsigned char *cdata, unsigned
 */
 
 /* Return number of bytes written */
-unsigned int write_db_to_file (KMerDB *db, FILE *ofs);
+unsigned int write_db_to_file (KMerDB *db, FILE *ofs, unsigned int kmers);
 
 unsigned int read_database_from_binary (KMerDB *db, const unsigned char *cdata, unsigned long long csize);
 

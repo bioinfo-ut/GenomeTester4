@@ -128,7 +128,7 @@ unsigned long long string_to_word (const char *s, unsigned int wordlength)
 	l = (wordlength < 32) ? wordlength : 32;
 	for (i = 0; i < l; i++) {
 		if (strchr (alphabet, s[i]) == NULL) {
-			fprintf (stderr, "Invalid character string!\n");
+			fprintf (stderr, "Invalid character %c in string!\n", s[i]);
 		}
 		word <<= 2;
 		word |= get_nucl_value (s[i]);

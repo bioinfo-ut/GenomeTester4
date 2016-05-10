@@ -24,6 +24,7 @@
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
+#include <stdio.h>
 #include <pthread.h>
 
 #include "wordtable.h"
@@ -114,13 +115,17 @@ void maker_queue_release (MakerQueue *mq);
 struct _TaskFile {
         TaskFile *next;
         const char *filename;
+        FILE *ifs;
+        unsigned int close_on_delete;
         const unsigned char *cdata;
         unsigned long long csize;
+        unsigned int scout;
         unsigned int has_reader;
         FastaReader reader;
 };
 
-TaskFile *task_file_new (const char *filename);
+TaskFile *task_file_new (const char *filename, unsigned int scout);
+TaskFile *task_file_new_from_stream (FILE *ifs, const char *filename, unsigned int close_on_delete);
 void task_file_delete (TaskFile *tf);
 /* Frontend to mmap and FastaReader */
 unsigned int task_file_read_nwords (TaskFile *tf, unsigned long long maxwords, unsigned int wordsize,

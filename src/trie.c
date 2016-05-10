@@ -176,10 +176,11 @@ trie_allocate_branch (Trie *trie, unsigned int aidx)
       idx = 0;
     }
     if (!trie->branches[block]) {
-      /* fprintf (stderr, "trie_allocate_branch: new block %llu\n", block); */
       trie->branches[block] = (TrieNodeBranch *) malloc (TRIE_BLOCK_SIZE * sizeof (TrieNodeBranch));
     }
     trie->allocators[aidx].next = block * TRIE_BLOCK_SIZE + idx;
+    /* Skip zero address that is reserved for empty ref */
+    if (!block && !idx) trie->allocators[aidx].next += 1;
     trie->nbranches += ALLOCATOR_BLOCK_SIZE;
     pthread_mutex_unlock (&trie->mutex);
   }

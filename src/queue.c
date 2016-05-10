@@ -220,11 +220,23 @@ delete_scouts () {
 /* File parsing tasks */
 
 TaskFile *
-task_file_new (const char *filename)
+task_file_new (const char *filename, unsigned int scout)
 {
   TaskFile *tf = (TaskFile *) malloc (sizeof (TaskFile));
   memset (tf, 0, sizeof (TaskFile));
   tf->filename = filename;
+  tf->scout = scout;
+  return tf;
+}
+
+TaskFile *
+task_file_new_from_stream (FILE *ifs, const char *filename, unsigned int close_on_delete)
+{
+  TaskFile *tf = (TaskFile *) malloc (sizeof (TaskFile));
+  memset (tf, 0, sizeof (TaskFile));
+  tf->filename = filename;
+  tf->ifs = ifs;
+  tf->close_on_delete = close_on_delete;
   return tf;
 }
 
@@ -236,6 +248,9 @@ task_file_delete (TaskFile *tf)
   }
   if (tf->cdata) {
     munmap ((void *) tf->cdata, tf->csize);
+  }
+  if (tf->close_on_delete) {
+    fclose (tf->ifs);
   }
   free (tf);
 }
@@ -253,16 +268,20 @@ task_file_read_nwords (TaskFile *tf, unsigned long long maxwords, unsigned int w
   int (*read_word) (FastaReader *, unsigned long long word, void *),
   void *data)
 {
-  if (!tf->cdata) {
-    size_t csize;
-    tf->cdata = (const unsigned char *) mmap_by_filename ((const char *) tf->filename, &csize);
-    if (!tf->cdata) {
-      fprintf (stderr, "Cannot mmap %s\n", tf->filename);
-      return 1;
+  if (!tf->has_reader) {
+    if (tf->ifs) {
+      fasta_reader_init_from_file (&tf->reader, wordsize, 1, tf->ifs);
+    } else if (!tf->cdata) {
+      size_t csize;
+      tf->cdata = (const unsigned char *) mmap_by_filename ((const char *) tf->filename, &csize);
+      if (!tf->cdata) {
+        fprintf (stderr, "Cannot mmap %s\n", tf->filename);
+        return 1;
+      }
+      tf->csize = csize;
+      if (tf->scout) scout_mmap (tf->cdata, tf->csize);
+      fasta_reader_init_from_data (&tf->reader, wordsize, 1, tf->cdata, tf->csize);
     }
-    tf->csize = csize;
-    scout_mmap (tf->cdata, tf->csize);
-    fasta_reader_init_from_data (&tf->reader, wordsize, 1, tf->cdata, tf->csize);
     tf->has_reader = 1;
   }
   fasta_reader_read_nwords (&tf->reader, maxwords, start_sequence, end_sequence, read_character, read_nucleotide, read_word, data);

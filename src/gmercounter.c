@@ -18,7 +18,7 @@
 #define MAX_FILESIZE 10000000000
 
 #define BLOCK_SIZE (1024 * 1024 * 10)
-#define DEFAULT_NUM_THREADS 16
+#define DEFAULT_NUM_THREADS 24
 #define DEFAULT_NUM_TABLES 24
 
 #define MAX_KMERS 25
@@ -53,21 +53,26 @@ struct _SNPQueue {
 /* Main thread loop */
 static void *process (void *arg);
 static int read_word_2 (FastaReader *reader, unsigned long long word, void *data);
-static unsigned int get_double_median (KMerDB *db);
+static int compare_counts (const void *lhs, const void *rhs);
+static unsigned int get_pair_median (KMerDB *db);
 
 static void
 print_usage (FILE *ofs) {
   fprintf (ofs, "Usage:\n");
-  fprintf (ofs, "  snpcaller ARGUMENTS SEQUENCES...\n");
+  fprintf (ofs, "  gmer_counter ARGUMENTS SEQUENCES...\n");
   fprintf (ofs, "Arguments:\n");
   fprintf (ofs, "    -db DATABASE     - SNP/KMER database file\n");
   fprintf (ofs, "    -dbb DBBINARY    - binary database file\n");
   fprintf (ofs, "    -w FILENAME      - write binary database to file\n");
+  fprintf (ofs, "    -32              - use 32-bit integeres for counts (default 16-bit)\n");
   fprintf (ofs, "    --max_kmers NUM  - maximum number of kmers per node\n");
   fprintf (ofs, "    --header         - print header row\n");
   fprintf (ofs, "    --total          - print the total number of kmers per node\n");
   fprintf (ofs, "    --unique         - print the number of nonzero kmers per node\n");
   fprintf (ofs, "    --kmers          - print individual kmer counts (default if no other output)\n");
+  fprintf (ofs, "    --distribution NUM  - print kmer distribution (up to given number)\n");
+  fprintf (ofs, "    --num_threads    - number of worker threads (default %u)\n", DEFAULT_NUM_THREADS);
+  fprintf (ofs, "    --low_memory     - optimize for low memory usage\n");
   fprintf (ofs, "    -D               - increase debug level\n");
 }
 
@@ -78,8 +83,8 @@ main (int argc, const char *argv[])
   const char *dbb = NULL;
   const char *wdb = NULL;
   unsigned int max_kmers_per_node = 1000000000;
-  unsigned int header = 0, total = 0, unique = 0, kmers = 0;
-  unsigned int double_median = 0;
+  unsigned int header = 0, total = 0, unique = 0, kmers = 0, distro = 0, big = 0, dm = 0;
+  unsigned int lowmem = 0;
   unsigned int nseqs = 0;
   const char *seqnames[1024];
   unsigned long long i;
@@ -131,8 +136,26 @@ main (int argc, const char *argv[])
       unique = 1;
     } else if (!strcmp (argv[i], "--kmers")) {
       kmers = 1;
+    } else if (!strcmp (argv[i], "-32")) {
+      big = 1;
     } else if (!strcmp (argv[i], "--double_median")) {
-      double_median = 1;
+      dm = 1;
+    } else if (!strcmp (argv[i], "--distribution")) {
+      i += 1;
+      if (i >= argc) {
+        print_usage (stderr);
+        exit (1);
+      }
+      distro = strtol (argv[i], NULL, 10);
+    } else if (!strcmp (argv[i], "--num_threads")) {
+      i += 1;
+      if (i >= argc) {
+        print_usage (stderr);
+        exit (1);
+      }
+      nthreads = strtol (argv[i], NULL, 10);
+    } else if (!strcmp (argv[i], "--low_memory")) {
+      lowmem = 1;
     } else if (!strcmp (argv[i], "-D")) {
       /* Debug */
       debug += 1;
@@ -160,8 +183,11 @@ main (int argc, const char *argv[])
     print_usage (stderr);
     exit (1);
   }
-  if (!total && !unique) {
+  if (!total && !unique && !distro) {
     kmers = 1;
+  }
+  if (distro > 65536) {
+    distro = 65536;
   }
 
   memset (&db, 0, sizeof db);
@@ -175,7 +201,11 @@ main (int argc, const char *argv[])
       fprintf (stderr, "Cannot mmap database file %s\n", db_name);
       exit (1);
     }
-    read_db_from_text (&db, cdata, csize, max_kmers_per_node);
+    if (!lowmem) scout_mmap (cdata, csize);
+    if (!read_db_from_text (&db, cdata, csize, max_kmers_per_node, (big) ? 32 : 16)) {
+      fprintf (stderr, "Cannot read text database %s\n", dbb);
+      exit (1);
+    }
   }
 
   if (dbb) {
@@ -189,8 +219,11 @@ main (int argc, const char *argv[])
       fprintf (stderr, "Cannot mmap %s\n", dbb);
       exit (1);
     }
-    scout_mmap (cdata, csize);
-    read_database_from_binary (&db, cdata, csize);
+    if (!lowmem) scout_mmap (cdata, csize);
+    if (!read_database_from_binary (&db, cdata, csize)) {
+      fprintf (stderr, "Cannot read binary database %s\n", dbb);
+      exit (1);
+    }
     if (debug) fprintf (stderr, "Finished loading binary database\n");
   }
 
@@ -205,7 +238,7 @@ main (int argc, const char *argv[])
       fprintf (stderr, "Cannot open %s for writing\n", wdb);
       exit (1);
     }
-    write_db_to_file (&db, ofs);
+    write_db_to_file (&db, ofs, 0);
     fclose (ofs);
     if (debug) {
       fprintf (stderr, "Done\n");
@@ -218,7 +251,12 @@ main (int argc, const char *argv[])
     memset (&snpq, 0, sizeof (snpq));
     snpq.db = &db;
     for (i = 0; i < nseqs; i++) {
-      TaskFile *tf = task_file_new (seqnames[i]);
+      TaskFile *tf;
+      if (!strcmp (seqnames[i], "-")) {
+        tf = task_file_new_from_stream (stdin, seqnames[i], 0);
+      } else {
+        tf = task_file_new (seqnames[i], !lowmem);
+      }
       tf->next = snpq.files;
       snpq.files = tf;
       snpq.nfiles += 1;
@@ -255,17 +293,18 @@ main (int argc, const char *argv[])
       fprintf (stderr, "Finished reading files\n");
     }
     
+    if (dm) {
+      unsigned int med = get_pair_median (&db);
+      fprintf (stdout, "#PairMedian\t%u\n", med);
+    }
+    
     if (header) {
       fprintf (stdout, "NODE\tN_KMERS");
       if (total) fprintf (stdout, "\tTOTAL");
       if (unique) fprintf (stdout, "\tUNIQUE");
       if (kmers) fprintf (stdout, "\tKMERS");
+      if (distro) fprintf (stdout, "\tDISTRIBUTION");
       fprintf (stdout, "\n");
-    }
-  
-    if (double_median) {
-      unsigned int med = get_double_median (&db);
-      fprintf (stdout, "PairMedian\t%u\n", med);
     }
   
     for (i = 0; i < db.n_nodes; i++) {
@@ -274,20 +313,59 @@ main (int argc, const char *argv[])
       if (total) {
         unsigned long long total = 0;
         for (j = 0; j < db.nodes[i].nkmers; j++) {
-          total += db.kmers[db.nodes[i].kmers + j];
+          if (db.count_bits == 16) {
+            total += db.kmers_16[db.nodes[i].kmers + j];
+          } else {
+            total += db.kmers_32[db.nodes[i].kmers + j];
+          }
         }
         fprintf (stdout, "\t%llu", total);
       }
       if (unique) {
         unsigned int uniq = 0;
         for (j = 0; j < db.nodes[i].nkmers; j++) {
-          if (db.kmers[db.nodes[i].kmers + j]) uniq += 1;
+          if (db.count_bits == 16) {
+            if (db.kmers_16[db.nodes[i].kmers + j]) uniq += 1;
+          } else {
+            if (db.kmers_16[db.nodes[i].kmers + j]) uniq += 1;
+          }
         }
         fprintf (stdout, "\t%u", uniq);
       }
       if (kmers) {
         for (j = 0; j < db.nodes[i].nkmers; j++) {
-          fprintf (stdout, "\t%u", db.kmers[db.nodes[i].kmers + j]);
+          if (db.count_bits == 16) {
+            fprintf (stdout, "\t%u", db.kmers_16[db.nodes[i].kmers + j]);
+          } else {
+            fprintf (stdout, "\t%u", db.kmers_32[db.nodes[i].kmers + j]);
+          }
+        }
+      }
+      if (distro) {
+        static unsigned int c_len = 0;
+        static unsigned int *c = NULL;
+        if (c_len < db.nodes[i].nkmers) {
+          c_len = c_len << 1;
+          if (c_len < db.nodes[i].nkmers) c_len = db.nodes[i].nkmers;
+          c = (unsigned int *) realloc (c, c_len * 4);
+        }
+        unsigned int current, count;
+        if (db.count_bits == 16) {
+          for (j = 0; j < db.nodes[i].nkmers; j++) c[j] = db.kmers_16[db.nodes[i].kmers + j];
+        } else {
+          memcpy (c, db.kmers_32 + db.nodes[i].kmers, db.nodes[i].nkmers * 4);
+        }
+        qsort (c, db.nodes[i].nkmers, 4, compare_counts);
+        current = 0;
+        j = 0;
+        while (current <= distro) {
+          count = 0;
+          while ((j < db.nodes[i].nkmers) && (c[j] == current)) {
+            count += 1;
+            j += 1;
+          }
+          fprintf (stdout, "\t%u", count);
+          current += 1;
         }
       }
       fprintf (stdout, "\n");
@@ -336,21 +414,6 @@ process (void *arg)
         exit (1);
       }
       if (debug > 1) fprintf (stderr, "Thread %d: finished reading %s at %llu\n", idx, tf->filename, tf->reader.cpos);
-#if 0
-      if (!tf->cdata) {
-        size_t csize;
-        tf->cdata = (const unsigned char *) mmap_by_filename ((const char *) tf->filename, &csize);
-        if (!tf->cdata) {
-          fprintf (stderr, "Cannot mmap %s\n", tf->filename);
-          exit (1);
-        }
-        tf->csize = csize;
-        scout_mmap (tf->cdata, tf->csize);
-        fasta_reader_init_from_data (&tf->reader, snpq->db->wordsize, 1, tf->cdata, (tf->csize <= MAX_FILESIZE) ? tf->csize : MAX_FILESIZE);
-        tf->has_reader = 1;
-      }
-      fasta_reader_read_nwords (&tf->reader, BLOCK_SIZE, NULL, NULL, NULL, NULL, read_word_2, tt);
-#endif
       pthread_mutex_lock (&snpq->queue.mutex);
       if (tf->reader.in_eof) {
         task_file_delete (tf);
@@ -395,7 +458,11 @@ process (void *arg)
           fprintf (stderr, "DB inconsistency: KMer index %u is bigger than the number of kmers %u\n", kmer, db->nodes[node].nkmers);
           break;
         }
-        db->kmers[db->nodes[node].kmers + kmer] += 1;
+        if (db->count_bits == 16) {
+          if (db->kmers_16[db->nodes[node].kmers + kmer] < 65535) db->kmers_16[db->nodes[node].kmers + kmer] += 1;
+        } else {
+          if (db->kmers_32[db->nodes[node].kmers + kmer] < 0xffffffff) db->kmers_32[db->nodes[node].kmers + kmer] += 1;
+        }
       }
       tt->next = snpq->free_tables;
       snpq->free_tables = tt;
@@ -433,36 +500,53 @@ read_word_2 (FastaReader *reader, unsigned long long word, void *data)
   return 0;
 }
 
+static int
+compare_counts (const void *lhs, const void *rhs) {
+  if (*((unsigned int *) lhs) < *((unsigned int *) rhs)) return -1;
+  if (*((unsigned int *) lhs) == *((unsigned int *) rhs)) return 0;
+  return 1;
+}
+
 static unsigned int
-get_double_median (KMerDB *db)
+get_pair_median (KMerDB *db)
 {
-  unsigned long long n_paired_kmers, i;
-  unsigned int max, min, med;
-  n_paired_kmers = db->n_kmers & 0xfffffffffffffffe;
-  /* Find max and min */
+  unsigned long long i;
+  unsigned int total, min, max, med, j;
+
   max = 0;
-  min = 1000000;
-  for (i = 0; i < n_paired_kmers; i += 2) {
-    unsigned int sum = db->kmers[i] + db->kmers[i + 1];
-    if (sum > max) max = sum;
-    if (sum < min) min = sum;
+  min = 0xffffffff;
+  total = 0;
+  for (i = 0; i < db->n_nodes; i++) {
+    total += db->nodes[i].nkmers / 2;
+    for (j = 0; j < db->nodes[i].nkmers; j += 2) {
+      unsigned int sum;
+      if (db->count_bits == 16) {
+        sum = db->kmers_16[db->nodes[i].kmers + j] + db->kmers_16[db->nodes[i].kmers + j + 1];
+      } else {
+        sum = db->kmers_32[db->nodes[i].kmers + j] + db->kmers_32[db->nodes[i].kmers + j + 1];
+      }
+      if (sum > max) max = sum;
+      if (sum < min) min = sum;
+    }
   }
   med = (min + max) / 2;
-  /* Iterate */
   while (max > min) {
-    unsigned long long above, below, equal;
-    above = 0;
-    below = 0;
-    equal = 0;
-    for (i = 0; i < n_paired_kmers; i += 2) {
-      unsigned int sum = db->kmers[i] + db->kmers[i + 1];
-      if (sum > med) above += 1;
-      if (sum < med) below += 1;
+    unsigned int above = 0, below = 0, equal;
+    for (i = 0; i < db->n_nodes; i++) {
+      for (j = 0; j < db->nodes[i].nkmers; j += 2) {
+        unsigned int sum;
+        if (db->count_bits == 16) {
+          sum = db->kmers_16[db->nodes[i].kmers + j] + db->kmers_16[db->nodes[i].kmers + j + 1];
+        } else {
+          sum = db->kmers_32[db->nodes[i].kmers + j] + db->kmers_32[db->nodes[i].kmers + j + 1];
+        }
+        if (sum > med) above += 1;
+        if (sum < med) below += 1;
+      }
     }
-    equal = n_paired_kmers / 2 - above - below;
-    if (debug > 1) {
-      fprintf (stderr, "Min %u med %u max %u, below %llu, equal %llu, above %llu\n", min, med, max, below, equal, above);
-    }
+
+    equal = total - above - below;
+    if (debug > 1) fprintf (stderr, "Trying median %u (%u) - equal %u, below %u, above %u\n", med / 6, med, equal, below, above);
     /* Special case: min == med, max == med + 1 */
     if (max == (min + 1)) {
       if (above > (below + equal)) {
@@ -474,18 +558,16 @@ get_double_median (KMerDB *db)
     if (above > below) {
       if ((above - below) < equal) break;
       min = med;
-      med = (min + max) / 2;
     } else if (below > above) {
       if ((below - above) < equal) break;
       max = med;
-      med = (min + max) / 2;
     } else {
       break;
     }
+    med = (min + max) / 2;
   }
   return med;
 }
-
 
 TaskTable *
 task_table_new ()

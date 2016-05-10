@@ -71,15 +71,17 @@ GDISTRIBUTION_SOURCES = \
 	fasta.c fasta.h \
 	sequence.c sequence.h
 
-NIPT_SOURCES = \
+GMER_CALLER_SOURCES = \
 	binomial.c binomial.h \
+	genotypes.c genotypes.h \
 	simplex.c simplex.h \
+	thread-pool.c thread-pool.h \
 	utils.c utils.h \
-	nipt.c
+	gmer_caller.c
 
 RELEASEFLAGS = -O3
 DEBUGFLAGS = -O0 -g
-LIBS = -lm -lpthread
+LIBS = -lm -lpthread -lrt
 INCS = -I.
 BINS  = glistmaker glistquery glistcompare
 
@@ -102,14 +104,14 @@ glistquery: $(LISTQUERY_SOURCES)
 glistcompare: $(LISTCOMPARE_SOURCES)
 	$(CXX) $(LISTCOMPARE_SOURCES) -o glistcompare $(LIBS) $(CXXFLAGS)
 
-gmercounter: $(GMERCOUNTER_SOURCES)
-	$(CXX) $(GMERCOUNTER_SOURCES) -o gmercounter $(LIBS) $(DEBUGFLAGS) -Wall
+gmer_counter: $(GMERCOUNTER_SOURCES)
+	$(CXX) $(GMERCOUNTER_SOURCES) -o gmer_counter $(LIBS) $(CXXFLAGS) -Wall
 
 gdistribution: $(GDISTRIBUTION_SOURCES)
 	$(CXX) $(GDISTRIBUTION_SOURCES) -o gdistribution $(LIBS) $(DEBUGFLAGS) -Wall
 	
-nipt: $(NIPT_SOURCES)
-	$(CXX) $(NIPT_SOURCES) -o nipt $(LIBS) $(DEBUGFLAGS) -Wall
+gmer_caller: $(GMER_CALLER_SOURCES)
+	$(CXX) $(GMER_CALLER_SOURCES) -o gmer_caller $(LIBS) $(CXXFLAGS) -Wall
 	
 clean: clean-custom
 	rm -f *.o $(BINS)

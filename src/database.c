@@ -37,6 +37,7 @@ count_lines_from_text (const unsigned char *cdata, size_t csize, unsigned int *w
     ntokenz = split_line (cdata + cpos, csize - cpos, tokenz, lengths, 3);
     if (ntokenz < 2) {
       fprintf (stderr, "Line %u has <2 (%u) tokens\n", n_lines, ntokenz);
+      n_lines = 0;
       break;
     }
     if (n_lines == 0) {
@@ -77,7 +78,7 @@ get_bits (unsigned int value) {
 }
 
 unsigned int
-read_db_from_text (KMerDB *db, const unsigned char *cdata, unsigned long long csize, unsigned int max_kmers_per_node)
+read_db_from_text (KMerDB *db, const unsigned char *cdata, unsigned long long csize, unsigned int max_kmers_per_node, unsigned int count_bits)
 {
   unsigned long long cpos, last, div;
   unsigned int nlines, wordsize, n_kmers, max_kmers, names_size;
@@ -92,6 +93,10 @@ read_db_from_text (KMerDB *db, const unsigned char *cdata, unsigned long long cs
   if (debug) {
     fprintf (stderr, "Lines %u wordisze %u kmers %u (max per node %u) name size %u\n", nlines, wordsize, n_kmers, max_kmers, names_size);
   }
+  if (!nlines) {
+    fprintf (stderr, "File is not text-format kmer database (maybe binary?)\n");
+    return 0;
+  }
   if (max_kmers > max_kmers_per_node) {
     max_kmers = max_kmers_per_node;
   }
@@ -99,12 +104,18 @@ read_db_from_text (KMerDB *db, const unsigned char *cdata, unsigned long long cs
   db->wordsize = wordsize;
   db->node_bits = get_bits (nlines + 1);
   db->kmer_bits = get_bits (max_kmers);
+  db->count_bits = count_bits;
   db->n_nodes = 0;
   db->nodes = (Node *) malloc (nlines * sizeof (Node));
   memset (db->nodes, 0, nlines * sizeof (Node));
   db->n_kmers = n_kmers;
-  db->kmers = (unsigned short *) malloc (n_kmers * 2);
-  memset (db->kmers, 0, n_kmers * 2);
+  if (count_bits == 16) {
+    db->kmers_16 = (unsigned short *) malloc (n_kmers * 2);
+    memset (db->kmers_16, 0, n_kmers * 2);
+  } else {
+    db->kmers_32 = (unsigned int *) malloc (n_kmers * 4);
+    memset (db->kmers_32, 0, n_kmers * 4);
+  }
   db->names_size = names_size;
   db->names = (char *) malloc (names_size);
   memset (db->names, 0, names_size);
@@ -221,18 +232,25 @@ read_db_from_text (KMerDB *db, const unsigned char *cdata, unsigned long long cs
   return idx;
 }
 
+static const char *DBKEY = "GMDB";
+
 unsigned int
-write_db_to_file (KMerDB *db, FILE *ofs)
+write_db_to_file (KMerDB *db, FILE *ofs, unsigned int kmers)
 {
   unsigned long long written = 0, blocksize;
+  static const unsigned short major = 0, minor = 1;
+  fwrite (DBKEY, 4, 1, ofs);
+  fwrite (&major, 2, 1, ofs);
+  fwrite (&minor, 2, 1, ofs);
+
   fwrite (&db->wordsize, 4, 1, ofs);
   fwrite (&db->node_bits, 4, 1, ofs);
   fwrite (&db->kmer_bits, 4, 1, ofs);
-  fwrite (&db, 4, 1, ofs);
+  fwrite (&db->count_bits, 4, 1, ofs);
   fwrite (&db->n_nodes, 8, 1, ofs);
   fwrite (&db->n_kmers, 8, 1, ofs);
   fwrite (&db->names_size, 8, 1, ofs);
-  written = 40;
+  written = 48;
   /* Nodes */
   blocksize = (db->n_nodes * sizeof (Node) + 15) & 0xfffffffffffffff0;
   fwrite (&blocksize, 8, 1, ofs);
@@ -241,12 +259,27 @@ write_db_to_file (KMerDB *db, FILE *ofs)
   written += blocksize;
   fseek (ofs, written, SEEK_SET);
   /* KMers */
-  blocksize = (db->n_kmers * 2 + 15) & 0xfffffffffffffff0;
-  fwrite (&blocksize, 8, 1, ofs);
-  written += 8;
-  fwrite (db->kmers, 2, db->n_kmers, ofs);
-  written += blocksize;
-  fseek (ofs, written, SEEK_SET);
+  if (kmers) {
+    if (db->count_bits == 16) {
+      blocksize = (db->n_kmers * 2 + 15) & 0xfffffffffffffff0;
+      fwrite (&blocksize, 8, 1, ofs);
+      written += 8;
+      fwrite (db->kmers_16, 2, db->n_kmers, ofs);
+      written += blocksize;
+    } else if (db->count_bits == 32) {
+      blocksize = (db->n_kmers * 4 + 15) & 0xfffffffffffffff0;
+      fwrite (&blocksize, 8, 1, ofs);
+      written += 8;
+      fwrite (db->kmers_32, 4, db->n_kmers, ofs);
+      written += blocksize;
+    }
+    fseek (ofs, written, SEEK_SET);
+  } else {
+    blocksize = 0;
+    fwrite (&blocksize, 8, 1, ofs);
+    written += 8;
+    fseek (ofs, written, SEEK_SET);
+  }
   /* Names */
   blocksize = (db->names_size + 15) & 0xfffffffffffffff0;
   fwrite (&blocksize, 8, 1, ofs);
@@ -263,12 +296,27 @@ unsigned int
 read_database_from_binary (KMerDB *db, const unsigned char *cdata, unsigned long long csize)
 {
   unsigned long long cpos = 0, blocksize;
+  unsigned short major, minor;
+  unsigned int version;
+
+  cpos += 4;
+  memcpy (&major, cdata + cpos, 2);
+  cpos += 2;
+  memcpy (&minor, cdata + cpos, 2);
+  cpos += 2;
+  version = (major << 16) | minor;
+
   memcpy (&db->wordsize, cdata + cpos, 4);
   cpos += 4;
   memcpy (&db->node_bits, cdata + cpos, 4);
   cpos += 4;
   memcpy (&db->kmer_bits, cdata + cpos, 4);
   cpos += 4;
+  if (version == 0) {
+    db->count_bits = 16;
+  } else {
+    memcpy (&db->count_bits, cdata + cpos, 4);
+  }
   cpos += 4;
   memcpy (&db->n_nodes, cdata + cpos, 8);
   cpos += 8;
@@ -282,10 +330,25 @@ read_database_from_binary (KMerDB *db, const unsigned char *cdata, unsigned long
   db->nodes = (Node *) (cdata + cpos);
   cpos += blocksize;
   /* Kmers */
-  db->kmers = (unsigned short *) malloc (db->n_kmers * 2);
-  memcpy (&blocksize, cdata + cpos, 8);
-  cpos += 8;
-  memcpy (db->kmers, cdata + cpos, db->n_kmers * 2);
+  if (db->count_bits == 16) {
+    db->kmers_16 = (unsigned short *) malloc (db->n_kmers * 2);
+    memcpy (&blocksize, cdata + cpos, 8);
+    cpos += 8;
+    if (blocksize >= db->n_kmers * 2) {
+      memcpy (db->kmers_16, cdata + cpos, db->n_kmers * 2);
+    } else {
+      memset (db->kmers_16, 0, db->n_kmers * 2);
+    }
+  } else if (db->count_bits == 32) {
+    db->kmers_32 = (unsigned int *) malloc (db->n_kmers * 4);
+    memcpy (&blocksize, cdata + cpos, 8);
+    cpos += 8;
+    if (blocksize >= db->n_kmers * 4) {
+      memcpy (db->kmers_32, cdata + cpos, db->n_kmers * 4);
+    } else {
+      memset (db->kmers_32, 0, db->n_kmers * 4);
+    }
+  }
   cpos += blocksize;
   /* Names */
   memcpy (&blocksize, cdata + cpos, 8);

@@ -171,6 +171,13 @@ get_time (void)
 	return dtval;
 }
 
+unsigned long long
+rand_long_long (unsigned long long min, unsigned long long max)
+{
+  unsigned long long delta = max - min + 1;
+  return min + (unsigned long long) (delta * (rand () / (RAND_MAX + 1.0)));
+}
+
 unsigned int
 split_line (const unsigned char *cdata, unsigned long long csize, const unsigned char *tokenz[], unsigned int lengths[], unsigned int max_tokens)
 {
@@ -182,7 +189,8 @@ split_line (const unsigned char *cdata, unsigned long long csize, const unsigned
     while ((e < csize) && (cdata[e] >= ' ')) e += 1;
     lengths[i] = e - s;
     i += 1;
-    s = e + 1;
+    s = e;
+    if (cdata[s] != '\n') s += 1;
   }
   return i;
 }

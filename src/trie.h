@@ -21,10 +21,10 @@ struct _TrieNodeBranch {
 #define TRIE_BLOCK_BITS 30
 #define TRIE_BLOCK_SIZE (1ULL << TRIE_BLOCK_BITS)
 
-#define TRIE_BLOCK_FROM_REF(r) (((((r) >> 2) >> TRIE_BLOCK_BITS) & 0x3ff) - 1)
+#define TRIE_BLOCK_FROM_REF(r) ((((r) >> 2) >> TRIE_BLOCK_BITS) & 0x3ff)
 #define TRIE_INDEX_FROM_REF(r) (((r) >> 2) & (TRIE_BLOCK_SIZE - 1))
 #define TRIE_ADDRESS_FROM_REF(t,r) ((t)->branches[TRIE_BLOCK_FROM_REF(r)] + TRIE_INDEX_FROM_REF(r))
-#define TRIE_REF_FROM_ADDRESS(t,b,i) ((((b) + 1) << TRIE_BLOCK_BITS) | (i)) << 2;
+#define TRIE_REF_FROM_ADDRESS(t,b,i) (((b) << TRIE_BLOCK_BITS) | (i)) << 2;
 
 #define TYPE_BRANCH 0ULL
 #define TYPE_KMER 1ULL

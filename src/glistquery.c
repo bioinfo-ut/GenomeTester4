@@ -48,6 +48,7 @@ int search_list (wordmap *map, const char *querylistfilename, parameters *p, uns
 int process_word (FastaReader *reader, unsigned long long word, void *data);
 int print_full_map (wordmap *map);
 void get_statistics (wordmap *map);
+void print_median (wordmap *map);
 void print_help (int exitvalue);
 
 int debug = 0;
@@ -56,14 +57,13 @@ unsigned int use_scouts = 1;
 
 int main (int argc, const char *argv[])
 {
-
 	int argidx, v = 0;
 	const char *listfilename = NULL;
 	const char *querystring = NULL, *queryfilename = NULL, *seqfilename = NULL, *querylistfilename = NULL;
 	parameters p = {0};
 	wordmap *map;
 	char *end;
-	int printall = 0, getstat = 0;
+	int printall = 0, getstat = 0, getmed = 0;
 	unsigned int minfreq = 0, maxfreq = UINT_MAX;
 
 	/* parsing commandline */
@@ -173,6 +173,8 @@ int main (int argc, const char *argv[])
 			printall = 1;
 		} else if (!strcmp(argv[argidx], "-stat")) {	
 			getstat = 1;
+		} else if (!strcmp(argv[argidx], "-median")) {
+			getmed = 1;
 		} else if (!strcmp(argv[argidx], "--disable_scouts")) {	
 			use_scouts = 0;
 		} else {
@@ -222,6 +224,11 @@ int main (int argc, const char *argv[])
 	
 	if (getstat) {
 		get_statistics (map);
+		exit (0);
+	}
+
+	if (getmed) {
+		print_median (map);
 		exit (0);
 	}
 
@@ -380,6 +387,58 @@ void get_statistics (wordmap *map)
 	return;
 }
 
+void print_median (wordmap *map)
+{
+	unsigned int min, max, med, gmin, gmax;
+	unsigned long long i;
+	gmin = 0xffffffff;
+	gmax = 0;
+	if (debug > 0) fprintf (stderr, "Finding min/max...");
+	for (i = 0; i < map->header->nwords; i++) {
+		unsigned int freq = WORDMAP_FREQ (map, i);
+		if (freq < gmin) gmin = freq;
+		if (freq > gmax) gmax = freq;
+	}
+	if (debug > 0) fprintf (stderr, "done (%u %u)\n", gmin, gmax);
+	min = gmin;
+	max = gmax;
+	med = (unsigned int) (((unsigned long long) min + max) / 2);
+	while (max > min) {
+		unsigned long long above = 0, below = 0, equal;
+		for (i = 0; i < map->header->nwords; i++) {
+			unsigned int freq = WORDMAP_FREQ (map, i);
+			if (freq > med) above += 1;
+			if (freq < med) below += 1;
+		}
+		equal = map->header->nwords - above - below;
+		if (debug > 0) fprintf (stderr, "Trying median %u - equal %llu, below %llu, above %llu\n", med, equal, below, above);
+		/* Special case: min == med, max == med + 1 */
+		if (max == (min + 1)) {
+			if (above > (below + equal)) {
+				/* Max is true median */
+				med = max;
+			}
+			break;
+		}
+		if (above > below) {
+			if ((above - below) < equal) break;
+			min = med;
+		} else if (below > above) {
+			if ((below - above) < equal) break;
+			max = med;
+		} else {
+			break;
+		}
+		med = (min + max) / 2;
+	}
+	
+	fprintf (stdout, "Statistics of %s <<Built with glistmaker version %d.%d>>\n", map->filename, map->header->version_major, map->header->version_minor);
+	fprintf (stdout, "Wordlength\t%u\n", map->header->wordlength);
+	fprintf (stdout, "NUnique\t%llu\n", map->header->nwords);
+	fprintf (stdout, "NTotal\t%llu\n", map->header->totalfreq);
+	fprintf (stdout, "Min %u Max %u Median %u Average %.2f\n", gmin, gmax, med, (double) map->header->totalfreq / map->header->nwords);
+}
+
 void print_help (int exit_value)
 {
 	fprintf (stderr, "Usage: glistquery <INPUTLIST> [OPTIONS]\n");
@@ -387,6 +446,7 @@ void print_help (int exit_value)
 	fprintf (stderr, "    -v, --version             - print version information and exit\n");
 	fprintf (stderr, "    -h, --help                - print this usage screen and exit\n");
 	fprintf (stderr, "    -stat                     - print statistics of the list file and exit\n");
+	fprintf (stderr, "    -median                   - print min/max/median/average and exit\n");
 	fprintf (stderr, "    -q, --query               - single query word\n");
 	fprintf (stderr, "    -f, --queryfile           - list of query words in a file\n");
 	fprintf (stderr, "    -s, --seqfile             - FastA/FastQ file\n");

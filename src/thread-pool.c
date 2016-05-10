@@ -20,7 +20,9 @@ typedef struct _Task Task;
 
 static void *worker_main (void *data);
 static Task *task_new (AosoraThreadPool *tpool);
+#if 0
 static void task_delete (Task *task);
+#endif
 
 struct _Task {
 	AosoraThreadPool *tpool;
@@ -220,8 +222,10 @@ task_new (AosoraThreadPool *tpool)
 	return task;
 }
 
+#if 0
 static void
 task_delete (Task *task)
 {
 	free (task);
 }
+#endif

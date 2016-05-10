@@ -1,0 +1,65 @@
+# Project: GMER Caller
+
+VERSION = 1.0
+CXX  = gcc
+
+# C Files
+
+GMERCOUNTER_SOURCES = \
+	gmercounter.c \
+	buffer.c buffer.h \
+	common.c common.h \
+	trie.c trie.h \
+	wordmap.c wordmap.h \
+	sequence.c sequence.h \
+	wordtable.c wordtable.h \
+	fasta.c fasta.h \
+	thread-pool.c thread-pool.h \
+	queue.c queue.h \
+	utils.c utils.h \
+	database.c database.h
+
+GMER_CALLER_SOURCES = \
+	binomial.c binomial.h \
+	genotypes.c genotypes.h \
+	simplex.c simplex.h \
+	thread-pool.c thread-pool.h \
+	utils.c utils.h \
+	gmer_caller.c
+
+RELEASEFLAGS = -O3
+DEBUGFLAGS = -O0 -g
+LIBS = -lm -lpthread -lrt
+INCS = -I.
+BINS  = gmer_counter gmer_caller
+
+#CXXFLAGS = $(INCS) $(DEBUGFLAGS) -Wall 
+CXXFLAGS = $(INCS) $(RELEASEFLAGS) -Wall 
+
+.PHONY: all all-before all-after clean clean-custom
+
+all: all-before $(BINS) all-after
+
+gmer_counter: $(GMERCOUNTER_SOURCES)
+	$(CXX) $(GMERCOUNTER_SOURCES) -o gmer_counter $(LIBS) $(CXXFLAGS) -Wall
+
+gmer_caller: $(GMER_CALLER_SOURCES)
+	$(CXX) $(GMER_CALLER_SOURCES) -o gmer_caller $(LIBS) $(CXXFLAGS) -Wall
+
+dist: $(GMERCOUNTER_SOURCES) $(GMER_CALLER_SOURCES)
+	mkdir gmer_caller_$(VERSION);
+	cp $(GMERCOUNTER_SOURCES) gmer_caller_$(VERSION);
+	cp $(GMER_CALLER_SOURCES) gmer_caller_$(VERSION);
+	cp Makefile.gmer gmer_caller_$(VERSION)/Makefile;
+	touch gmer_caller_$(VERSION)/.depend;
+	tar c gmer_caller_$(VERSION) > gmer_caller_$(VERSION).tar;
+	gzip gmer_caller_$(VERSION).tar;
+	rm -rf gmer_caller_$(VERSION);
+	
+clean: clean-custom
+	rm -f *.o $(BINS)
+
+depend:
+	$(CC) $(CFLAGS) -M *.c > .depend
+
+include .depend

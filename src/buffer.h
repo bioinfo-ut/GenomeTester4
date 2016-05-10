@@ -24,6 +24,7 @@
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
+#include <stdio.h>
 
 #define MAX_SEQ_BUFFER_SIZE 100
 

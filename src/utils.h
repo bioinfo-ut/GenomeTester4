@@ -27,7 +27,7 @@
 #include <stdlib.h>
 
 /* memory-map a given file */
-const char * mmap_by_filename (const char *filename, size_t *size);
+const char *mmap_by_filename (const char *filename, size_t *size);
 
 /* memory-unmap a given file */
 int munmap_by_file (const char *file, size_t *size);
@@ -37,6 +37,7 @@ void insertionSort (unsigned long long *begin, unsigned long long *end, unsigned
 void hybridInPlaceRadixSort256 (unsigned long long *begin, unsigned long long *end, unsigned int *begfreq, unsigned int shift);
 
 double get_time (void);
+unsigned long long rand_long_long (unsigned long long min, unsigned long long max);
 
 /* Split line into tokens */
 /* Line ends with \n (or at csize), tokens end with \t */
