@@ -27,6 +27,10 @@ GMER_CALLER_SOURCES = \
 	utils.c utils.h \
 	gmer_caller.c
 
+SCRIPTS_DIR = ../fastgt/scripts
+
+README = ../README.fastgt
+
 RELEASEFLAGS = -O3
 DEBUGFLAGS = -O0 -g
 LIBS = -lm -lpthread -lrt
@@ -47,14 +51,16 @@ gmer_caller: $(GMER_CALLER_SOURCES)
 	$(CXX) $(GMER_CALLER_SOURCES) -o gmer_caller $(LIBS) $(CXXFLAGS) -Wall
 
 dist: $(GMERCOUNTER_SOURCES) $(GMER_CALLER_SOURCES)
-	mkdir gmer_caller_$(VERSION);
-	cp $(GMERCOUNTER_SOURCES) gmer_caller_$(VERSION);
-	cp $(GMER_CALLER_SOURCES) gmer_caller_$(VERSION);
-	cp Makefile.gmer gmer_caller_$(VERSION)/Makefile;
-	touch gmer_caller_$(VERSION)/.depend;
-	tar c gmer_caller_$(VERSION) > gmer_caller_$(VERSION).tar;
-	gzip gmer_caller_$(VERSION).tar;
-	rm -rf gmer_caller_$(VERSION);
+	mkdir fastgt_$(VERSION);
+	cp $(GMERCOUNTER_SOURCES) fastgt_$(VERSION);
+	cp $(GMER_CALLER_SOURCES) fastgt_$(VERSION);
+	cp Makefile.gmer fastgt_$(VERSION)/Makefile;
+	cp -r $(SCRIPTS_DIR) fastgt_$(VERSION);
+	cp $(README) fastgt_$(VERSION);
+	touch fastgt_$(VERSION)/.depend;
+	tar c fastgt_$(VERSION) > fastgt_$(VERSION).tar;
+	gzip fastgt_$(VERSION).tar;
+	rm -rf fastgt_$(VERSION);
 	
 clean: clean-custom
 	rm -f *.o $(BINS)

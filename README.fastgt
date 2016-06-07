@@ -1,0 +1,8 @@
+FastGT genotype caller
+Copyright (C) University of Tartu 2015-2016
+
+1. Build
+Simply type "make"
+It builds two binaries - gmer_counter and gmer_caller
+
+

@@ -50,6 +50,15 @@ LISTCOMPARE_SOURCES = \
 	queue.c queue.h \
 	utils.c
 
+GDISTRIBUTION_SOURCES = \
+	gdistribution.c \
+	wordmap.c wordmap.h \
+	wordtable.c wordtable.h \
+	utils.c utils.h \
+	queue.c queue.h \
+	fasta.c fasta.h \
+	sequence.c sequence.h
+
 GMERCOUNTER_SOURCES = \
 	gmercounter.c \
 	trie.c trie.h \
@@ -61,15 +70,6 @@ GMERCOUNTER_SOURCES = \
 	queue.c queue.h \
 	utils.c utils.h \
 	database.c database.h
-
-GDISTRIBUTION_SOURCES = \
-	gdistribution.c \
-	wordmap.c wordmap.h \
-	wordtable.c wordtable.h \
-	utils.c utils.h \
-	queue.c queue.h \
-	fasta.c fasta.h \
-	sequence.c sequence.h
 
 GMER_CALLER_SOURCES = \
 	binomial.c binomial.h \
@@ -104,12 +104,12 @@ glistquery: $(LISTQUERY_SOURCES)
 glistcompare: $(LISTCOMPARE_SOURCES)
 	$(CXX) $(LISTCOMPARE_SOURCES) -o glistcompare $(LIBS) $(CXXFLAGS)
 
-gmer_counter: $(GMERCOUNTER_SOURCES)
-	$(CXX) $(GMERCOUNTER_SOURCES) -o gmer_counter $(LIBS) $(CXXFLAGS) -Wall
-
 gdistribution: $(GDISTRIBUTION_SOURCES)
 	$(CXX) $(GDISTRIBUTION_SOURCES) -o gdistribution $(LIBS) $(DEBUGFLAGS) -Wall
 	
+gmer_counter: $(GMERCOUNTER_SOURCES)
+	$(CXX) $(GMERCOUNTER_SOURCES) -o gmer_counter $(LIBS) $(CXXFLAGS) -Wall
+
 gmer_caller: $(GMER_CALLER_SOURCES)
 	$(CXX) $(GMER_CALLER_SOURCES) -o gmer_caller $(LIBS) $(CXXFLAGS) -Wall
 	

@@ -695,20 +695,23 @@ main (int argc, const char *argv[])
     }
   }
 
-  /* Parse calls */
+  /* Parse autosome/unspecified calls calls */
   if (debug) fprintf (stderr, "Reading autosome/unspecified calls...");
   calls_a = parse_calls (lines, a, na, a_med);
   if (debug) fprintf (stderr, "done\n");
 
-  /* Autosomes */
-  /* Only if model is not custom */
-  if (nruns) {
+  /* Train autosome model */
+  /* Only if na > 0 && nruns > 0 */
+  if (nruns && (na > 0)) {
     if (debug) fprintf (stderr, "Training autosome/unspecified model\n");
     if ((model == MODEL_FULL) || (model == MODEL_DIPLOID)) {
+      /* Train full model */
       train_model (calls_a, na, max_training, nruns, params, &pB, 1, nthreads);
     } else if (model == MODEL_HAPLOID) {
+      /* Haploid model */
       train_model (calls_a, na, max_training, nruns, params, &pB, 2, nthreads);
     } else {
+      /* Estimate MAF */
       pB = calculate_allele_freq (calls_a, NULL, na);
     }
     if (info) {
@@ -719,13 +722,16 @@ main (int argc, const char *argv[])
     }
   }
 
+  /* Default X model is diploid */
+  memcpy (x_params, params, sizeof (params));
+  /* If model is FULL, parse X calls */
   if (model == MODEL_FULL) {
     if (debug) fprintf (stderr, "Reading X calls...");
     calls_x = parse_calls (lines, x, nx, x_med);
     if (debug) fprintf (stderr, "done\n");
-    if (p_XX <= p_X) {
+    /* Train separate haploid model */
+    if ((nx > 0) && nruns && (p_XX <= p_X)) {
       /* Male */
-      memcpy (x_params, params, sizeof (params));
       x_params[P_1] = 0.98f;
       x_params[P_2] = 0.01f;
       if (debug) fprintf (stderr, "Training X model\n");
@@ -735,6 +741,7 @@ main (int argc, const char *argv[])
       }
     }
   }
+
   /* Print genotypes */
   if (print_gt) {
     if (header) {
