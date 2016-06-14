@@ -6,7 +6,7 @@
 * Copyright Lauris Kaplinski 2014
 */
 
-#define debug 1
+#define debug 0
 
 #include <malloc.h>
 #include <string.h>
