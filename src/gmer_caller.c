@@ -445,7 +445,7 @@ print_usage (FILE *ofs)
   fprintf (ofs, "Usage:\n");
   fprintf (ofs, "  gmer_caller ARGUMENTS COUNTS_FILE\n");
   fprintf (ofs, "Arguments:\n");
-  fprintf (ofs, "    --training_size NUM - Use NUM nodes for training (default 100000)\n");
+  fprintf (ofs, "    --training_size NUM - Use NUM markers for training (default 100000)\n");
   fprintf (ofs, "    --runs NUMBER       - Perfom NUMBER runs of model training (use 0 for no training)\n");
   fprintf (ofs, "    --num_threads NUM   - Use NUM threads (min 1, max %u, default %u)\n", MAX_THREADS, MAX_THREADS / 2);
   fprintf (ofs, "    --header            - Print table header\n");

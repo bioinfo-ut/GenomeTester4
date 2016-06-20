@@ -29,7 +29,7 @@ GMER_CALLER_SOURCES = \
 
 SCRIPTS_DIR = ../fastgt/scripts
 
-README = ../README.fastgt
+README = ../fastgt/README.dist
 
 RELEASEFLAGS = -O3
 DEBUGFLAGS = -O0 -g
@@ -60,6 +60,16 @@ dist: $(GMERCOUNTER_SOURCES) $(GMER_CALLER_SOURCES)
 	touch fastgt_$(VERSION)/.depend;
 	tar c fastgt_$(VERSION) > fastgt_$(VERSION).tar;
 	gzip fastgt_$(VERSION).tar;
+	rm -rf fastgt_$(VERSION);
+
+dist_bin: gmer_counter gmer_caller
+	mkdir fastgt_$(VERSION)
+	cp gmer_counter fastgt_$(VERSION);
+	cp gmer_caller fastgt_$(VERSION);
+	cp -r $(SCRIPTS_DIR) fastgt_$(VERSION);
+	cp $(README) fastgt_$(VERSION);
+	tar c fastgt_$(VERSION) > fastgt_binaries_$(VERSION).tar;
+	gzip fastgt_binaries_$(VERSION).tar;
 	rm -rf fastgt_$(VERSION);
 	
 clean: clean-custom

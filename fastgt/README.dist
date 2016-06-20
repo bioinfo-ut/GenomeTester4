@@ -1,0 +1,20 @@
+FastGT genotype caller
+Copyright (C) University of Tartu 2015-2016
+
+FastGT is a fast and accurate genotype caller from sequencing data.
+It uses Empirical Bayes classifier for calling genotypes from the counts of polymorphism-specific k-mers.
+FastGT can detect both canonical (diploid for autosomes and female X, haploid for male X and Y) and
+non-canonical (0-4 alleles) genotypes.
+
+1. Pipeline
+First one has to prepare the database of specific k-mers for each allele of polymorphism of interest.
+K-mer are counted with program gmer_counter
+
+gmer_counter -db DATABASE FASTA/FASTQ_FILE(S) > COUNTS_FILE
+
+The results should be redirected to file for calling
+Then the genotypes are called using program gmer_caller
+
+gmer_caller COUNTS_FILE
+
+

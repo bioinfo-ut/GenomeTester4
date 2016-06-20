@@ -1,8 +1,27 @@
 FastGT genotype caller
 Copyright (C) University of Tartu 2015-2016
 
-1. Build
-Simply type "make"
-It builds two binaries - gmer_counter and gmer_caller
+FastGT is a fast and accurate genotype caller from sequencing data.
+It is implemented as a sub-project of GenomeTester4, sharing some source files.
+
+1. Building FastGT binaries inside GenomeTester4 distribution
+It has two binaries - gmer_counter and gmer_caller
+Change int src subdirectory and type:
+
+make gmer_counter
+make gmer_caller
+
+2. Building distribution tarballs
+
+Change into src subdirectory and type:
+
+make -f Makefile.gmer dist
+
+or (binaries):
+
+make -f Makefile.gmer dist_bin
+
+3. Usage
+Refer to README.dist in fastgt subdirectory.
 
 
