@@ -42,7 +42,8 @@ unsigned long long generate_mismatches (wordtable *mmtable, unsigned long long w
 		unsigned int givenfreq, unsigned int nmm, unsigned int startsite, int usesmallercomplement, int countonly,
 		int equalmmonly);
 
-char * word_to_string (unsigned long long word, unsigned int wordlength);
+char *word_to_string (unsigned long long word, unsigned int wordlength);
+unsigned int word2string (char *b, unsigned long long word, unsigned int wordlength);
 
 unsigned long long string_to_word (const char *s, unsigned int wordlength);
 

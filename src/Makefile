@@ -79,6 +79,17 @@ GMER_CALLER_SOURCES = \
 	utils.c utils.h \
 	gmer_caller.c
 
+TEST_SOURCES = \
+	binomial.c binomial.h \
+	fasta.c fasta.h \
+	queue.c queue.h \
+	sequence.c sequence.h \
+	simplex.c simplex.h \
+	utils.c utils.h \
+	wordmap.c wordmap.h \
+	wordtable.c wordtable.h \
+	distro.c
+
 RELEASEFLAGS = -O3
 DEBUGFLAGS = -O0 -g
 LIBS = -lm -lpthread -lrt
@@ -112,6 +123,9 @@ gmer_counter: $(GMERCOUNTER_SOURCES)
 
 gmer_caller: $(GMER_CALLER_SOURCES)
 	$(CXX) $(GMER_CALLER_SOURCES) -o gmer_caller $(LIBS) $(CXXFLAGS) -Wall
+
+distro: $(TEST_SOURCES)
+	$(CXX) $(TEST_SOURCES) -o distro $(LIBS) $(DEBUGFLAGS) -Wall
 	
 clean: clean-custom
 	rm -f *.o $(BINS)

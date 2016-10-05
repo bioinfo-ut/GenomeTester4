@@ -49,6 +49,8 @@ int process_word (FastaReader *reader, unsigned long long word, void *data);
 int print_full_map (wordmap *map);
 void get_statistics (wordmap *map);
 void print_median (wordmap *map);
+void print_distro (wordmap *map, unsigned int size);
+void print_gc (wordmap *map);
 void print_help (int exitvalue);
 
 int debug = 0;
@@ -65,6 +67,8 @@ int main (int argc, const char *argv[])
 	char *end;
 	int printall = 0, getstat = 0, getmed = 0;
 	unsigned int minfreq = 0, maxfreq = UINT_MAX;
+	unsigned int distro = 0;
+	unsigned int gc = 0;
 
 	/* parsing commandline */
 	
@@ -175,6 +179,14 @@ int main (int argc, const char *argv[])
 			getstat = 1;
 		} else if (!strcmp(argv[argidx], "-median")) {
 			getmed = 1;
+		} else if (!strcmp(argv[argidx], "-distribution")) {
+			if ((argidx + 1) >= argc) {
+				print_help (1);
+			}
+			argidx += 1;
+			distro = strtol (argv[argidx], &end, 10);;
+		} else if (!strcmp(argv[argidx], "-gc")) {
+			gc = 1;
 		} else if (!strcmp(argv[argidx], "--disable_scouts")) {	
 			use_scouts = 0;
 		} else {
@@ -229,6 +241,16 @@ int main (int argc, const char *argv[])
 
 	if (getmed) {
 		print_median (map);
+		exit (0);
+	}
+
+	if (distro) {
+		print_distro (map, distro + 1);
+		exit (0);
+	}
+	
+	if (gc) {
+		print_gc (map);
 		exit (0);
 	}
 
@@ -439,6 +461,39 @@ void print_median (wordmap *map)
 	fprintf (stdout, "Min %u Max %u Median %u Average %.2f\n", gmin, gmax, med, (double) map->header->totalfreq / map->header->nwords);
 }
 
+void
+print_distro (wordmap *map, unsigned int max)
+{
+	unsigned long long i;
+	unsigned long long *d = (unsigned long long *) malloc (max * 8);
+	memset (d, 0, max * 8);
+	for (i = 0; i < map->header->nwords; i++) {
+		unsigned int freq = WORDMAP_FREQ (map, i);
+		if (freq < max) d[freq] += 1;
+	}
+	for (i = 0; i < max; i++) {
+		fprintf (stdout, "%llu\t%llu\n", i, d[i]);
+	}
+}
+
+void
+print_gc (wordmap *map)
+{
+	unsigned long long i;
+	unsigned long long count = 0;
+	for (i = 0; i < map->header->nwords; i++) {
+		unsigned long long word = WORDMAP_WORD (map, i);
+		unsigned int freq = WORDMAP_FREQ (map, i);
+		unsigned int j;
+		for (j = 0; j < map->header->wordlength; j++) {
+			/* if (((word & 3) == 1) || ((word & 3) == 2)) count += freq; */
+			count += freq * ((word ^ (word >> 1)) & 1);
+			word = word >> 2;
+		}
+	}
+	printf ("GC\t%g\n", (double) count / (map->header->totalfreq * map->header->wordlength));
+}
+
 void print_help (int exit_value)
 {
 	fprintf (stderr, "Usage: glistquery <INPUTLIST> [OPTIONS]\n");
@@ -447,6 +502,8 @@ void print_help (int exit_value)
 	fprintf (stderr, "    -h, --help                - print this usage screen and exit\n");
 	fprintf (stderr, "    -stat                     - print statistics of the list file and exit\n");
 	fprintf (stderr, "    -median                   - print min/max/median/average and exit\n");
+	fprintf (stderr, "    -distribution MAX         - print distribution up to MAX\n");
+	fprintf (stderr, "    -gc                       - print average GC content of all words\n");
 	fprintf (stderr, "    -q, --query               - single query word\n");
 	fprintf (stderr, "    -f, --queryfile           - list of query words in a file\n");
 	fprintf (stderr, "    -s, --seqfile             - FastA/FastQ file\n");

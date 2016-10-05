@@ -26,6 +26,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/mman.h>
 
 #include "wordmap.h"
 #include "wordtable.h"
@@ -55,6 +56,8 @@ wordmap_new (const char *listfilename, unsigned int scout)
 		wordmap_delete (map);
 		return NULL;
 	}
+	map->file_map = (unsigned char *) content;
+	map->file_size = size;
 	map->header = (header *) content;
 	if (map->header->code != glistmaker_code_match || size != sizeof (header) + map->header->nwords * 12) {
 		free ((void *) content);
@@ -66,6 +69,12 @@ wordmap_new (const char *listfilename, unsigned int scout)
 		scout_mmap ((const unsigned char *) content, size);
 	}
 	return map;
+}
+
+void
+wordmap_release (wordmap *map)
+{
+	munmap (map->file_map, map->file_size);
 }
 
 void 

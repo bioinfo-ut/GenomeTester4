@@ -51,6 +51,8 @@ typedef struct _parameters {
 
 typedef struct _wordmap {
 	const char *filename;
+	unsigned char *file_map;
+	unsigned long long file_size;
 	header *header;
 	const char *wordlist;
 	void *additional_data;
@@ -60,6 +62,7 @@ typedef struct _wordmap {
 #define WORDMAP_FREQ(w,i) (*((unsigned int *) ((w)->wordlist + 12 * (i) + 8)))
 
 wordmap *wordmap_new (const char *listfilename, unsigned int scout);
+void wordmap_release (wordmap *map);
 
 void wordmap_delete (wordmap *map);
 

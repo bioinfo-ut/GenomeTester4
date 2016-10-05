@@ -106,7 +106,7 @@ unsigned long long generate_mismatches (wordtable *mmtable, unsigned long long w
 	return count;
 }
 
-char * word_to_string (unsigned long long word, unsigned int wordlength)
+char *word_to_string (unsigned long long word, unsigned int wordlength)
 {
 	char *s = (char *) malloc (wordlength + 1);
 	unsigned int i, temp;
@@ -118,6 +118,20 @@ char * word_to_string (unsigned long long word, unsigned int wordlength)
 	}
 	s[wordlength] = 0;
 	return s;
+}
+
+unsigned int
+word2string (char *b, unsigned long long word, unsigned int wordlength)
+{
+	unsigned int i, temp;
+
+	for (i = 0; i < wordlength; i++) {
+		temp = word & 3;
+		b[wordlength - i - 1] = alphabet[temp];
+		word >>= 2;
+	}
+	b[wordlength] = 0;
+	return wordlength;
 }
 
 unsigned long long string_to_word (const char *s, unsigned int wordlength)
