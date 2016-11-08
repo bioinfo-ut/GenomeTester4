@@ -55,7 +55,7 @@
 static void * process (void *arg);
 
 /* Merge tables directly to disk */
-static void merge_write_multi (wordtable **t, unsigned int ntables, const char *filename, unsigned int cutoff);
+static unsigned int merge_write_multi (wordtable **t, unsigned int ntables, const char *filename, unsigned int cutoff);
 
 /* */
 int process_word (FastaReader *reader, unsigned long long word, void *data);
@@ -280,8 +280,8 @@ main (int argc, const char *argv[])
                 maker_queue_release (&mq);
         } else {
 		/* CASE: ONE THREAD */
-		const char *ff;
-		size_t fsize;
+		const unsigned char *cdata;
+		unsigned long long csize;
 		wordtable *table, *temptable;
 		int v;
 		
@@ -298,12 +298,12 @@ main (int argc, const char *argv[])
 				/* stdin */
 				fasta_reader_init_from_file (&reader, wordlength, 1, stdin);
 			} else {
-				ff = mmap_by_filename (argv[argidx], &fsize);
-				if (!ff) {
+				cdata = gt4_mmap (argv[argidx], &csize);
+				if (!cdata) {
 					fprintf (stderr, "Error: Cannot read file %s!\n", argv[argidx]);
 					return 1;
 				}
-				fasta_reader_init_from_data (&reader, wordlength, 1, (const unsigned char *) ff, fsize);
+				fasta_reader_init_from_data (&reader, wordlength, 1, cdata, csize);
 			}
 
 			/* reading words from FastA/FastQ */
@@ -334,7 +334,9 @@ main (int argc, const char *argv[])
 
 		/* write the final list into a file */
 		if (debug > 0) fprintf (stderr, "Writing list %s\n", outputname);
-		wordtable_write_to_file (table, outputname, cutoff);
+		if (!wordtable_write_to_file (table, outputname, cutoff)) {
+			fprintf (stderr, "Cannot write list to file\n");
+		}
 	}
 
 	/*wordtable_delete (temptable);
@@ -399,7 +401,9 @@ process (void *arg)
 				/* Now we can release mutex */
 				pthread_mutex_unlock (&mq->queue.mutex);
 				/* merge_write (table, other, c, queue->cutoff); */
-				merge_write_multi (t, ntables, c, mq->cutoff);
+				if (merge_write_multi (t, ntables, c, mq->cutoff)) {
+					fprintf (stderr, "Cannot write list to file\n");
+				}
 				pthread_mutex_lock (&mq->queue.mutex);
 				mq->ntasks[TASK_MERGE] -= 1;
 				pthread_cond_broadcast (&mq->queue.cond);
@@ -514,10 +518,10 @@ process (void *arg)
                         		fasta_reader_init_from_file (&task->reader, mq->wordlen, 1, stdin);
                         	} else {
                                 	const unsigned char *cdata;
-                                	size_t csize;
-                                	cdata = (const unsigned char *) mmap_by_filename (task->filename, &csize);
+                                	unsigned long long csize;
+                                	cdata = (const unsigned char *) gt4_mmap (task->filename, &csize);
                                 	if (cdata) {
-                                		scout_mmap (cdata, csize);
+                                		/* scout_mmap (cdata, csize); */
                                 		task->cdata = cdata;
                                 		task->csize = csize;
                                 		fasta_reader_init_from_data (&task->reader, mq->wordlen, 1, cdata, csize);
@@ -597,14 +601,14 @@ process_word (FastaReader *reader, unsigned long long word, void *data)
 	return 0;
 }
 
-static void
+static unsigned int
 merge_write_multi (wordtable *t[], unsigned int ntables, const char *filename, unsigned int cutoff)
 {
 	unsigned long long nwords[MAX_MERGED_TABLES];
 	unsigned long long i[MAX_MERGED_TABLES];
 	unsigned int nfinished;
 
-	header h;
+	GT4ListHeader h;
 
 	FILE *ofs;
 	char *b;
@@ -614,20 +618,24 @@ merge_write_multi (wordtable *t[], unsigned int ntables, const char *filename, u
 	unsigned int freq;
 	double t_s, t_e;
 
-	h.code = glistmaker_code_match;
+	h.code = GT4_LIST_CODE;
 	h.version_major = VERSION_MAJOR;
 	h.version_minor = VERSION_MINOR;
 	h.wordlength = t[0]->wordlength;
 	h.nwords = 0;
 	h.totalfreq = 0;
-	h.padding = sizeof (header);
+	h.padding = sizeof (GT4ListHeader);
 
 	b = (char *) malloc (BSIZE + 12);
 	
 	ofs = fopen (filename, "w");
+	if (!ofs) {
+		fprintf (stderr, "Cannot open output file %s\n", filename);
+		return 1;
+	}
 
 	t_s = get_time ();
-	fwrite (&h, sizeof (header), 1, ofs);
+	fwrite (&h, sizeof (GT4ListHeader), 1, ofs);
 
 	bp = 0;
 	nfinished = 0;
@@ -688,12 +696,14 @@ merge_write_multi (wordtable *t[], unsigned int ntables, const char *filename, u
 		fwrite (b, 1, bp, ofs);
 	}
 	fseek (ofs, 0, SEEK_SET);
-	fwrite (&h, sizeof (header), 1, ofs);
+	fwrite (&h, sizeof (GT4ListHeader), 1, ofs);
 	fclose (ofs);
 	t_e = get_time ();
 	if (debug > 0) fprintf (stderr, "Writing %d tables with merging %.2f\n", ntables, t_e - t_s);
 	
 	free (b);
+
+	return 0;
 }
 
 void 

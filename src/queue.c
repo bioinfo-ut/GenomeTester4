@@ -272,8 +272,8 @@ task_file_read_nwords (TaskFile *tf, unsigned long long maxwords, unsigned int w
     if (tf->ifs) {
       fasta_reader_init_from_file (&tf->reader, wordsize, 1, tf->ifs);
     } else if (!tf->cdata) {
-      size_t csize;
-      tf->cdata = (const unsigned char *) mmap_by_filename ((const char *) tf->filename, &csize);
+      unsigned long long csize;
+      tf->cdata = gt4_mmap ((const char *) tf->filename, &csize);
       if (!tf->cdata) {
         fprintf (stderr, "Cannot mmap %s\n", tf->filename);
         return 1;

@@ -30,11 +30,12 @@
 
 #include "utils.h"
 
-const char * mmap_by_filename (const char *filename, size_t *size)
+const unsigned char *
+gt4_mmap (const char *filename, unsigned long long *size)
 {
 	struct stat st;
 	int status, handle;
-	const char *data;
+	const unsigned char *data;
 
 	status = stat (filename, &st);
 	if (status < 0) {
@@ -46,21 +47,21 @@ const char * mmap_by_filename (const char *filename, size_t *size)
 		return NULL;
 	}
 
-	data = (const char *) mmap (NULL, st.st_size, PROT_READ, MAP_PRIVATE, handle, 0);
-	if (data == (const char *) -1) {
+	data = mmap (NULL, st.st_size, PROT_READ, MAP_PRIVATE, handle, 0);
+	if (data == (const unsigned char *) -1) {
 		return NULL;
 	} else {
-		*size = (size_t)st.st_size;
+		*size = st.st_size;
 	}
 
 	close (handle);
 	return data;
 }
 
-int munmap_by_file (const char *file, size_t *size)
+void
+gt4_munmap (const unsigned char *cdata, unsigned long long csize)
 {
-	munmap ((void *) file, *size);
-	return 0;
+	munmap ((void *) cdata, csize);
 }
 
 /* this implementation is based on:

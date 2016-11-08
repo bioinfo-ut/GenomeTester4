@@ -6,7 +6,7 @@
  *
  * A toolkit for creating and manipulating k-mer lists from biological sequences
  * 
- * Copyright (C) 2014 University of Tartu
+ * Copyright (C) 2014-2016 University of Tartu
  *
  * Authors: Maarja Lepamets and Lauris Kaplinski
  *
@@ -24,15 +24,23 @@
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
+/*
+ * GT4WordMap is the most basic list container
+ */
 
 #ifndef __WORDMAP_C__
+/* Defaults to 0, can be increased to print debug information */
 extern unsigned int debug_wordmap;
-extern unsigned glistmaker_code_match;
+/* List tag "GT4C" encoded to big-endian 32-bit integer */
+extern unsigned GT4_LIST_CODE;
 #endif
 
 #define WORDMAP_ELEMENT_SIZE (sizeof (unsigned long long) + sizeof (unsigned int))
 
-typedef struct _header {
+typedef struct _GT4ListHeader GT4ListHeader;
+typedef struct _GT4WordMap GT4WordMap;
+
+struct _GT4ListHeader {
 	unsigned int code;
 	unsigned int version_major;
 	unsigned int version_minor;
@@ -40,7 +48,16 @@ typedef struct _header {
 	unsigned long long nwords;
 	unsigned long long totalfreq;
 	unsigned long long padding;
-} header;
+};
+
+struct _GT4WordMap {
+	char *filename;
+	const unsigned char *file_map;
+	unsigned long long file_size;
+	GT4ListHeader *header;
+	const unsigned char *wordlist;
+	void *user_data;
+};
 
 typedef struct _parameters {
 	unsigned int wordlength;
@@ -49,30 +66,20 @@ typedef struct _parameters {
 	double coef;
 } parameters;
 
-typedef struct _wordmap {
-	const char *filename;
-	unsigned char *file_map;
-	unsigned long long file_size;
-	header *header;
-	const char *wordlist;
-	void *additional_data;
-} wordmap;
-
 #define WORDMAP_WORD(w,i) (*((unsigned long long *) ((w)->wordlist + 12 * (i))))
 #define WORDMAP_FREQ(w,i) (*((unsigned int *) ((w)->wordlist + 12 * (i) + 8)))
 
-wordmap *wordmap_new (const char *listfilename, unsigned int scout);
-void wordmap_release (wordmap *map);
+/* Creates new GT4WordMap by memory-mapping file, returns NULL if error */
+/* If "scout" is true, a new thread is created that sequentially prefetces the map into virtual memory */
+GT4WordMap *gt4_wordmap_new (const char *listfilename, unsigned int scout);
+/* Releases allocated and mapped memory and cleans data fields */
+void gt4_wordmap_release (GT4WordMap *map);
+/* Releases wordmap and frees the structure */
+void gt4_wordmap_delete (GT4WordMap *map);
 
-void wordmap_delete (wordmap *map);
+unsigned int wordmap_search_query (GT4WordMap *wmap, unsigned long long query, parameters *p, int printall, unsigned int equalmmonly, unsigned int dosubtraction, GT4WordMap *querymap);
 
-void wordmap_set_additional_data (wordmap *map, void *data);
-
-unsigned int wordmap_search_query (wordmap *wmap, unsigned long long query, parameters *p,
-		int printall, int equalmmonly, int subtract, wordmap *querywmap);
-
-unsigned int search_query_from_both_strands (wordmap *wmap, unsigned long long query);
-
-unsigned int binary_search (wordmap *wmap, unsigned long long query);
+unsigned int gt4_wordmap_lookup_canonical (GT4WordMap *wmap, unsigned long long query);
+unsigned int gt4_wordmap_lookup (GT4WordMap *wmap, unsigned long long query);
 
 #endif /* WORDMAP_H_ */

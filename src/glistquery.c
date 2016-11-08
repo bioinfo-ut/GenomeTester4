@@ -34,23 +34,23 @@
 #include "common.h"
 
 typedef struct _querystructure {
-	wordmap *map;
+	GT4WordMap *map;
 	parameters *p;
 	unsigned int minfreq;
 	unsigned int maxfreq;
 	int printall;
 } querystructure;
 
-void search_one_query_string (wordmap *map, const char *querystring, parameters *p, unsigned int minfreq, unsigned int maxfreq, int printall);
-int search_n_query_strings (wordmap *map, const char *queryfile, parameters *p, unsigned int minfreq, unsigned int maxfreq, int printall);
-int search_fasta (wordmap *map, const char *seqfilename, parameters *p, unsigned int minfreq, unsigned int maxfreq, int printall);
-int search_list (wordmap *map, const char *querylistfilename, parameters *p, unsigned int minfreq, unsigned int maxfreq, int printall);
+void search_one_query_string (GT4WordMap *map, const char *querystring, parameters *p, unsigned int minfreq, unsigned int maxfreq, int printall);
+int search_n_query_strings (GT4WordMap *map, const char *queryfile, parameters *p, unsigned int minfreq, unsigned int maxfreq, int printall);
+int search_fasta (GT4WordMap *map, const char *seqfilename, parameters *p, unsigned int minfreq, unsigned int maxfreq, int printall);
+int search_list (GT4WordMap *map, const char *querylistfilename, parameters *p, unsigned int minfreq, unsigned int maxfreq, int printall);
 int process_word (FastaReader *reader, unsigned long long word, void *data);
-int print_full_map (wordmap *map);
-void get_statistics (wordmap *map);
-void print_median (wordmap *map);
-void print_distro (wordmap *map, unsigned int size);
-void print_gc (wordmap *map);
+int print_full_map (GT4WordMap *map);
+void get_statistics (GT4WordMap *map);
+void print_median (GT4WordMap *map);
+void print_distro (GT4WordMap *map, unsigned int size);
+void print_gc (GT4WordMap *map);
 void print_help (int exitvalue);
 
 int debug = 0;
@@ -63,7 +63,7 @@ int main (int argc, const char *argv[])
 	const char *listfilename = NULL;
 	const char *querystring = NULL, *queryfilename = NULL, *seqfilename = NULL, *querylistfilename = NULL;
 	parameters p = {0};
-	wordmap *map;
+	GT4WordMap *map;
 	char *end;
 	int printall = 0, getstat = 0, getmed = 0;
 	unsigned int minfreq = 0, maxfreq = UINT_MAX;
@@ -218,7 +218,7 @@ int main (int argc, const char *argv[])
 		print_help (1);	  
 	}
 
-	map = wordmap_new (listfilename, !getstat && use_scouts);
+	map = gt4_wordmap_new (listfilename, !getstat && use_scouts);
 	if (!map) {
 		fprintf (stderr, "Error: Could not make wordmap from file %s!\n", listfilename);
 		return 1;
@@ -229,7 +229,7 @@ int main (int argc, const char *argv[])
 		exit (1);
 	}
 
-	if (map->header->code != glistmaker_code_match) {
+	if (map->header->code != GT4_LIST_CODE) {
 		fprintf (stderr, "Error: %s is not a glistmaker v.4 file.\n", map->filename);
 		exit (1);
 	}
@@ -291,7 +291,7 @@ int main (int argc, const char *argv[])
 }
 
 /* print the whole list */
-int print_full_map (wordmap *map)
+int print_full_map (GT4WordMap *map)
 {
 	unsigned long long i, word;
 	unsigned int freq;
@@ -308,7 +308,7 @@ int print_full_map (wordmap *map)
 }
 
 /* use one specific query sequence */
-void search_one_query_string (wordmap *map, const char *querystring, parameters *p, unsigned int minfreq, unsigned int maxfreq, int printall)
+void search_one_query_string (GT4WordMap *map, const char *querystring, parameters *p, unsigned int minfreq, unsigned int maxfreq, int printall)
 {
 	unsigned int freq = 0;
 	unsigned long long query;
@@ -320,7 +320,7 @@ void search_one_query_string (wordmap *map, const char *querystring, parameters 
 }
 
 /* use file which consist of many queries */
-int search_n_query_strings (wordmap *map, const char *queryfile, parameters *p, unsigned int minfreq, unsigned int maxfreq, int printall)
+int search_n_query_strings (GT4WordMap *map, const char *queryfile, parameters *p, unsigned int minfreq, unsigned int maxfreq, int printall)
 {
 	FILE *f;
 	char querystring[256];
@@ -350,12 +350,13 @@ int search_n_query_strings (wordmap *map, const char *queryfile, parameters *p, 
 	return 0;
 }
 
-int search_fasta (wordmap *map, const char *seqfilename, parameters *p, unsigned int minfreq, unsigned int maxfreq, int printall)
+int
+search_fasta (GT4WordMap *map, const char *seqfilename, parameters *p, unsigned int minfreq, unsigned int maxfreq, int printall)
 {
-	const char *ff;
-	size_t size;
+	const unsigned char *cdata;
+	unsigned long long csize;
 	querystructure qs = {0};
-	int v;
+	int result;
 	FastaReader r;
 
 	qs.map = map;
@@ -363,23 +364,23 @@ int search_fasta (wordmap *map, const char *seqfilename, parameters *p, unsigned
 	qs.minfreq = minfreq;
 	qs.maxfreq = maxfreq;
 	qs.printall = printall;
-	ff = mmap_by_filename (seqfilename, &size);
+	cdata = gt4_mmap (seqfilename, &csize);
 
-	fasta_reader_init_from_data (&r, p->wordlength, 0, (const unsigned char *) ff, size);
-	v = fasta_reader_read_nwords (&r, size, NULL, NULL, NULL, NULL, process_word, (void *) &qs);
+	fasta_reader_init_from_data (&r, p->wordlength, 0, cdata, csize);
+	result = fasta_reader_read_nwords (&r, csize, NULL, NULL, NULL, NULL, process_word, (void *) &qs);
 	/* v = fasta_reader_read_nwords (ff, size, p->wordlength, (void *) &qs, 0, 0, NULL, NULL, process_word); */
 	fasta_reader_release (&r);
-	if (v) return v;
-	return 0;
+	gt4_munmap (cdata, csize);
+	return result;
 }
 
-int search_list (wordmap *map, const char *querylistfilename, parameters *p, unsigned int minfreq, unsigned int maxfreq, int printall)
+int search_list (GT4WordMap *map, const char *querylistfilename, parameters *p, unsigned int minfreq, unsigned int maxfreq, int printall)
 {
-	wordmap *qmap;
+	GT4WordMap *qmap;
 	unsigned long long i, word = 0L;
 	unsigned int freq;
 	
-	qmap = wordmap_new (querylistfilename, use_scouts);
+	qmap = gt4_wordmap_new (querylistfilename, use_scouts);
 	
 	if (map->header->wordlength != qmap->header->wordlength) return GT_INCOMPATIBLE_WORDLENGTH_ERROR;
 	
@@ -400,7 +401,7 @@ int process_word (FastaReader *reader, unsigned long long word, void *data)
 	return 0;
 }
 
-void get_statistics (wordmap *map)
+void get_statistics (GT4WordMap *map)
 {
 	fprintf (stdout, "Statistics of %s <<Built with glistmaker version %d.%d>>\n", map->filename, map->header->version_major, map->header->version_minor);
 	fprintf (stdout, "Wordlength\t%u\n", map->header->wordlength);
@@ -409,7 +410,7 @@ void get_statistics (wordmap *map)
 	return;
 }
 
-void print_median (wordmap *map)
+void print_median (GT4WordMap *map)
 {
 	unsigned int min, max, med, gmin, gmax;
 	unsigned long long i;
@@ -462,7 +463,7 @@ void print_median (wordmap *map)
 }
 
 void
-print_distro (wordmap *map, unsigned int max)
+print_distro (GT4WordMap *map, unsigned int max)
 {
 	unsigned long long i;
 	unsigned long long *d = (unsigned long long *) malloc (max * 8);
@@ -477,7 +478,7 @@ print_distro (wordmap *map, unsigned int max)
 }
 
 void
-print_gc (wordmap *map)
+print_gc (GT4WordMap *map)
 {
 	unsigned long long i;
 	unsigned long long count = 0;
@@ -508,7 +509,7 @@ void print_help (int exit_value)
 	fprintf (stderr, "    -f, --queryfile           - list of query words in a file\n");
 	fprintf (stderr, "    -s, --seqfile             - FastA/FastQ file\n");
 	fprintf (stderr, "    -l, --listfile            - list file made by glistmaker\n");
-	fprintf (stderr, "    -mm, --mismatch NUMBER    - specify number of mismatches (default 0, can be used with -d and -dd)\n");
+	fprintf (stderr, "    -mm, --mismatch NUMBER    - specify number of mismatches (default 0)\n");
 	fprintf (stderr, "    -p, --perfectmatch NUMBER - specify number of 3' perfect matches (default 0)\n");
 	fprintf (stderr, "    -min, --minfreq NUMBER    - minimum frequency of the printed words (default 0)\n");
 	fprintf (stderr, "    -max, --maxfreq NUMBER    - maximum frequency of the printed words (default MAX_UINT)\n");

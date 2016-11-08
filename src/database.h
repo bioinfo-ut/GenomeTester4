@@ -38,21 +38,47 @@ struct _KMerDB {
   Trie trie;
 };
 
+/* Reads */
+
+typedef struct _Read Read;
+
+struct _Read {
+  unsigned long long file_pos;
+  unsigned int file_idx;
+  unsigned int kmer_idx;
+};
+
+/* Read list */
+
+typedef struct _ReadList ReadList;
+
+struct _ReadList {
+  ReadList *next;
+  Read *read;
+};
+
 /* Return number of nodes successfully read */
 unsigned int read_db_from_text (KMerDB *db, const unsigned char *cdata, unsigned long long csize, unsigned int max_kmers_per_node, unsigned int count_bits);
 
 /*
  * Binary representation
  *
- * 0  : wordsize (4)
- * 4  : node_bits (4)
- * 8  : kmer_bits (4)
- * 12 : dummy (4)
- * 16 : n_nodes (8)
- * 24 : n_kmers (8)
- * 32 : names_size (8)
- * 40 : nodes_blocksize (8)
- * 48 : Nodes
+ * 0  : "GMDB" (4)
+ * 4  : major (2)
+ * 6  : minor (2)
+ * 8  : wordsize (4)
+ * 12 : node_bits (4)
+ * 16 : kmer_bits (4)
+ * 20 : dummy (4)
+ * 24 : n_nodes (8)
+ * 32 : n_kmers (8)
+ * 40 : names_size (8)
+ * 48 : nodes_start (8)
+ * 56 : kmers_start (8)
+ * 64 : names_start (8)
+ * 72 : trie_start (8)
+ *    : nodes_blocksize (8)
+ *    : Nodes
  *    : kmers_blocksize (8)
  *    : Kmers
  *    : names_blocksize (8)

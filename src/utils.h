@@ -26,11 +26,11 @@
 
 #include <stdlib.h>
 
-/* memory-map a given file */
-const char *mmap_by_filename (const char *filename, size_t *size);
+/* Memory-map a given file */
+const unsigned char *gt4_mmap (const char *filename, unsigned long long *csize);
 
-/* memory-unmap a given file */
-int munmap_by_file (const char *file, size_t *size);
+/* Memory-unmap a previously mapped file */
+void gt4_munmap (const unsigned char *cdata, unsigned long long csize);
 
 void insertionSort (unsigned long long *begin, unsigned long long *end, unsigned int *begfreq);
 

@@ -52,6 +52,7 @@ struct _SNPQueue {
 
 /* Main thread loop */
 static void *process (void *arg);
+static int start_sequence (FastaReader *reader, void *data);
 static int read_word_2 (FastaReader *reader, unsigned long long word, void *data);
 static int compare_counts (const void *lhs, const void *rhs);
 static unsigned int get_pair_median (KMerDB *db);
@@ -195,8 +196,8 @@ main (int argc, const char *argv[])
   if (db_name) {
     /* Read text database */
     const unsigned char *cdata;
-    size_t csize;
-    cdata = (const unsigned char *) mmap_by_filename (db_name, &csize);
+    unsigned long long csize;
+    cdata = gt4_mmap (db_name, &csize);
     if (!cdata) {
       fprintf (stderr, "Cannot mmap database file %s\n", db_name);
       exit (1);
@@ -211,10 +212,10 @@ main (int argc, const char *argv[])
   if (dbb) {
     /* Read binary database */
     const unsigned char *cdata;
-    size_t csize;
+    unsigned long long csize;
 
     if (debug) fprintf (stderr, "Loading binary database %s\n", dbb);
-    cdata = (const unsigned char *) mmap_by_filename (dbb, &csize);
+    cdata = gt4_mmap (dbb, &csize);
     if (!cdata) {
       fprintf (stderr, "Cannot mmap %s\n", dbb);
       exit (1);
@@ -409,7 +410,7 @@ process (void *arg)
       /* Read words from file */
       tt->nwords = 0;
       if (debug > 0) fprintf (stderr, "Thread %d: reading file %s from %llu\n", idx, tf->filename, tf->reader.cpos);
-      if (task_file_read_nwords (tf, BLOCK_SIZE, snpq->db->wordsize, NULL, NULL, NULL, NULL, read_word_2, tt)) {
+      if (task_file_read_nwords (tf, BLOCK_SIZE, snpq->db->wordsize, start_sequence, NULL, NULL, NULL, read_word_2, tt)) {
         fprintf (stderr, "Cannot create FastaReader fro %s\n", tf->filename);
         exit (1);
       }
@@ -458,6 +459,7 @@ process (void *arg)
           fprintf (stderr, "DB inconsistency: KMer index %u is bigger than the number of kmers %u\n", kmer, db->nodes[node].nkmers);
           break;
         }
+        /* Increase kmer count */
         if (db->count_bits == 16) {
           if (db->kmers_16[db->nodes[node].kmers + kmer] < 65535) db->kmers_16[db->nodes[node].kmers + kmer] += 1;
         } else {
@@ -489,6 +491,14 @@ process (void *arg)
   pthread_cond_broadcast (&snpq->queue.cond);
   pthread_mutex_unlock (&snpq->queue.mutex);
 
+  return 0;
+}
+
+static int
+start_sequence (FastaReader *reader, void *data)
+{
+  //TaskTable *tt = (TaskTable *) data;
+  if (debug > 2) fprintf (stderr, "%s\n", reader->name);
   return 0;
 }
 

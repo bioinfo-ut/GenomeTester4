@@ -37,65 +37,75 @@
 
 unsigned int debug_wordmap = 0;
 
-unsigned int glistmaker_code_match = 'G' << 24 | 'T' << 16 | '4' << 8 | 'C';
+unsigned int GT4_LIST_CODE = 'G' << 24 | 'T' << 16 | '4' << 8 | 'C';
 
-
-wordmap * 
-wordmap_new (const char *listfilename, unsigned int scout)
+GT4WordMap * 
+gt4_wordmap_new (const char *listfilename, unsigned int scout)
 {
-	const char *content;
-	size_t size;
-	wordmap *map = (wordmap *) malloc (sizeof (wordmap));
-	if (!map) return NULL;
-	
-	memset (map, 0, sizeof (wordmap));
-	map->filename = listfilename;
-	
-	content = mmap_by_filename (listfilename, &size);
-	if (!content) {
-		wordmap_delete (map);
+	const unsigned char *cdata;
+	unsigned long long csize;
+	GT4WordMap *map = (GT4WordMap *) malloc (sizeof (GT4WordMap));
+	if (!map) {
+		fprintf (stderr, "gt4_wordmap_new: could not allocate map\n");
 		return NULL;
 	}
-	map->file_map = (unsigned char *) content;
-	map->file_size = size;
-	map->header = (header *) content;
-	if (map->header->code != glistmaker_code_match || size != sizeof (header) + map->header->nwords * 12) {
-		free ((void *) content);
-		wordmap_delete (map);
+	memset (map, 0, sizeof (GT4WordMap));
+
+	map->filename = strdup (listfilename);
+	cdata = gt4_mmap (listfilename, &csize);
+	if (!cdata) {
+		fprintf (stderr, "gt4_wordmap_new: could not mmap file %s\n", listfilename);
+		gt4_wordmap_delete (map);
 		return NULL;
 	}
-	map->wordlist = content + sizeof (header);
+	map->file_map = cdata;
+	map->file_size = csize;
+	map->header = (GT4ListHeader *) cdata;
+	if (map->header->code != GT4_LIST_CODE) {
+		fprintf (stderr, "gt4_wordmap_new: invalid file tag (%x, should be %x)\n", map->header->code, GT4_LIST_CODE);
+		gt4_munmap (cdata, csize);
+		gt4_wordmap_delete (map);
+		return NULL;
+	}
+	if (csize != sizeof (GT4ListHeader) + map->header->nwords * 12) {
+		fprintf (stderr, "gt4_wordmap_new: invalid file size (%llu, should be %llu)\n", csize, sizeof (GT4ListHeader) + map->header->nwords * 12);
+		gt4_munmap (cdata, csize);
+		gt4_wordmap_delete (map);
+		return NULL;
+	}
+	map->wordlist = cdata + sizeof (GT4ListHeader);
 	if (scout) {
-		scout_mmap ((const unsigned char *) content, size);
+		scout_mmap ((const unsigned char *) cdata, csize);
 	}
 	return map;
 }
 
 void
-wordmap_release (wordmap *map)
+gt4_wordmap_release (GT4WordMap *map)
 {
-	munmap (map->file_map, map->file_size);
+	if (map->filename) {
+		free (map->filename);
+		map->filename = NULL;
+	}
+	if (map->file_map) {
+		munmap ((void *) map->file_map, map->file_size);
+		map->file_map = NULL;
+		map->file_size = 0;
+	}
+	map->header = NULL;
+	map->wordlist = NULL;
+	map->user_data = NULL;
 }
 
-void 
-wordmap_delete (wordmap *map)
+void
+gt4_wordmap_delete (GT4WordMap *map)
 {
-	if (map->wordlist) free ((void *) map->wordlist);
-	if (map->header) free ((void *) map->header);
-	if (map->additional_data) free ((void *) map->additional_data);
-	if (map) free ((void *) map);
-	return;
-}
-
-void 
-wordmap_set_additional_data (wordmap *map, void *additional_data)
-{
-	map->additional_data = additional_data;
+	gt4_wordmap_release (map);
+	free (map);
 }
 
 unsigned int 
-wordmap_search_query (wordmap *map, unsigned long long query, parameters *p, int printall, int equalmmonly,
-		int dosubtraction, wordmap *querymap)
+wordmap_search_query (GT4WordMap *map, unsigned long long query, parameters *p, int printall, unsigned int equalmmonly, unsigned int dosubtraction, GT4WordMap *querymap)
 {
 	static wordtable mm_table = {0};
 	unsigned long long i, nwords = 0L;
@@ -103,31 +113,28 @@ wordmap_search_query (wordmap *map, unsigned long long query, parameters *p, int
 
 	/* if no mismatches */
 	if (!p->nmm) {
-		return search_query_from_both_strands (map, query);
+		return gt4_wordmap_lookup (map, query);
 	}
 
 	mm_table.wordlength = p->wordlength;
 
 	/* find and set table size */
-	if (mm_table.nwordslots == 0) {
+	if (!mm_table.nwords) {
 		nwords = generate_mismatches (NULL, query, p->wordlength, 0, p->nmm, p->pm3, 0, 1, 0);
 		wordtable_ensure_size (&mm_table, nwords, 0);
 		if (debug_wordmap > 1) {
 			fprintf (stderr, "MM Table size %llu, num mismatches %llu\n", mm_table.nwords, nwords);
 		}
 	}
-	
 	generate_mismatches (&mm_table, query, p->wordlength, 0, p->nmm, p->pm3, 0, 0, equalmmonly);
-	
 	if (debug_wordmap > 1) {
 		fprintf (stderr, "MM Table size %llu\n", mm_table.nwords);
 	}
 
 	for (i = 0; i < mm_table.nwords; i++) {
-
 		if (dosubtraction) {
-			querycount = search_query_from_both_strands (querymap, mm_table.words[i]);
-			currentcount = search_query_from_both_strands (map, mm_table.words[i]);
+			querycount = gt4_wordmap_lookup (querymap, mm_table.words[i]);
+			currentcount = gt4_wordmap_lookup (map, mm_table.words[i]);
 			if (currentcount > querycount) {
 				if (debug_wordmap > 1) {
 					fprintf (stderr, "%llu %llu %llu querycount %u currentcount %u\n", query, i, mm_table.words[i], querycount, currentcount);
@@ -136,9 +143,8 @@ wordmap_search_query (wordmap *map, unsigned long long query, parameters *p, int
 				return ~0L;
 			}
 			count += (currentcount - querycount);
-
 		} else {
-			currentcount = search_query_from_both_strands (map, mm_table.words[i]);
+			currentcount = gt4_wordmap_lookup (map, mm_table.words[i]);
 			count += currentcount;
 			if (printall && currentcount > 0) {
 				fprintf (stdout, "%s\t%u\n", word_to_string (mm_table.words[i], mm_table.wordlength), currentcount);
@@ -151,25 +157,22 @@ wordmap_search_query (wordmap *map, unsigned long long query, parameters *p, int
 }
 
 unsigned int 
-binary_search (wordmap *map, unsigned long long query)
+gt4_wordmap_lookup_canonical (GT4WordMap *map, unsigned long long query)
 {
 	unsigned long long word, low, high, mid;
-	unsigned int freq;
 	low = 0;
 	high = map->header->nwords - 1;
 	mid = (low + high) / 2;
 			
 	while (low <= high) {
-		word = *((unsigned long long *) (map->wordlist + mid * (sizeof (unsigned long long) + sizeof (unsigned int))));
-				
+		word = WORDMAP_WORD (map, mid);
 		if (word < query) {
 			low = mid + 1;
 		} else if (word > query) {
 			if (mid == 0) break;
 			high = mid - 1;
 		} else {
-			freq = *((unsigned int *) (map->wordlist + mid * (sizeof (unsigned long long) + sizeof (unsigned int)) + sizeof (unsigned long long)));
-			return freq;
+			return WORDMAP_FREQ (map, mid);
 		}
 		mid = (low + high) / 2;
 	}
@@ -177,15 +180,11 @@ binary_search (wordmap *map, unsigned long long query)
 }
 
 unsigned int 
-search_query_from_both_strands (wordmap *map, unsigned long long query)
+gt4_wordmap_lookup (GT4WordMap *map, unsigned long long query)
 {
-	unsigned int freqfw, freqrv;
-	freqfw = binary_search (map, query);
-	if (!freqfw) {
-		freqrv = binary_search (map, get_reverse_complement (query, map->header->wordlength));
-		return freqrv;
-	}
-	return freqfw;
+	unsigned long long rev = get_reverse_complement (query, map->header->wordlength);
+	if (rev < query) query = rev;
+	return gt4_wordmap_lookup_canonical (map, query);
 }
 
 

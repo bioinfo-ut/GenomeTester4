@@ -321,30 +321,30 @@ wordtable_count_unique (wordtable *table)
 
 #define BSIZE 10000
 
-void 
+unsigned int
 wordtable_write_to_file (wordtable *table, const char *outputname, unsigned int cutoff)
 {
 	unsigned long long i, count, totalfreq;
 	char fname[256]; /* the length of the output name is limited and checked in main(..) method */
 	FILE *f;
-	header h;
+	GT4ListHeader h;
 	char b[BSIZE + 12];
 	unsigned int bp;
-	if (table->nwords == 0) return;
+	if (table->nwords == 0) return 0;
 
-	memset (&h, 0, sizeof (header));
+	memset (&h, 0, sizeof (GT4ListHeader));
 
 	sprintf (fname, "%s_%d.list", outputname, table->wordlength);
 	f = fopen (fname, "w");
 	if (!f) {
 		fprintf (stderr, "Cannot open output file %s\n", fname);
-		exit (1);
+		return 1;
 	}
 #if 0
 	b = malloc (1024 * 1024);
 	setvbuf (f, b, _IOFBF, 1024 * 1024);
 #endif
-	fwrite (&h, sizeof (header), 1, f);
+	fwrite (&h, sizeof (GT4ListHeader), 1, f);
 
 	count = 0;
 	totalfreq = 0;
@@ -371,20 +371,20 @@ wordtable_write_to_file (wordtable *table, const char *outputname, unsigned int 
 		fwrite (b, 1, bp, f);
 	}
 
-	h.code = glistmaker_code_match;
+	h.code = GT4_LIST_CODE;
 	h.version_major = VERSION_MAJOR;
 	h.version_minor = VERSION_MINOR;
 	h.wordlength = table->wordlength;
 	h.nwords = count;
 	h.totalfreq = totalfreq;
-	h.padding = sizeof (header);
+	h.padding = sizeof (GT4ListHeader);
 	fseek (f, 0, SEEK_SET);
-	fwrite (&h, sizeof (header), 1, f);
+	fwrite (&h, sizeof (GT4ListHeader), 1, f);
 	fclose (f);
 #if 0
 	free (b);
 #endif
-	return;
+	return 0;
 }
 
 void write_word_to_file (unsigned long long word, unsigned freq, FILE *f)

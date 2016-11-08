@@ -112,7 +112,7 @@ poisson (unsigned int k, double lambda)
 double
 dbinom (unsigned int x, unsigned int n, double p)
 {
-  double c = combinations (n, x);
+  double c = combinations_d (n, x);
   double p0 =  pow (p, x);
   double p1 =  pow (1 - p, n - x);
   return c * p0 * p1;
@@ -121,7 +121,7 @@ dbinom (unsigned int x, unsigned int n, double p)
 double
 log_dbinom (unsigned int x, unsigned int n, double p)
 {
-  double c = log_combinations (n, x);
+  double c = log_combinations_d (n, x);
   double p0 = log (p) * x;
   double p1 = log (1 - p) * (n - x);
   return c + p0 + p1;

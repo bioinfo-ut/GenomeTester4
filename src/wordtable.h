@@ -65,7 +65,7 @@ void wordtable_merge_frequencies (wordtable *table);
 
 unsigned long long wordtable_count_unique(wordtable *table);
 
-void wordtable_write_to_file (wordtable *table, const char *outputname, unsigned int cutoff);
+unsigned int wordtable_write_to_file (wordtable *table, const char *outputname, unsigned int cutoff);
 
 void write_word_to_file (unsigned long long word, unsigned freq, FILE *f);
 

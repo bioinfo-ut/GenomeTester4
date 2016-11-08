@@ -211,7 +211,11 @@ calculate_allele_freq (SNPCall *calls, unsigned int set[], unsigned int set_size
       npB += 1;
     }
   }
-  return (float) (ppB / npB);
+  if (npB) {
+    return (float) (ppB / npB);
+  } else {
+    return 0;
+  }
 }
 
 static void
@@ -249,8 +253,16 @@ train_model (SNPCall *calls, unsigned int ncalls, unsigned int max_training, uns
   if (debug) fprintf (stderr, "done\n");
   if (debug) {
     fprintf (stderr, "A %f B %f\n", s0, s1);
-    fprintf (stderr, "Training size %u mean %.2f\n", ntrain, keskmine);
+    fprintf (stderr, "Training size %u mean %.g\n", ntrain, keskmine);
     fprintf (stderr, "pB %.3f\n", *pB);
+  }
+  if (keskmine == 0) {
+    fprintf (stderr, "No calls in training sample, aborting model optimization\n");
+    return;
+  }
+  if (pB == 0) {
+    fprintf (stderr, "No B allele in training sample, aborting model optimization\n");
+    return;
   }
 
   /* Genoomis mitteesineva k-meeri keskmine kohtamiste arv readide seas (keskmine vigade arv) - l_viga */
@@ -484,7 +496,7 @@ main (int argc, const char *argv[])
   int aidx;
   float params[7], x_params[7];
   const unsigned char *cdata;
-  size_t csize;
+  unsigned long long csize;
   unsigned int nlines;
   const unsigned char **lines;
   unsigned int na, nx, ny;
@@ -611,7 +623,7 @@ main (int argc, const char *argv[])
   
   /* Read calls */
   if (debug) fprintf (stderr, "Reading %s...", call_fn);
-  cdata = (const unsigned char *) mmap_by_filename (call_fn, &csize);
+  cdata = (const unsigned char *) gt4_mmap (call_fn, &csize);
   if (!cdata) {
     fprintf (stderr, "Cannot read %s\n", call_fn);
     exit (1);
