@@ -7,37 +7,37 @@ CXX  = gcc
 
 LISTMAKER_SOURCES = \
 	glistmaker.c \
-	wordtable.c \
-	wordmap.c \
-	fasta.c \
-	buffer.c \
-	sequence.c \
+	wordtable.c wordtable.h \
+	wordmap.c wordmap.h \
+	fasta.c fasta.h \
+	buffer.c buffer.h \
+	sequence.c sequence.h \
 	queue.c queue.h \
-	common.c \
-	utils.c
+	common.c common.h \
+	utils.c utils.h
 
 LISTMAKER2_SOURCES = \
 	glistmaker2.c \
-	wordtable.c \
-	wordmap.c \
-	fasta.c \
-	buffer.c \
-	sequence.c \
-	queue.c \
-	common.c \
+	wordtable.c wordtable.h \
+	wordmap.c wordmap. h \
+	fasta.c fasta.h \
+	buffer.c buffer.h \
+	sequence.c sequence.h \
+	queue.c queue.h \
+	common.c common.h \
 	trie.c trie.h \
-	utils.c
+	utils.c utils.h
 
 LISTQUERY_SOURCES = \
 	glistquery.c \
-	wordtable.c \
-	wordmap.c \
-	fasta.c \
-	buffer.c \
-	sequence.c \
-	common.c \
+	wordtable.c wordtable.h \
+	wordmap.c wordmap.h \
+	fasta.c fasta.h \
+	buffer.c buffer.h \
+	sequence.c sequence.h \
+	common.c common.h \
 	queue.c queue.h \
-	utils.c
+	utils.c utils.h
 
 LISTCOMPARE_SOURCES = \
 	glistcompare.c \
@@ -60,7 +60,7 @@ GDISTRIBUTION_SOURCES = \
 	sequence.c sequence.h
 
 GMERCOUNTER_SOURCES = \
-	gmercounter.c \
+	gmer_counter.c \
 	trie.c trie.h \
 	wordmap.c wordmap.h \
 	sequence.c sequence.h \
