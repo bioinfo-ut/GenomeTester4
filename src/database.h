@@ -1,5 +1,5 @@
-#ifndef __DATABASE_H__
-#define __DATABASE_H__
+#ifndef __GM4_DATABASE_H__
+#define __GM4_DATABASE_H__
 
 #include <stdio.h>
 
@@ -43,9 +43,12 @@ struct _KMerDB {
 typedef struct _Read Read;
 
 struct _Read {
-  unsigned long long file_pos;
+  /* Position of name entry */
+  unsigned long long name_pos;
+  /* Start of kmer relative to the start of name */
+  unsigned int kmer_pos;
+  /* File number */
   unsigned int file_idx;
-  unsigned int kmer_idx;
 };
 
 /* Read list */
@@ -54,8 +57,10 @@ typedef struct _ReadList ReadList;
 
 struct _ReadList {
   ReadList *next;
-  Read *read;
+  Read read;
 };
+
+ReadList *gm4_read_list_new (void);
 
 /* Return number of nodes successfully read */
 unsigned int read_db_from_text (KMerDB *db, const unsigned char *cdata, unsigned long long csize, unsigned int max_kmers_per_node, unsigned int count_bits);
@@ -83,6 +88,7 @@ unsigned int read_db_from_text (KMerDB *db, const unsigned char *cdata, unsigned
  *    : Kmers
  *    : names_blocksize (8)
  *    : Names
+ *    : trie_blocksize (8)
  *    : Trie
 */
 

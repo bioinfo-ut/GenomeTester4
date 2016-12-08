@@ -115,6 +115,8 @@ void maker_queue_release (MakerQueue *mq);
 struct _TaskFile {
         TaskFile *next;
         const char *filename;
+        /* File index */
+        unsigned int idx;
         FILE *ifs;
         unsigned int close_on_delete;
         const unsigned char *cdata;

@@ -24,6 +24,7 @@
 #define MAX_KMERS 25
 
 unsigned int debug = 0;
+unsigned int compile_index = 1;
 
 typedef struct _TaskTable TaskTable;
 struct _TaskTable {
@@ -31,6 +32,10 @@ struct _TaskTable {
   unsigned int nwords;
   unsigned long long *words;
   unsigned int *alleles;
+  /* Read indexing */
+  unsigned int file_idx;
+  unsigned long long name_pos;
+  Read *reads;
 };
 
 TaskTable *task_table_new ();
@@ -48,12 +53,14 @@ struct _SNPQueue {
   TaskTable *full_tables;
   /* Data */
   KMerDB *db;
+  /* Read lists */
+  ReadList **reads;
 };
 
 /* Main thread loop */
 static void *process (void *arg);
 static int start_sequence (FastaReader *reader, void *data);
-static int read_word_2 (FastaReader *reader, unsigned long long word, void *data);
+static int read_word (FastaReader *reader, unsigned long long word, void *data);
 static int compare_counts (const void *lhs, const void *rhs);
 static unsigned int get_pair_median (KMerDB *db);
 
@@ -157,6 +164,8 @@ main (int argc, const char *argv[])
       nthreads = strtol (argv[i], NULL, 10);
     } else if (!strcmp (argv[i], "--low_memory")) {
       lowmem = 1;
+    } else if (!strcmp (argv[i], "--count_trie_allocations")) {
+      gt4_trie_debug |= GT4_TRIE_COUNT_ALLOCATIONS;
     } else if (!strcmp (argv[i], "-D")) {
       /* Debug */
       debug += 1;
@@ -228,6 +237,9 @@ main (int argc, const char *argv[])
     if (debug) fprintf (stderr, "Finished loading binary database\n");
   }
 
+  if (gt4_trie_debug & GT4_TRIE_COUNT_ALLOCATIONS) {
+    fprintf (stderr, "Trie: %u allocations, total memory %llu MiB\n", db.trie.num_allocations, db.trie.total_memory / (1024 * 1024));
+  }
   if (wdb) {
     /* Write binary database */
     FILE *ofs;
@@ -259,6 +271,7 @@ main (int argc, const char *argv[])
         tf = task_file_new (seqnames[i], !lowmem);
       }
       tf->next = snpq.files;
+      tf->idx = i;
       snpq.files = tf;
       snpq.nfiles += 1;
     }
@@ -266,6 +279,10 @@ main (int argc, const char *argv[])
       TaskTable *tt = task_table_new ();
       tt->next = snpq.free_tables;
       snpq.free_tables = tt;
+    }
+    if (compile_index) {
+      snpq.reads = (ReadList **) malloc (db.n_kmers * sizeof (ReadList *));
+      memset (snpq.reads, 0, db.n_kmers * sizeof (ReadList *));
     }
     /* Initialize main mutex and cond */
     queue_init (&snpq.queue);
@@ -369,6 +386,16 @@ main (int argc, const char *argv[])
           current += 1;
         }
       }
+      if (compile_index) {
+        for (j = 0; j < db.nodes[i].nkmers; j++) {
+          unsigned int kmer_idx;
+          ReadList *rl;
+          kmer_idx = db.nodes[i].kmers + j;
+          for (rl = snpq.reads[kmer_idx]; rl; rl = rl->next) {
+            fprintf (stdout, " (%u/%llu/%u)", rl->read.file_idx, rl->read.name_pos, rl->read.kmer_pos);
+          }
+        }
+      }
       fprintf (stdout, "\n");
     }
   }
@@ -402,6 +429,7 @@ process (void *arg)
     if ((snpq->files) && (snpq->free_tables)) {
       TaskFile *tf;
       TaskTable *tt;
+      /* Create new file reading task */
       tf = snpq->files;
       snpq->files = tf->next;
       tt = snpq->free_tables;
@@ -409,8 +437,9 @@ process (void *arg)
       pthread_mutex_unlock (&snpq->queue.mutex);
       /* Read words from file */
       tt->nwords = 0;
+      tt->file_idx = tf->idx;
       if (debug > 0) fprintf (stderr, "Thread %d: reading file %s from %llu\n", idx, tf->filename, tf->reader.cpos);
-      if (task_file_read_nwords (tf, BLOCK_SIZE, snpq->db->wordsize, start_sequence, NULL, NULL, NULL, read_word_2, tt)) {
+      if (task_file_read_nwords (tf, BLOCK_SIZE, snpq->db->wordsize, start_sequence, NULL, NULL, NULL, read_word, tt)) {
         fprintf (stderr, "Cannot create FastaReader fro %s\n", tf->filename);
         exit (1);
       }
@@ -430,6 +459,7 @@ process (void *arg)
     } else if (snpq->full_tables) {
       TaskTable *tt;
       unsigned int i;
+      /* Create new lookup task */
       tt = (TaskTable *) snpq->full_tables;
       snpq->full_tables = tt->next;
 
@@ -446,7 +476,7 @@ process (void *arg)
 
       /* fixme: Create separate task / mutex */
       for (i = 0; i <  tt->nwords; i++) {
-        unsigned int code, node, kmer;
+        unsigned int code, node, kmer, kmer_idx;
         code = tt->alleles[i];
         if (!code) continue;
         node = (code >> db->kmer_bits) - 1;
@@ -460,10 +490,17 @@ process (void *arg)
           break;
         }
         /* Increase kmer count */
+        kmer_idx = db->nodes[node].kmers + kmer;
         if (db->count_bits == 16) {
-          if (db->kmers_16[db->nodes[node].kmers + kmer] < 65535) db->kmers_16[db->nodes[node].kmers + kmer] += 1;
+          if (db->kmers_16[kmer_idx] < 65535) db->kmers_16[kmer_idx] += 1;
         } else {
-          if (db->kmers_32[db->nodes[node].kmers + kmer] < 0xffffffff) db->kmers_32[db->nodes[node].kmers + kmer] += 1;
+          if (db->kmers_32[kmer_idx] < 0xffffffff) db->kmers_32[kmer_idx] += 1;
+        }
+        if (compile_index) {
+          ReadList *rl = gm4_read_list_new ();
+          rl->read = tt->reads[i];
+          rl->next = snpq->reads[kmer_idx];
+          snpq->reads[kmer_idx] = rl;
         }
       }
       tt->next = snpq->free_tables;
@@ -497,16 +534,23 @@ process (void *arg)
 static int
 start_sequence (FastaReader *reader, void *data)
 {
-  //TaskTable *tt = (TaskTable *) data;
+  TaskTable *tt = (TaskTable *) data;
   if (debug > 2) fprintf (stderr, "%s\n", reader->name);
+  tt->name_pos = reader->name_pos;
   return 0;
 }
 
 static int
-read_word_2 (FastaReader *reader, unsigned long long word, void *data)
+read_word (FastaReader *reader, unsigned long long word, void *data)
 {
   TaskTable *tt = (TaskTable *) data;
-  tt->words[tt->nwords++] = word;
+  tt->words[tt->nwords] = word;
+  if (compile_index) {
+    tt->reads[tt->nwords].file_idx = tt->file_idx;
+    tt->reads[tt->nwords].name_pos = tt->name_pos;
+    tt->reads[tt->nwords].kmer_pos = reader->cpos - tt->name_pos;
+  }
+  tt->nwords += 1;
   return 0;
 }
 
@@ -586,6 +630,9 @@ task_table_new ()
   memset (tt, 0, sizeof (TaskTable));
   tt->words = (unsigned long long *) malloc (BLOCK_SIZE * 8);
   tt->alleles = (unsigned int *) malloc (BLOCK_SIZE * 4);
+  if (compile_index) {
+    tt->reads = (Read *) malloc (BLOCK_SIZE * sizeof (Read));
+  }
   return tt;
 }
 
@@ -594,5 +641,8 @@ task_table_free (TaskTable *tt)
 {
   free (tt->words);
   free (tt->alleles);
+  if (tt->reads) {
+    free (tt->reads);
+  }
   free (tt);
 }

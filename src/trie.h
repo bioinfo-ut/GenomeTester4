@@ -1,8 +1,12 @@
-#ifndef __TRIE_H__
-#define __TRIE_H__
+#ifndef __GT4_TRIE_H__
+#define __GT4_TRIE_H__
 
 #include <stdio.h>
 #include <pthread.h>
+
+#ifndef __GT4_TRIE_C__
+extern unsigned int gt4_trie_debug;
+#endif
 
 /* Block of Trie structures */
 
@@ -16,6 +20,9 @@ struct _TrieNodeBranch {
   unsigned long long word : 26;
   TrieRef children[2];
 };
+
+/* Debug flags */
+#define GT4_TRIE_COUNT_ALLOCATIONS 1
 
 /* Allocation */
 #define TRIE_BLOCK_BITS 30
@@ -64,8 +71,8 @@ struct _TrieNodeBranch {
 typedef struct _TrieAllocator TrieAllocator;
 struct _TrieAllocator {
   unsigned long long next;
-  /* Align with cache line */
-  char dummy[56];
+  /* Span cache line */
+  char dummy[120];
 };
 
 struct _Trie {
@@ -79,6 +86,9 @@ struct _Trie {
   /* Blocks */
   unsigned long long nbranches;
   TrieNodeBranch *branches[1024];
+  /* Debug */
+  unsigned int num_allocations;
+  unsigned long long total_memory;
 };
 
 Trie *trie_new (unsigned int nbits, unsigned int nbits_root, unsigned int nallocators);

@@ -1,9 +1,13 @@
+#define __GT4_TRIE_C__
+
 #include <malloc.h>
 #include <string.h>
 #include <assert.h>
 #include <strings.h>
 
 #include "trie.h"
+
+unsigned int gt4_trie_debug = 0;
 
 #define debug 1
 
@@ -23,11 +27,17 @@ trie_new (unsigned int nbits, unsigned int nbits_root, unsigned int nallocators)
 void
 trie_setup_full (Trie *trie, unsigned int nbits, unsigned int nbits_root, unsigned int nallocators)
 {
+  unsigned long long root_size;
   memset (trie, 0, sizeof (Trie));
   trie->nbits = nbits;
   trie->nbits_root = (nbits > nbits_root) ? nbits_root : nbits;
-  trie->roots = (TrieRef *) malloc ((1ULL << trie->nbits_root) * sizeof (TrieRef));
-  memset (trie->roots, 0, (1ULL << trie->nbits_root) * sizeof (TrieRef));
+  root_size = (1ULL << trie->nbits_root) * sizeof (TrieRef);
+  trie->roots = (TrieRef *) malloc (root_size);
+  if (gt4_trie_debug & GT4_TRIE_COUNT_ALLOCATIONS) {
+    trie->num_allocations += 1;
+    trie->total_memory += root_size;
+  }
+  memset (trie->roots, 0, root_size);
 
   pthread_mutex_init (&trie->mutex, NULL);
   trie->nallocators = nallocators;
@@ -75,14 +85,20 @@ unsigned int
 trie_setup_from_file (Trie *trie, FILE *ifs)
 {
   unsigned long long i, nbranches;
+  unsigned long long nroots, root_size;
   /* Trie */
   memset (trie, 0, sizeof (Trie));
   fread (&trie->nbits, 4, 1, ifs);
   fread (&trie->nbits_root, 4, 1, ifs);
   fread (&trie->nbranches, 8, 1, ifs);
   /* Roots */
-  unsigned long long nroots = 1ULL << trie->nbits_root;
-  trie->roots = (TrieRef *) malloc (nroots * sizeof (TrieRef));
+  nroots = 1ULL << trie->nbits_root;
+  root_size = nroots * sizeof (TrieRef);
+  trie->roots = (TrieRef *) malloc (root_size);
+  if (gt4_trie_debug & GT4_TRIE_COUNT_ALLOCATIONS) {
+    trie->num_allocations += 1;
+    trie->total_memory += root_size;
+  }
   for (i = 0; i < nroots; i++) {
     fread (&trie->roots[i], sizeof (TrieRef), 1, ifs);
   }
@@ -90,8 +106,14 @@ trie_setup_from_file (Trie *trie, FILE *ifs)
   nbranches = trie->nbranches;
   while (nbranches > 0) {
     unsigned long long size = nbranches;
+    unsigned long long branches_size;
     if (size > TRIE_BLOCK_SIZE) size = TRIE_BLOCK_SIZE;
-    trie->branches[i] = (TrieNodeBranch *) malloc (size * sizeof (TrieNodeBranch));
+    branches_size = size * sizeof (TrieNodeBranch);
+    trie->branches[i] = (TrieNodeBranch *) malloc (branches_size);
+    if (gt4_trie_debug & GT4_TRIE_COUNT_ALLOCATIONS) {
+      trie->num_allocations += 1;
+      trie->total_memory += branches_size;
+    }
     fread (trie->branches[i], sizeof (TrieNodeBranch), size, ifs);
     nbranches -= size;
   }
@@ -176,7 +198,12 @@ trie_allocate_branch (Trie *trie, unsigned int aidx)
       idx = 0;
     }
     if (!trie->branches[block]) {
-      trie->branches[block] = (TrieNodeBranch *) malloc (TRIE_BLOCK_SIZE * sizeof (TrieNodeBranch));
+      unsigned long long size = TRIE_BLOCK_SIZE * sizeof (TrieNodeBranch);
+      trie->branches[block] = (TrieNodeBranch *) malloc (size);
+      if (gt4_trie_debug & GT4_TRIE_COUNT_ALLOCATIONS) {
+        trie->num_allocations += 1;
+        trie->total_memory += size;
+      }
     }
     trie->allocators[aidx].next = block * TRIE_BLOCK_SIZE + idx;
     /* Skip zero address that is reserved for empty ref */

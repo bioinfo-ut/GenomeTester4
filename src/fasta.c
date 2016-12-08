@@ -139,12 +139,12 @@ fasta_reader_read_nwords (FastaReader *reader, unsigned long long maxwords,
 			int result = read_character (reader, cval, data);
 			if (result) return result;
 		}
-		reader->cpos += 1;
 		/* Proper character */
 		switch (reader->state) {
 		case FASTA_READER_STATE_NONE:
 			if ((cval == '>') || (cval == '@')) {
 				reader->state = FASTA_READER_STATE_NAME;
+				reader->name_pos = reader->cpos;
 				reader->name_length = 0;
 			}
 			break;
@@ -176,6 +176,7 @@ fasta_reader_read_nwords (FastaReader *reader, unsigned long long maxwords,
 				}
 				if (cval == '>') {
 					reader->state = FASTA_READER_STATE_NAME;
+					reader->name_pos = reader->cpos;
 					reader->name_length = 0;
 				} else {
 					reader->state = FASTA_READER_STATE_QUALITY;
@@ -220,11 +221,14 @@ fasta_reader_read_nwords (FastaReader *reader, unsigned long long maxwords,
 			break;
 		case FASTA_READER_STATE_QUALITY:
 			if (cval == '@') {
+				reader->name_pos = reader->cpos;
 				reader->state = FASTA_READER_STATE_NAME;
 				reader->name_length = 0;
 			}
 			break;
 		}
+		/* Next character */
+		reader->cpos += 1;
 	}
 	return 0;
 }

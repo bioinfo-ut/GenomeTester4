@@ -40,7 +40,7 @@ count_lines_from_text (const unsigned char *cdata, size_t csize, unsigned int *w
       n_lines = 0;
       break;
     }
-    if (n_lines == 0) {
+    if (!*wordsize) {
       *wordsize = lengths[2];
       if (debug) fprintf (stderr, "Wordsize %u\n", *wordsize);
     }
@@ -138,8 +138,8 @@ read_db_from_text (KMerDB *db, const unsigned char *cdata, unsigned long long cs
   cpos = 0;
   last = 0;
   while (cpos < csize) {
-    const unsigned char *tokenz[256];
-    unsigned int lengths[256];
+    const unsigned char *tokenz[65536];
+    unsigned int lengths[65536];
     unsigned int ntokenz, n_kmers;
     unsigned int i;
     /* Initialize */
@@ -308,7 +308,13 @@ write_db_to_file (KMerDB *db, FILE *ofs, unsigned int kmers)
   fseek (ofs, written, SEEK_SET);
   /* Trie */
   trie_start = written;
-  written += trie_write_to_file (&db->trie, ofs);
+  fwrite (&blocksize, 8, 1, ofs);
+  blocksize = trie_write_to_file (&db->trie, ofs);
+  blocksize = (blocksize + 15) & 0xfffffffffffffff0;
+  fseek (ofs, trie_start, SEEK_SET);
+  fwrite (&blocksize, 8, 1, ofs);
+  written += blocksize;
+  fseek (ofs, written, SEEK_SET);
   /* Rewrite start locations */
   fseek (ofs, 48, SEEK_SET);
   fwrite (&nodes_start, 8, 1, ofs);
@@ -432,7 +438,25 @@ read_database_from_binary (KMerDB *db, const unsigned char *cdata, unsigned long
   cpos += 8;
   db->names = (char *) (cdata + cpos);
   cpos += blocksize;
-  if (version > 1) cpos = trie_start;
+  if (version > 1) {
+    cpos = trie_start;
+    memcpy (&blocksize, cdata + cpos, 8);
+    cpos += 8;
+  }
   trie_setup_from_data (&db->trie, cdata + cpos);
   return 1;
+}
+
+ReadList
+*gm4_read_list_new (void)
+{
+  static ReadList *lists = NULL;
+  static unsigned int n_lists = 0;
+  static unsigned int block_size = 0;
+  if (n_lists >= block_size) {
+    block_size = 1024 * 1024;
+    lists = (ReadList *) malloc (block_size * sizeof (ReadList));
+    n_lists = 0;
+  }
+  return &lists[n_lists++];
 }

@@ -55,9 +55,10 @@ typedef struct _FastaReader {
 	unsigned long long cpos;
 	unsigned long long npos;
 	unsigned long long wpos;
-	/* Name */
-	unsigned char name[MAX_NAME_SIZE + 1];
+	/* Current name */
+	unsigned long long name_pos;
 	unsigned int name_length;
+	unsigned char name[MAX_NAME_SIZE + 1];
 	/* Words */
 	unsigned long long wordfw;
 	unsigned long long wordrv;
