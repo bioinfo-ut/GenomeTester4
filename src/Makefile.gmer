@@ -6,7 +6,7 @@ CXX  = gcc
 # C Files
 
 GMERCOUNTER_SOURCES = \
-	gmercounter.c \
+	gmer_counter.c \
 	buffer.c buffer.h \
 	common.c common.h \
 	trie.c trie.h \
