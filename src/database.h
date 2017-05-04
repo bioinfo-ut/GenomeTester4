@@ -3,6 +3,7 @@
 
 #include <stdio.h>
 
+#include "index.h"
 #include "trie.h"
 
 typedef struct _Node Node;
@@ -36,6 +37,8 @@ struct _KMerDB {
   char *names;
   /* Trie mapping kmers to nodes/counts */
   Trie trie;
+  /* Read index */
+  GT4Index index;
 };
 
 /* Reads */
@@ -49,6 +52,8 @@ struct _Read {
   unsigned int kmer_pos;
   /* File number */
   unsigned int file_idx;
+  /* Direction */
+  unsigned int dir;
 };
 
 /* Read list */
@@ -74,7 +79,7 @@ unsigned int read_db_from_text (KMerDB *db, const unsigned char *cdata, unsigned
  * 8  : wordsize (4)
  * 12 : node_bits (4)
  * 16 : kmer_bits (4)
- * 20 : dummy (4)
+ * 20 : count_bits (4)
  * 24 : n_nodes (8)
  * 32 : n_kmers (8)
  * 40 : names_size (8)
@@ -82,6 +87,7 @@ unsigned int read_db_from_text (KMerDB *db, const unsigned char *cdata, unsigned
  * 56 : kmers_start (8)
  * 64 : names_start (8)
  * 72 : trie_start (8)
+ * 80 : index start (8)
  *    : nodes_blocksize (8)
  *    : Nodes
  *    : kmers_blocksize (8)
@@ -90,6 +96,8 @@ unsigned int read_db_from_text (KMerDB *db, const unsigned char *cdata, unsigned
  *    : Names
  *    : trie_blocksize (8)
  *    : Trie
+ *    : index_blocksize (8)
+ *    : Index
 */
 
 /* Return number of bytes written */

@@ -45,21 +45,26 @@ union _QValue {
 
 typedef struct _Queue Queue;
 struct _Queue {
-        /* Number of threads running */
-        int nthreads;
-        /* Single mutex and cond for queue management */
-        pthread_mutex_t mutex;
-        pthread_cond_t cond;
-        /* Debug */
-        QValue tokens[NUM_ID_TOKENS];
+  /* Threads */
+  unsigned int nthreads_total;
+  unsigned int nthreads_running;
+  pthread_t *threads;
+  /* Single mutex and cond for queue management */
+  pthread_mutex_t mutex;
+  pthread_cond_t cond;
+  /* Debug */
+  QValue tokens[NUM_ID_TOKENS];
 };
 
 /* Initialize/destroy mutexes and conds */
 /* Return 0 on success */
-unsigned int queue_init (Queue *queue);
+/* Thread 0 is main, queue will be created with nthreads - 1 entries */
+unsigned int queue_init (Queue *queue, unsigned int nthreads);
+unsigned int queue_create_threads (Queue *queue, void (*process) (Queue *, unsigned int, void *), void *data);
 unsigned int queue_finalize (Queue *queue);
 unsigned int queue_lock (Queue *queue);
 unsigned int queue_unlock (Queue *queue);
+/* Should be called with mutex locked, returns mutex locked */
 unsigned int queue_wait (Queue *queue);
 unsigned int queue_broadcast (Queue *queue);
 
@@ -107,7 +112,7 @@ struct _MakerQueue {
         wordtable *available[MAX_TABLES];
 };
 
-void maker_queue_setup (MakerQueue *mq);
+void maker_queue_setup (MakerQueue *mq, unsigned int nthreads);
 void maker_queue_release (MakerQueue *mq);
 
 /* File parsing tasks */

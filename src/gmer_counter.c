@@ -24,7 +24,6 @@
 #define MAX_KMERS 25
 
 unsigned int debug = 0;
-unsigned int compile_index = 1;
 
 typedef struct _TaskTable TaskTable;
 struct _TaskTable {
@@ -34,11 +33,11 @@ struct _TaskTable {
   unsigned int *alleles;
   /* Read indexing */
   unsigned int file_idx;
-  unsigned long long name_pos;
+  /* unsigned long long _name_pos; */
   Read *reads;
 };
 
-TaskTable *task_table_new ();
+TaskTable *task_table_new (unsigned int index);
 void task_table_free (TaskTable *tt);
 
 typedef struct _SNPQueue SNPQueue;
@@ -58,8 +57,10 @@ struct _SNPQueue {
 };
 
 /* Main thread loop */
-static void *process (void *arg);
+static void process (Queue *queue, unsigned int idx, void *arg);
+#if 0
 static int start_sequence (FastaReader *reader, void *data);
+#endif
 static int read_word (FastaReader *reader, unsigned long long word, void *data);
 static int compare_counts (const void *lhs, const void *rhs);
 static unsigned int get_pair_median (KMerDB *db);
@@ -78,6 +79,7 @@ print_usage (FILE *ofs) {
   fprintf (ofs, "    --total          - print the total number of kmers per node\n");
   fprintf (ofs, "    --unique         - print the number of nonzero kmers per node\n");
   fprintf (ofs, "    --kmers          - print individual kmer counts (default if no other output)\n");
+  fprintf (ofs, "    --compile_index  - Add read index to database and write it to file\n");
   fprintf (ofs, "    --distribution NUM  - print kmer distribution (up to given number)\n");
   fprintf (ofs, "    --num_threads    - number of worker threads (default %u)\n", DEFAULT_NUM_THREADS);
   fprintf (ofs, "    --low_memory     - optimize for low memory usage\n");
@@ -90,6 +92,7 @@ main (int argc, const char *argv[])
   const char *db_name = NULL;
   const char *dbb = NULL;
   const char *wdb = NULL;
+  const char *index = NULL;
   unsigned int max_kmers_per_node = 1000000000;
   unsigned int header = 0, total = 0, unique = 0, kmers = 0, distro = 0, big = 0, dm = 0;
   unsigned int lowmem = 0;
@@ -99,7 +102,6 @@ main (int argc, const char *argv[])
 
   unsigned int nthreads = DEFAULT_NUM_THREADS;
   SNPQueue snpq;
-  pthread_t threads[256];
 
   KMerDB db;
 
@@ -148,6 +150,14 @@ main (int argc, const char *argv[])
       big = 1;
     } else if (!strcmp (argv[i], "--double_median")) {
       dm = 1;
+    } else if (!strcmp (argv[i], "--compile_index")) {
+      /* Write index */
+      i += 1;
+      if (i >= argc) {
+        print_usage (stderr);
+        exit (1);
+      }
+      index = argv[i];
     } else if (!strcmp (argv[i], "--distribution")) {
       i += 1;
       if (i >= argc) {
@@ -229,12 +239,12 @@ main (int argc, const char *argv[])
       fprintf (stderr, "Cannot mmap %s\n", dbb);
       exit (1);
     }
-    if (!lowmem) scout_mmap (cdata, csize);
+    scout_mmap (cdata, csize);
     if (!read_database_from_binary (&db, cdata, csize)) {
       fprintf (stderr, "Cannot read binary database %s\n", dbb);
       exit (1);
     }
-    if (debug) fprintf (stderr, "Finished loading binary database\n");
+    if (debug) fprintf (stderr, "Finished loading binary database (index = %u)\n", db.index.read_blocks != NULL);
   }
 
   if (gt4_trie_debug & GT4_TRIE_COUNT_ALLOCATIONS) {
@@ -259,9 +269,8 @@ main (int argc, const char *argv[])
   }
 
   if (nseqs > 0) {
+    queue_init (&snpq.queue, nthreads);
     /* Read files */
-    /* Initialize queue */
-    memset (&snpq, 0, sizeof (snpq));
     snpq.db = &db;
     for (i = 0; i < nseqs; i++) {
       TaskFile *tf;
@@ -276,32 +285,18 @@ main (int argc, const char *argv[])
       snpq.nfiles += 1;
     }
     for (i = 0; i < DEFAULT_NUM_TABLES; i++) {
-      TaskTable *tt = task_table_new ();
+      TaskTable *tt = task_table_new (index != NULL);
       tt->next = snpq.free_tables;
       snpq.free_tables = tt;
     }
-    if (compile_index) {
+    if (index) {
       snpq.reads = (ReadList **) malloc (db.n_kmers * sizeof (ReadList *));
       memset (snpq.reads, 0, db.n_kmers * sizeof (ReadList *));
     }
-    /* Initialize main mutex and cond */
-    queue_init (&snpq.queue);
-    /* Lock the mutex */
+    queue_create_threads (&snpq.queue, process, &snpq);
+    process (&snpq.queue, 0, &snpq);
     queue_lock (&snpq.queue);
-    snpq.queue.nthreads = 0;
-    for (i = 1; i < (int) nthreads; i++){
-      int rc;
-      if (debug > 1) fprintf (stderr, "Creating thread %llu\n", i);
-      rc = pthread_create (&threads[i], NULL, process, &snpq);
-      if (rc) {
-        fprintf (stderr, "ERROR; return code from pthread_create() is %d\n", rc);
-        exit (-1);
-      }
-    }
-    queue_unlock (&snpq.queue);
-    process (&snpq);
-    queue_lock (&snpq.queue);
-    while (snpq.queue.nthreads > 0) {
+    while (snpq.queue.nthreads_running > 1) {
       queue_wait (&snpq.queue);
     }
     queue_unlock (&snpq.queue);
@@ -310,7 +305,10 @@ main (int argc, const char *argv[])
     if (debug) {
       fprintf (stderr, "Finished reading files\n");
     }
-    
+
+    if (db_name) fprintf (stdout, "#TextDatabase\t%s\n", db_name);
+    if (dbb) fprintf (stdout, "#BinaryDatabase\t%s\n", dbb);
+        
     if (dm) {
       unsigned int med = get_pair_median (&db);
       fprintf (stdout, "#PairMedian\t%u\n", med);
@@ -323,6 +321,88 @@ main (int argc, const char *argv[])
       if (kmers) fprintf (stdout, "\tKMERS");
       if (distro) fprintf (stdout, "\tDISTRIBUTION");
       fprintf (stdout, "\n");
+    }
+  
+    if (index) {
+      /* Build read index */
+      unsigned long long max_name_pos = 0;
+      unsigned int max_file_idx = 0, max_kmer_pos = 0;
+      unsigned long long read_start = 0;
+
+      /* Files */
+      db.index.n_files = nseqs;
+      db.index.files = (char **) malloc (db.index.n_files * sizeof (char *));
+      for (i = 0; i < nseqs; i++) {
+        db.index.files[i] = (char *) seqnames[i];
+      }
+      max_file_idx = nseqs - 1;
+
+      for (i = 0; i < db.n_nodes; i++) {
+        unsigned int j;
+        for (j = 0; j < db.nodes[i].nkmers; j++) {
+          unsigned int kmer_idx;
+          ReadList *rl;
+          kmer_idx = db.nodes[i].kmers + j;
+          for (rl = snpq.reads[kmer_idx]; rl; rl = rl->next) {
+            if (rl->read.name_pos > max_name_pos) max_name_pos = rl->read.name_pos;
+            if (rl->read.kmer_pos > max_kmer_pos) max_kmer_pos = rl->read.kmer_pos;
+          }
+        }
+      }
+      
+      if (debug) fprintf (stderr, "Num files %u Max name pos %llu Max sequence pos %u\n", nseqs, max_name_pos, max_kmer_pos);
+      db.index.nbits_file = 1;
+      while (max_file_idx > 1) {
+        db.index.nbits_file += 1;
+        max_file_idx /= 2;
+      }
+      db.index.nbits_npos = 1;
+      while (max_name_pos > 1) {
+        db.index.nbits_npos += 1;
+        max_name_pos /= 2;
+      }
+      db.index.nbits_kmer = 1;
+      while (max_kmer_pos > 1) {
+        db.index.nbits_kmer += 1;
+        max_kmer_pos /= 2;
+      }
+      if (debug) fprintf (stderr, "NBits file %u npos %u kmer %u\n", db.index.nbits_file, db.index.nbits_npos, db.index.nbits_kmer);
+      db.index.n_kmers = db.n_kmers;
+      db.index.read_blocks = (unsigned long long *) malloc (db.n_kmers * sizeof (unsigned long long));
+      for (i = 0; i < db.n_kmers; i++) {
+        ReadList *rl;
+        for (rl = snpq.reads[i]; rl; rl = rl->next) db.index.n_reads += 1;
+      }
+      db.index.reads = (unsigned long long *) malloc (db.index.n_reads * sizeof (unsigned long long));
+      for (i = 0; i < db.n_kmers; i++) {
+        unsigned int read_idx = 0;
+        ReadList *rl;
+        for (rl = snpq.reads[i]; rl; rl = rl->next) {
+          unsigned long long code = ((unsigned long long) rl->read.dir << (db.index.nbits_file + db.index.nbits_npos + db.index.nbits_kmer)) |
+            ((unsigned long long) rl->read.file_idx << (db.index.nbits_npos + db.index.nbits_kmer)) |
+            (rl->read.name_pos << db.index.nbits_kmer) |
+            rl->read.kmer_pos;
+          db.index.reads[read_start + read_idx] = code;
+          read_idx += 1;
+        }
+        db.index.read_blocks[i] = (unsigned long long) read_start << 24 | read_idx;
+        read_start += read_idx;
+      }
+      /* Write database with index */
+      FILE *ofs;
+      if (debug) {
+        fprintf (stderr, "Writing index database to %s\n", index);
+      }
+      ofs = (fopen (index, "w+"));
+      if (!ofs) {
+        fprintf (stderr, "Cannot open %s for writing\n", index);
+        exit (1);
+      }
+      write_db_to_file (&db, ofs, 0);
+      fclose (ofs);
+      if (debug) {
+        fprintf (stderr, "Done\n");
+      }
     }
   
     for (i = 0; i < db.n_nodes; i++) {
@@ -386,7 +466,7 @@ main (int argc, const char *argv[])
           current += 1;
         }
       }
-      if (compile_index) {
+      if (index) {
         for (j = 0; j < db.nodes[i].nkmers; j++) {
           unsigned int kmer_idx;
           ReadList *rl;
@@ -403,12 +483,11 @@ main (int argc, const char *argv[])
   return 0;
 }
 
-static void *
-process (void *arg)
+static void
+process (Queue *queue, unsigned int idx, void *arg)
 {
   SNPQueue *snpq;
   KMerDB *db;
-  int idx = -1;
   unsigned int finished;
 
   snpq = (SNPQueue *) arg;
@@ -416,16 +495,11 @@ process (void *arg)
 
   finished = 0;
         
+  if (debug > 1) fprintf (stderr, "Thread %d started (total %d)\n", idx, snpq->queue.nthreads_running);
   /* Do work */
   while (!finished) {
     /* Get exclusive lock on queue */
-    pthread_mutex_lock (&snpq->queue.mutex);
-    if (idx < 0) {
-      /* Thread is started, increase counter and get idx */
-      idx = snpq->queue.nthreads;
-      snpq->queue.nthreads += 1;
-      if (debug > 1) fprintf (stderr, "Thread %d started (total %d)\n", idx, snpq->queue.nthreads);
-    }
+    queue_lock (queue);
     if ((snpq->files) && (snpq->free_tables)) {
       TaskFile *tf;
       TaskTable *tt;
@@ -439,7 +513,7 @@ process (void *arg)
       tt->nwords = 0;
       tt->file_idx = tf->idx;
       if (debug > 0) fprintf (stderr, "Thread %d: reading file %s from %llu\n", idx, tf->filename, tf->reader.cpos);
-      if (task_file_read_nwords (tf, BLOCK_SIZE, snpq->db->wordsize, start_sequence, NULL, NULL, NULL, read_word, tt)) {
+      if (task_file_read_nwords (tf, BLOCK_SIZE, snpq->db->wordsize, NULL, NULL, NULL, NULL, read_word, tt)) {
         fprintf (stderr, "Cannot create FastaReader fro %s\n", tf->filename);
         exit (1);
       }
@@ -479,6 +553,7 @@ process (void *arg)
         unsigned int code, node, kmer, kmer_idx;
         code = tt->alleles[i];
         if (!code) continue;
+        code &= 0x7fffffff;
         node = (code >> db->kmer_bits) - 1;
         if (node >= db->n_nodes) {
           fprintf (stderr, "DB inconsistency: Node index %u is bigger than the number of nodes %llu\n", node, db->n_nodes);
@@ -496,7 +571,7 @@ process (void *arg)
         } else {
           if (db->kmers_32[kmer_idx] < 0xffffffff) db->kmers_32[kmer_idx] += 1;
         }
-        if (compile_index) {
+        if (snpq->reads) {
           ReadList *rl = gm4_read_list_new ();
           rl->read = tt->reads[i];
           rl->next = snpq->reads[kmer_idx];
@@ -522,15 +597,10 @@ process (void *arg)
     }
   }
   /* Exit if everything is done */
-  pthread_mutex_lock (&snpq->queue.mutex);
-  snpq->queue.nthreads -= 1;
-  if (debug > 1) fprintf (stderr, "Thread %u exiting (remaining %d)\n", idx, snpq->queue.nthreads);
-  pthread_cond_broadcast (&snpq->queue.cond);
-  pthread_mutex_unlock (&snpq->queue.mutex);
-
-  return 0;
+  if (debug > 1) fprintf (stderr, "Thread %u exiting (remaining %d)\n", idx, snpq->queue.nthreads_running);
 }
 
+#if 0
 static int
 start_sequence (FastaReader *reader, void *data)
 {
@@ -539,16 +609,18 @@ start_sequence (FastaReader *reader, void *data)
   tt->name_pos = reader->name_pos;
   return 0;
 }
+#endif
 
 static int
 read_word (FastaReader *reader, unsigned long long word, void *data)
 {
   TaskTable *tt = (TaskTable *) data;
   tt->words[tt->nwords] = word;
-  if (compile_index) {
+  if (tt->reads) {
     tt->reads[tt->nwords].file_idx = tt->file_idx;
-    tt->reads[tt->nwords].name_pos = tt->name_pos;
-    tt->reads[tt->nwords].kmer_pos = reader->cpos - tt->name_pos;
+    tt->reads[tt->nwords].name_pos = reader->name_pos;
+    tt->reads[tt->nwords].kmer_pos = reader->cpos - reader->name_pos;
+    tt->reads[tt->nwords].dir = (word != reader->wordfw);
   }
   tt->nwords += 1;
   return 0;
@@ -624,13 +696,13 @@ get_pair_median (KMerDB *db)
 }
 
 TaskTable *
-task_table_new ()
+task_table_new (unsigned int index)
 {
   TaskTable *tt = (TaskTable *) malloc (sizeof (TaskTable));
   memset (tt, 0, sizeof (TaskTable));
   tt->words = (unsigned long long *) malloc (BLOCK_SIZE * 8);
   tt->alleles = (unsigned int *) malloc (BLOCK_SIZE * 4);
-  if (compile_index) {
+  if (index) {
     tt->reads = (Read *) malloc (BLOCK_SIZE * sizeof (Read));
   }
   return tt;

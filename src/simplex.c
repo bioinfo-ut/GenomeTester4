@@ -4,6 +4,7 @@
 // Simplex parameter fitting
 //
 
+#include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <math.h>
@@ -13,18 +14,18 @@
 float
 downhill_simplex (int NDIM, float MX[], float MdX[], float EMax, int nruns, int niterations, float (*func) (int, const float[], void *), void *data)
 {
-	double MP[26][25];          /* Main matrix of simplex vertices         */
-	double Pb[25];              /* The point Pb.                           */
-	double Pr[25];              /* The point Pr.                           */
-	double Prr[25];             /* The point Prr or Prr'.                  */
-	double Y[26];               /* Results Y[i]=FUNK(MP[i])                */
-	double RTol;                /* Real toleration                         */
-	double Al, Bt, Gm, Ypr, Yprr, Yavr, Rmp;
-	double xa, xb, xc, xd, lMin;
+	float MP[26][25];          /* Main matrix of simplex vertices         */
+	float Pb[25];              /* The point Pb.                           */
+	float Pr[25];              /* The point Pr.                           */
+	float Prr[25];             /* The point Prr or Prr'.                  */
+	float Y[26];               /* Results Y[i]=FUNK(MP[i])                */
+	float RTol;                /* Real toleration                         */
+	float Al, Bt, Gm, Ypr, Yprr, Yavr, Rmp;
+	float xa, xb, xc, xd, lMin;
 	int i, j, MPTS;
 	int ITR0, MITR, ITR1, NITR;
-	int iLo, iHi, iNHi;			/* Lowest point, Highest point, Next highest point */
-	double YLo, YHi, DLo, DHi;
+	int iLo = 0, iHi, iNHi;			/* Lowest point, Highest point, Next highest point */
+	/* float YLo, YHi, DLo, DHi; */
 
 	MPTS = NDIM + 1;
 	Al = 1.0;
@@ -37,7 +38,6 @@ downhill_simplex (int NDIM, float MX[], float MdX[], float EMax, int nruns, int 
 	Y[0] = func (NDIM, MX, data);
 	for (ITR1 = 0; ITR1 < NITR; ITR1++) {
 		ITR0 = 0;
-		srand (0);
 		for (i = 0; i < NDIM; i++) {
 			for (j = 0; j < MPTS; j++) MP[j][i] = MX[i];
 			MP[i][i] += MdX[i] * (0.9 + 0.2 * rand () / RAND_MAX) / (5 * ITR1 + 1);
@@ -46,11 +46,14 @@ downhill_simplex (int NDIM, float MX[], float MdX[], float EMax, int nruns, int 
 		}
 		/* Rotarion of the matrix MP - not implememnted */
 		for (j = 0; j <= NDIM; j++) {
-			for (i = 0; i < NDIM; i++) MX[i] = (float) MP[j][i];
+			for (i = 0; i < NDIM; i++) {
+			        MX[i] = (float) MP[j][i];
+			        assert (!isnan (MX[i]));
+                        }
 			Y[j] = func (NDIM, MX, data);
 		}
-		YLo = Y[0];
-		YHi = Y[0];
+		/* YLo = Y[0]; */
+		/* YHi = Y[0]; */
 		while (ITR0 < MITR) {
 			Yavr = 0;
 			iLo = 0;
@@ -72,12 +75,21 @@ downhill_simplex (int NDIM, float MX[], float MdX[], float EMax, int nruns, int 
 				}
 			}
 			Yavr /= Rmp;
-			RTol = 2.0 * fabs (Y[iHi] - Y[iLo]) / (fabs (Y[iHi]) + fabs (Y[iLo]));
+			if (Y[iHi] || Y[iLo]) {
+			        if (isfinite (Y[iHi]) && isfinite (Y[iLo])) {
+			                RTol = 2.0 * fabs (Y[iHi] - Y[iLo]) / (fabs (Y[iHi]) + fabs (Y[iLo]));
+                                } else {
+                                        RTol = INFINITY;
+                                }
+                        } else {
+                                RTol = 0;
+                        }
+			assert (!isnan (RTol));
 
-			DLo = fabs (YLo - Y[iLo]);
-			DHi = fabs (YHi - Y[iHi]);
-			YLo = Y[iLo];
-			YHi = Y[iHi];
+			/* DLo = fabs (YLo - Y[iLo]); */
+			/* DHi = fabs (YHi - Y[iHi]); */
+			/* YLo = Y[iLo]; */
+			/* YHi = Y[iHi]; */
 			// fprintf (stderr, "%d %d YLo %g YHi %g DLo %g DHi %g\n", ITR1, ITR0, YLo, YHi, DLo, DHi);
 			// if (YLo <= EMax) break;
 
@@ -93,11 +105,17 @@ downhill_simplex (int NDIM, float MX[], float MdX[], float EMax, int nruns, int 
 				Pb[j] /= NDIM;
 				Pr[j] = (1.0 + Al)*Pb[j] - Al*MP[iHi][j];
 			}
-			for (j = 0; j < NDIM; j++) MX[j] = (float) Pr[j];
+			for (j = 0; j < NDIM; j++) {
+			        MX[j] = (float) Pr[j];
+			        assert (!isnan (MX[j]));
+                        }
 			Ypr = func (NDIM, MX, data);
 			if (Ypr <= Y[iLo]) {
 				for (j = 0; j < NDIM; j++) Prr[j] = Gm*Pr[j] + (1.0 - Gm)*Pb[j];
-				for (j = 0; j < NDIM; j++) MX[j] = (float) Prr[j];
+				for (j = 0; j < NDIM; j++) {
+				        MX[j] = (float) Prr[j];
+				        assert (!isnan (MX[j]));
+                                }
 				Yprr = func (NDIM, MX, data);
 				if (Ypr > Yprr) {
 					for (j = 0; j < NDIM; j++) MP[iHi][j] = Prr[j];
@@ -113,7 +131,10 @@ downhill_simplex (int NDIM, float MX[], float MdX[], float EMax, int nruns, int 
 						Y[iHi] = Ypr;
 					}
 					for (j = 0; j < NDIM; j++) Prr[j] = Bt*MP[iHi][j] + (1.0 - Bt)*Pb[j];
-					for (j = 0; j < NDIM; j++) MX[j] = (float) Prr[j];
+					for (j = 0; j < NDIM; j++) {
+					        MX[j] = (float) Prr[j];
+					        assert (!isnan (MX[j]));
+                                        }
 					Yprr = func (NDIM, MX, data);
 					if (Yprr < Y[iHi]) {
 						for (j = 0; j < NDIM; j++) MP[iHi][j] = Prr[j];
@@ -123,14 +144,20 @@ downhill_simplex (int NDIM, float MX[], float MdX[], float EMax, int nruns, int 
 								  for(j=0;j<NDIM;j++) {Pr[j]=0.5*(MP[i][j]+MP[iLo][j]);MP[i][j]=Pr[j];}
 								  for(j=0;j<NDIM;j++) *(MX[j])=Pr[j];Y[i]=func();}}}                     */
 						for (j = 0; j < NDIM; j++) Pr[j] = 0.5*(MP[iHi][j] + MP[iLo][j]);
-						for (j = 0; j < NDIM; j++) MX[j] = (float) Pr[j];
+						for (j = 0; j < NDIM; j++) {
+						        MX[j] = (float) Pr[j];
+						        assert (!isnan (MX[j]));
+                                                }
 						Ypr = func (NDIM, MX, data);
 						if (Ypr < Y[iHi]) {
 							for (j = 0; j < NDIM; j++) MP[iHi][j] = Pr[j];
 							Y[iHi] = Ypr;
 						} else {
 							for (j = 0; j < NDIM; j++) Prr[j] = -MP[iHi][j] + 2.0*MP[iLo][j];
-							for (j = 0; j < NDIM; j++) MX[j] = (float) Prr[j];
+							for (j = 0; j < NDIM; j++) {
+							        MX[j] = (float) Prr[j];
+							        assert (!isnan (MX[j]));
+                                                        }
 							Yprr = func (NDIM, MX, data);
 							if (Yprr < Y[iHi]) {
 								for (j = 0; j < NDIM; j++) MP[iHi][j] = Prr[j];
@@ -142,8 +169,16 @@ downhill_simplex (int NDIM, float MX[], float MdX[], float EMax, int nruns, int 
 								xd = xb*xb - 4 * xa*xc;
 								if (xd > 0) {
 									lMin = 0.5*(-xb - sqrt (xd)) / xa;
-									for (j = 0; j < NDIM; j++) Pr[j] = lMin*MP[iHi][j] + (1 - lMin)*MP[iLo][j];
-									for (j = 0; j < NDIM; j++) MX[j] = (float) Pr[j];
+									assert (!isnan (lMin));
+									if (isfinite (lMin)) {
+								                for (j = 0; j < NDIM; j++) Pr[j] = lMin*MP[iHi][j] + (1 - lMin)*MP[iLo][j];
+                                                                        } else {
+                                                                                for (j = 0; j < NDIM; j++) Pr[j] = 0.5f * MP[iHi][j] + 0.5f * MP[iLo][j];
+                                                                        }
+									for (j = 0; j < NDIM; j++) {
+									        MX[j] = (float) Pr[j];
+									        assert (!isnan (MX[j]));
+                                                                        }
 									Ypr = func (NDIM, MX, data);
 								}
 								if (Ypr < Y[iHi]) {
@@ -164,7 +199,10 @@ downhill_simplex (int NDIM, float MX[], float MdX[], float EMax, int nruns, int 
 		}
 		iLo = 0;
 		for (i = 1; i < MPTS; i++) if (Y[i] < Y[iLo]) iLo = i;
-		for (i = 0; i < NDIM; i++) MX[i] = (float) MP[iLo][i];
+		for (i = 0; i < NDIM; i++) {
+		        MX[i] = (float) MP[iLo][i];
+                        assert (!isnan (MX[i]));
+                }
 		// fprintf (stderr, "%d %d YLo %g YHi %g\n", ITR1, ITR0, YLo, YHi);
 		// for (i = 0; i < NDIM; i++) MdX[i] /= 4;
 	}

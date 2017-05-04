@@ -75,7 +75,7 @@ int main (int argc, const char *argv[])
 
 	/* default values */
 	unsigned int cutoff = 1, nmm = 0;
-	int find_union = 0, find_intrsec = 0, find_diff = 0, find_ddiff = 0, subtraction = 0, countonly = 0;
+	int find_union = 0, find_intrsec = 0, find_diff = 0, find_ddiff = 0, subtraction = 0, countonly = 0, print_operation = 0;
 	int find_subset = 0;
 	int subset_method = RAND_ALL;
 	unsigned long long subset_size = 0;
@@ -170,7 +170,7 @@ int main (int argc, const char *argv[])
 			if (arg_idx >= argc) {
 				print_help (1);
 			}
-			if (!strcmp (argv[arg_idx], "rand_all")) {
+			if (!strcmp (argv[arg_idx], "rand")) {
 				subset_method = RAND_ALL;
 			} else if (!strcmp (argv[arg_idx], "rand_unique")) {
 				subset_method = RAND_UNIQUE;
@@ -186,6 +186,8 @@ int main (int argc, const char *argv[])
 				fprintf (stderr, "Error: Invalid subset size: %s! Must be an integer.\n", argv[arg_idx]);
 				print_help (1);
 			}
+		} else if (!strcmp (argv[arg_idx], "--print_operation")) {
+			print_operation = 1;
 		} else if (!strcmp (argv[arg_idx], "--disable_scouts")) {
 			use_scouts = 0;
 		} else if (!strcmp (argv[arg_idx], "-D")) {
@@ -208,6 +210,10 @@ int main (int argc, const char *argv[])
 			map = gt4_wordmap_new (fnames[0], USE_SCOUTS);
 			if (!map) {
 				fprintf (stderr, "Error: Creating the wordmap failed!\n");
+				exit (1);
+			}
+			if ((subset_method == RAND_UNIQUE) && (subset_size > map->header->nwords)) {
+				fprintf (stderr, "Error: Unique subset size (%llu) is bigger than number of unique kmers (%llu)\n", subset_size, map->header->nwords);
 				exit (1);
 			}
 			sprintf (c, "%s_subset", outputname);
@@ -247,6 +253,14 @@ int main (int argc, const char *argv[])
 	if (!find_intrsec && (rule == RULE_SUBTRACT || rule == RULE_MIN || rule == RULE_FIRST || rule == RULE_SECOND)) {
 		fprintf (stderr, "Error: Rules min, subtract, fist and second can only be used with finding the intersection.\n");
 		exit (1);
+	}
+
+	if (print_operation) {
+		unsigned int i;
+		fprintf (stdout, "Operation\t%s%s%s%s\nFiles\t%u\n", (find_union) ? "U" : "", (find_intrsec) ? "I" : "", (find_diff) ? "D" : "", (find_ddiff) ? "X" : "", nfiles);
+		for (i = 0; i < nfiles; i++) {
+			fprintf (stdout, "%u\t%s\n", i, fnames[i]);
+		}
 	}
 
 	if (nfiles == 2) {
@@ -666,21 +680,33 @@ subset (GT4WordMap *map, unsigned int subset_method, unsigned long long subset_s
 {
 	wordtable *wt;
 	unsigned long long i;
-	double nreq, nrem;
+
 	wt = wordtable_new (map->header->wordlength, subset_size);
-	nreq = subset_size;
-	nrem = map->header->nwords;
-	for (i = 0; i < (map->header->nwords - 1); i++) {
-		double prob = nreq / nrem;
-		double r = (rand () + 1.0) / RAND_MAX;
-		if (r <= prob) {
-			wordtable_add_word_nofreq (wt, WORDMAP_WORD(map, i), map->header->wordlength);
-			nreq -= 1;
+	/* fixme: We rely here on RNG cycle being at least >>32 bits */
+	if (subset_method == RAND_ALL) {
+		while (subset_size > 0) {
+			/* Pick random KMer */
+			unsigned long long lhs = (unsigned long long) (((rand () + 1.0) / RAND_MAX) * 0xffffffff);
+			unsigned long long rhs = (unsigned long long) (((rand () + 1.0) / RAND_MAX) * 0xffffffff);
+			unsigned long long p = ((lhs << 32) | rhs) % map->header->nwords;
+			wordtable_add_word_nofreq (wt, WORDMAP_WORD(map, p), map->header->wordlength);
+			subset_size -= 1;
 		}
-		nrem -= 1;
-	}
-	if (nreq > 0) {
-		wordtable_add_word_nofreq (wt, WORDMAP_WORD(map, map->header->nwords - 1), map->header->wordlength);
+	} else if (subset_method == RAND_UNIQUE) {
+		unsigned long long *q = (unsigned long long *) malloc (map->header->nwords * sizeof (unsigned long long));
+		for (i = 0; i < map->header->nwords; i++) q[i] = i;
+		for (i = 0; i < subset_size; i++) {
+			unsigned long long lhs = (unsigned long long) (((rand () + 1.0) / RAND_MAX) * 0xffffffff);
+			unsigned long long rhs = (unsigned long long) (((rand () + 1.0) / RAND_MAX) * 0xffffffff);
+			unsigned long long p = ((lhs << 32) | rhs) % map->header->nwords;
+			unsigned long long t = q[i];
+			q[i] = q[p];
+			q[p] = t;
+		}
+		for (i = 0; i < subset_size; i++) {
+			wordtable_add_word_nofreq (wt, WORDMAP_WORD(map, q[i]), map->header->wordlength);
+		}
+		free (q);
 	}
 	wordtable_sort (wt, 0);
 	wordtable_find_frequencies (wt);
@@ -901,7 +927,7 @@ compare_wordmap_headers (GT4ListHeader *h1, GT4ListHeader *h2)
 static void
 print_help (int exit_value)
 {
-	fprintf (stdout, "Usage: glistcompare <INPUTLIST1> <INPUTLIST2> [OPTIONS]\n");
+	fprintf (stdout, "Usage: glistcompare INPUTLIST1 [INPUTLIST2...] METHOD [OPTIONS]\n");
 	fprintf (stdout, "Options:\n");
 	fprintf (stdout, "    -v, --version            - print version information and exit\n");
 	fprintf (stdout, "    -h, --help               - print this usage screen and exit\n");
@@ -915,7 +941,7 @@ print_help (int exit_value)
 	fprintf (stdout, "    -o, --outputname STRING  - specify output name (default \"out\")\n");
 	fprintf (stdout, "    -r, --rule STRING        - specify rule how final frequencies are calculated (default, add, subtract, min, max, first, second, 1, 2)\n");
 	fprintf (stdout, "                               NOTE: rules min, subtract, first and second can only be used with finding the intersection.\n");
-	fprintf (stdout, "    -ss --subset METHOD SIZE - make subset with given method (rand_unique)\n");
+	fprintf (stdout, "    -ss, --subset METHOD SIZE - make subset with given method (rand, rand_unique)\n");
 	fprintf (stdout, "    --count_only             - output count of k-mers instead of k-mers themself\n");
 	fprintf (stdout, "    --disable_scouts         - disable list read-ahead in background thread\n");
 	fprintf (stdout, "    -D                       - increase debug level\n");

@@ -28,10 +28,12 @@
 #include <string.h>
 
 #include "sequence.h"
-#include "wordtable.h"
 
 /* all possible nucleotides */
 const char *alphabet = "ACGTUacgtu";
+
+/* Complementary table */
+static char *ct = NULL;
 
 unsigned long long get_nucl_value (char nucl)
 {
@@ -78,34 +80,6 @@ unsigned long long get_canonical_word (unsigned long long word, unsigned int wor
 	return word < rev_word ? word : rev_word;
 }
 
-unsigned long long generate_mismatches (wordtable *mmtable, unsigned long long word, unsigned int wordlength,
-		unsigned int givenfreq, unsigned int nmm, unsigned int startsite, int usesmallercomplement, int countonly,
-		int equalmmonly)
-{
-	unsigned long long mask = 0L, count = 0L, mismatch = 0L;
-	unsigned int i;
-
-	/* first I put the current word into the table */
-	if (!countonly && (nmm == 0 || !equalmmonly)) {
-		if (usesmallercomplement) {
-			word = get_canonical_word (word, wordlength);
-		}
-		wordtable_add_word (mmtable, word, givenfreq, wordlength);
-	}
-	if (nmm == 0) return 1;
-
-	/* generating mm-s */
-	for (i = startsite; i < wordlength; i++) {
-		for (mismatch = 1; mismatch < 4; mismatch++) {
-			if (!countonly) {
-				mask = mismatch << (2 * i);
-			}
-			count += generate_mismatches (mmtable, word ^ mask, wordlength, givenfreq, nmm - 1, i + 1, usesmallercomplement, countonly, equalmmonly);
-		}
-	}
-	return count;
-}
-
 char *word_to_string (unsigned long long word, unsigned int wordlength)
 {
 	char *s = (char *) malloc (wordlength + 1);
@@ -148,6 +122,48 @@ unsigned long long string_to_word (const char *s, unsigned int wordlength)
 		word |= get_nucl_value (s[i]);
 	}
 	return word;
+}
+
+static void
+init_ct (void)
+{
+  unsigned int i;
+  ct = (char *) malloc (256);
+  for (i = 0; i < 256; i++) ct[i] = 'N';
+  ct['a'] = 't';
+  ct['c'] = 'g';
+  ct['g'] = 'c';
+  ct['t'] = 'a';
+  ct['u'] = 'a';
+  ct['A'] = 'T';
+  ct['C'] = 'G';
+  ct['G'] = 'C';
+  ct['T'] = 'A';
+  ct['U'] = 'A';
+}
+
+void
+gt4_string_revcomp (char *d, const char *s, unsigned int length, unsigned int terminate)
+{
+  unsigned int i;
+  if (!ct) init_ct ();
+  for (i = 0; i < length; i++) {
+    d[i] = ct[(unsigned char) s[length - 1 - i]];
+  }
+  if (terminate) d[length] = 0;
+}
+
+void
+gt4_string_revcomp_inplace (char *s, unsigned int length)
+{
+  unsigned int i;
+  if (!ct) init_ct ();
+  for (i = 0; i < (length / 2); i++) {
+    unsigned int t = ct[(unsigned char) s[i]];
+    s[i] = ct[(unsigned char) s[length - 1 - i]];
+    s[length - 1 - i] = t;
+  }
+  if (length & 1) s[length / 2] = ct[(unsigned char) s[length / 2]];
 }
 
 void word_to_bitstring (unsigned long long word)

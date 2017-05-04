@@ -31,6 +31,8 @@
 
 #define MAX_NAME_SIZE 1000
 
+#define GT4FR_FASTA 1
+#define GT4FR_FASTQ 2
 #define FASTA_READER_STATE_NONE 0
 #define FASTA_READER_STATE_NAME 1
 #define FASTA_READER_STATE_SEQUENCE 2
@@ -49,7 +51,9 @@ typedef struct _FastaReader {
 	void *read_data;
 	unsigned int in_eof;
 	
-	/* State */
+	/* FastQ or FastA */
+	unsigned int type;
+	/* Current reading state */
 	unsigned int state;
 	/* Current character, nucleotide and word number */
 	unsigned long long cpos;
@@ -58,6 +62,7 @@ typedef struct _FastaReader {
 	/* Current name */
 	unsigned long long name_pos;
 	unsigned int name_length;
+	unsigned int name_idx;
 	unsigned char name[MAX_NAME_SIZE + 1];
 	/* Words */
 	unsigned long long wordfw;

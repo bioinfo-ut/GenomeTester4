@@ -47,6 +47,9 @@ unsigned int word2string (char *b, unsigned long long word, unsigned int wordlen
 
 unsigned long long string_to_word (const char *s, unsigned int wordlength);
 
+void gt4_string_revcomp (char *d, const char *s, unsigned int length, unsigned int terminate);
+void gt4_string_revcomp_inplace (char *s, unsigned int length);
+
 void word_to_bitstring (unsigned long long word);
 
 

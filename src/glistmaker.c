@@ -52,7 +52,7 @@
 #define TIME_FF 3
 
 /* Main thread loop */
-static void * process (void *arg);
+static void process (Queue *queue, unsigned int idx, void *arg);
 
 /* Merge tables directly to disk */
 static unsigned int merge_write_multi (wordtable **t, unsigned int ntables, const char *filename, unsigned int cutoff);
@@ -218,23 +218,18 @@ main (int argc, const char *argv[])
 		}
 	}
 	
-	if (nthreads > 0) {
+	if (nthreads > 1) {
 		/* CASE: SEVERAL THREADS */
 		MakerQueue mq;
-	        pthread_t threads[256];
 	        int rc;
-	        unsigned int t;
 	        unsigned int finished = 0;
 
-		maker_queue_setup (&mq);
+		maker_queue_setup (&mq, nthreads);
 
 		for (argidx = firstfasta + nfasta - 1; argidx >= firstfasta; argidx--) {
 			maker_queue_add_file (&mq, argv[argidx]);
 		}		
 
-	        /* Lock the mutex */
-	        pthread_mutex_lock (&mq.queue.mutex);
-	        mq.queue.nthreads = 0;
 	        mq.wordlen = wordlength;
 	        mq.tablesize = tablesize;
 	        mq.cutoff = cutoff;
@@ -244,25 +239,23 @@ main (int argc, const char *argv[])
 			fprintf (stderr, "Num tables is %d\n", ntables);
 			fprintf (stderr, "Table size is %lld\n", mq.tablesize);
 		}
-			  
-	        for (t = 1; t < nthreads; t++){
-	                if (debug > 1) fprintf (stderr, "Creating thread %u\n", t);
-	                rc = pthread_create (&threads[t], NULL, process, &mq);
-	                if (rc) {
-                                fprintf (stderr, "ERROR; return code from pthread_create() is %d\n", rc);
-                                exit (-1);
-                        }
+
+		rc = queue_create_threads (&mq.queue, process, &mq);
+                if (rc) {
+                   	fprintf (stderr, "ERROR; return code from pthread_create() is %d\n", rc);
+                   	exit (-1);
                 }
 
-                pthread_mutex_unlock (&mq.queue.mutex);
-
-                process (&mq);
+                process (&mq.queue, 0, &mq);
 
                 while (!finished) {
-                        pthread_mutex_lock (&mq.queue.mutex);
-                        if (mq.queue.nthreads < 1) finished = 1;
-                        pthread_mutex_unlock (&mq.queue.mutex);
+                        queue_lock (&mq.queue);
+                        queue_broadcast (&mq.queue);
+                        if (mq.queue.nthreads_running < 2) finished = 1;
+                        queue_unlock (&mq.queue);
+                        /* process (&mq.queue, 0, &mq); */
                         sleep (1);
+
                 }
                 if (mq.nsorted > 0) {
                 	/* write the final list into a file */
@@ -334,7 +327,7 @@ main (int argc, const char *argv[])
 
 		/* write the final list into a file */
 		if (debug > 0) fprintf (stderr, "Writing list %s\n", outputname);
-		if (!wordtable_write_to_file (table, outputname, cutoff)) {
+		if (wordtable_write_to_file (table, outputname, cutoff)) {
 			fprintf (stderr, "Cannot write list to file\n");
 		}
 	}
@@ -345,11 +338,10 @@ main (int argc, const char *argv[])
         pthread_exit (NULL);
 }
 
-static void *
-process (void *arg)
+static void
+process (Queue *queue, unsigned int idx, void *arg)
 {
         MakerQueue *mq;
-        int idx = -1;
         unsigned int finished;
         double s_t, e_t, d_t;
 
@@ -357,19 +349,16 @@ process (void *arg)
 
         finished = 0;
         
+        if (debug > 1) {
+        	queue_lock (queue);
+        	fprintf (stderr, "Thread %d started (total %d)\n", idx, queue->nthreads_running);
+        	queue_unlock (queue);
+	}
         /* Do work */
         while (!finished) {
         	unsigned int has_files, has_unsorted, has_unmerged, sorted_tables;
-        	
-                /* Get exclusive lock on queue */
+        	/* Get exclusive lock on queue */
                 pthread_mutex_lock (&mq->queue.mutex);
-                if (idx < 0) {
-                        /* Thread is started, increase counter and get idx */
-                        mq->queue.nthreads += 1;
-                        idx = mq->queue.nthreads;
-                        if (debug > 1) fprintf (stderr, "Thread %d started (total %d)\n", idx, mq->queue.nthreads);
-                }
-
                 if (debug > 1) fprintf (stderr, "Thread %d: FileTasks %u Unsorted %u Sorted %u\n", idx, mq->ntasks[TASK_READ], mq->nunsorted, mq->nsorted);
                 
                 has_files = mq->files || mq->ntasks[TASK_READ];
@@ -581,14 +570,11 @@ process (void *arg)
         }
 
         /* Exit if everything is done */
-        pthread_mutex_lock (&mq->queue.mutex);
-        mq->queue.nthreads -= 1;
-        if (debug > 1) fprintf (stderr, "Thread %u exiting (remaining %d)\n", idx, mq->queue.nthreads);
-        pthread_cond_broadcast (&mq->queue.cond);
-        pthread_mutex_unlock (&mq->queue.mutex);
-
-        /* pthread_exit (NULL); */
-        return 0;
+        if (debug) {
+        	queue_lock (queue);
+        	if (debug > 1) fprintf (stderr, "Thread %u exiting (remaining %d)\n", idx, queue->nthreads_running);
+        	queue_unlock (queue);
+	}
 }
 
 int 

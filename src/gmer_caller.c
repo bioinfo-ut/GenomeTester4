@@ -71,23 +71,23 @@ logit_1 (float a)
 }
 
 static float
-logit_min_p (float p)
+logit_clamped (float p, float min, float max)
 {
-  if (p <= MIN_P) {
-    p = MIN_P;
-  } else if (p >= (1 - MIN_P)) {
-    p = 1 - MIN_P;
+  if (p <= min) {
+    p = min;
+  } else if (p >= max) {
+    p = max;
   } else {
-    p = (p - MIN_P) / (1 - 2 * MIN_P);
+    p = (p - min) / (max - min);
   }
   return logit (p);
 }
 
 static float
-logit_1_min_p (float a)
+logit_1_clamped (float a, float min, float max)
 {
   a = logit_1 (a);
-  a = MIN_P + (1 - 2 * MIN_P) * a;
+  a = min + (max - min) * a;
   return a;
 }
 
@@ -96,10 +96,10 @@ print_params (const float params[], const char *prefix, FILE *ofs)
 {
   float l_viga, p_0, p_1, p_2, lambda, size, size2;
 
-  l_viga = logit_1_min_p (params[0]);
-  p_0 = logit_1_min_p (params[1]);
-  p_1 = logit_1_min_p (params[2]);
-  p_2 = logit_1_min_p (params[3]);
+  l_viga = logit_1_clamped (params[0], MIN_P, 0.1f);
+  p_0 = logit_1_clamped (params[1], MIN_P, 1 - MIN_P);
+  p_1 = logit_1_clamped (params[2], MIN_P, 1 - MIN_P);
+  p_2 = logit_1_clamped (params[3], MIN_P, 1 - MIN_P);
   lambda = expf (params[4]);
   size = params[5];
   size2 = -expf (params[6]);
@@ -267,12 +267,12 @@ train_model (SNPCall *calls, unsigned int ncalls, unsigned int max_training, uns
 
   /* Genoomis mitteesineva k-meeri keskmine kohtamiste arv readide seas (keskmine vigade arv) - l_viga */
   /* OPTIMIZING_PARAM = logit (ACTUAL_PARAM) */
-  params[0] = logit_min_p (v[0]);
+  params[0] = logit_clamped (v[0], MIN_P, 0.1f);
   /* N-täheliste genotüüpide tõenäosused */
   /* OPTIMIZING_PARAM = logit (ACTUAL_PARAM) */
-  params[1] = logit_min_p (v[1]); /* p0 */
-  params[2] = logit_min_p (v[2]); /* p1 */
-  params[3] = logit_min_p (v[3]); /* p2 */
+  params[1] = logit_clamped (v[1], MIN_P, 1 - MIN_P); /* p0 */
+  params[2] = logit_clamped (v[2], MIN_P, 1 - MIN_P); /* p1 */
+  params[3] = logit_clamped (v[3], MIN_P, 1 - MIN_P); /* p2 */
   /* Keskmine katvus */
   /* OPTIMIZING_PARAM = log (ACTUAL_PARAM) */
   params[4] = logf (mul * keskmine);
@@ -318,12 +318,12 @@ train_model (SNPCall *calls, unsigned int ncalls, unsigned int max_training, uns
   free (l3.var2);
 
   /* Kui mitu sellist k-meeri-lugemit näeme siis, kui antud k-meeri tegelikult genoomis ei esinenud... */
-  v[0] = logit_1_min_p (params[0]);
+  v[0] = logit_1_clamped (params[0], MIN_P, 0.1f);
   /* Tõenäosus omada midagi 0-korduses, 1-s korduses, 2-s korduses (nagu autosoomis) */
   /* Tõenäosus nÃ¤ha midagi enam kui kahes korduses (p_lisa) leitakse valemiga 1-p_0-p_1-p_2 */
-  v[1] = logit_1_min_p (params[1]);
-  v[2] = logit_1_min_p (params[2]);
-  v[3] = logit_1_min_p (params[3]);
+  v[1] = logit_1_clamped (params[1], MIN_P, 1 - MIN_P);
+  v[2] = logit_1_clamped (params[2], MIN_P, 1 - MIN_P);
+  v[3] = logit_1_clamped (params[3], MIN_P, 1 - MIN_P);
   /* Keskmine katvus (autosoomide korral, sugukromosoomide korral katvus/2) */
   v[4] = expf (params[4]);
   /* Ülehajuvusparameeter (Kui palju laiem on readide jaotus */
@@ -515,6 +515,9 @@ main (int argc, const char *argv[])
   params[SIZE2] = -0.6792684f;
 
   srand (1);
+
+  /* Initialize combination table for multithreaded use */
+  init_combination_tables ();
   
   aidx = 1;
   while (aidx < argc) {
@@ -825,14 +828,14 @@ optim_run (void *data)
 {
   L3Optim *optim = (L3Optim *) data;
   float l_viga, p_0, p_1, p_2, lambda, size, size2;
-  l_viga = logit_1_min_p (optim->l3->params[0]);
-  p_0 = logit_1_min_p (optim->l3->params[1]);
-  p_1 = logit_1_min_p (optim->l3->params[2]);
-  p_2 = logit_1_min_p (optim->l3->params[3]);
+  l_viga = logit_1_clamped (optim->l3->params[0], MIN_P, 0.1f);
+  p_0 = logit_1_clamped (optim->l3->params[1], MIN_P, 1 - MIN_P);
+  p_1 = logit_1_clamped (optim->l3->params[2], MIN_P, 1 - MIN_P);
+  p_2 = logit_1_clamped (optim->l3->params[3], MIN_P, 1 - MIN_P);
   lambda = expf (optim->l3->params[4]);
   size = optim->l3->params[5];
   size2 = -expf (optim->l3->params[6]);
-  if (debug > 1) fprintf (stderr, "Optimization: %u-%u\n", optim->first_call, optim->first_call + optim->n_calls);
+  if (debug > 2) fprintf (stderr, "Optimization: %u-%u\n", optim->first_call, optim->first_call + optim->n_calls);
   optim->sum = mlogL3 (l_viga, p_0, p_1, p_2, lambda, size, size2, optim->n_calls, optim->l3->pB, optim->l3->var1 + optim->first_call, optim->l3->var2 + optim->first_call);
 }
 
@@ -850,13 +853,13 @@ distanceL3 (int ndim, const float params[], void *data)
 
   if (debug > 1) print_params (params, "Params", stderr);
   
-  l_viga = logit_1_min_p (l3->params[0]);
+  l_viga = logit_1_clamped (l3->params[0], MIN_P, 0.1f);
   assert (!isnan (l_viga));
-  p_0 = logit_1_min_p (l3->params[1]);
+  p_0 = logit_1_clamped (l3->params[1], MIN_P, 1 - MIN_P);
   assert (!isnan (p_0));
-  p_1 = logit_1_min_p (l3->params[2]);
+  p_1 = logit_1_clamped (l3->params[2], MIN_P, 1 - MIN_P);
   assert (!isnan (p_1));
-  p_2 = logit_1_min_p (l3->params[3]);
+  p_2 = logit_1_clamped (l3->params[3], MIN_P, 1 - MIN_P);
   assert (!isnan (p_1));
   lambda = expf (l3->params[4]);
   assert (!isnan (lambda));

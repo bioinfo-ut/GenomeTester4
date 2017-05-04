@@ -26,6 +26,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "sequence.h"
 #include "wordtable.h"
 #include "wordmap.h"
 #include "common.h"
@@ -392,6 +393,34 @@ void write_word_to_file (unsigned long long word, unsigned freq, FILE *f)
 	fwrite (&word, sizeof (unsigned long long), 1, f);
 	fwrite (&freq, sizeof (unsigned int), 1, f);
 	return;
+}
+
+unsigned long long generate_mismatches (wordtable *mmtable, unsigned long long word, unsigned int wordlength,
+		unsigned int givenfreq, unsigned int nmm, unsigned int startsite, int usesmallercomplement, int countonly,
+		int equalmmonly)
+{
+	unsigned long long mask = 0L, count = 0L, mismatch = 0L;
+	unsigned int i;
+
+	/* first I put the current word into the table */
+	if (!countonly && (nmm == 0 || !equalmmonly)) {
+		if (usesmallercomplement) {
+			word = get_canonical_word (word, wordlength);
+		}
+		wordtable_add_word (mmtable, word, givenfreq, wordlength);
+	}
+	if (nmm == 0) return 1;
+
+	/* generating mm-s */
+	for (i = startsite; i < wordlength; i++) {
+		for (mismatch = 1; mismatch < 4; mismatch++) {
+			if (!countonly) {
+				mask = mismatch << (2 * i);
+			}
+			count += generate_mismatches (mmtable, word ^ mask, wordlength, givenfreq, nmm - 1, i + 1, usesmallercomplement, countonly, equalmmonly);
+		}
+	}
+	return count;
 }
 
 /* Generates filename from wordtable and prefix */

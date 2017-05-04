@@ -27,14 +27,66 @@
 #include "utils.h"
 #include "queue.h"
 
+unsigned int queue_debug = 0;
+
 /* Initialize/destroy mutexes and conds */
 /* Return 0 on success */
 
 unsigned int
-queue_init (Queue *queue)
+queue_init (Queue *queue, unsigned int nthreads)
 {
+  memset (queue, 0, sizeof (Queue));
+  queue->nthreads_total = nthreads;
+  queue->nthreads_running = 1;
+  queue->threads = (pthread_t *) malloc (nthreads * sizeof (pthread_t));
   pthread_mutex_init (&queue->mutex, NULL);
   pthread_cond_init (&queue->cond, NULL);
+  return 0;
+}
+
+struct _QD {
+  Queue *queue;
+  void (*process) (Queue *queue, unsigned int idx, void *data);
+  void *data;
+};
+
+static void *
+queue_start_thread (void *data)
+{
+  struct _QD *qd = (struct _QD *) data;
+  unsigned int idx;
+  queue_lock (qd->queue);
+  idx = qd->queue->nthreads_running++;
+  if (queue_debug) fprintf (stderr, "Thread %d started (total %d)\n", idx, qd->queue->nthreads_running);
+  queue_unlock (qd->queue);
+  qd->process (qd->queue, idx, qd->data);
+  queue_lock (qd->queue);
+  qd->queue->nthreads_running -= 1;
+  if (queue_debug) fprintf (stderr, "Thread %u exiting (remaining %d)\n", idx, qd->queue->nthreads_running);
+  queue_broadcast (qd->queue);
+  queue_unlock (qd->queue);
+  return NULL;
+}
+
+unsigned int
+queue_create_threads (Queue *queue, void (*process) (Queue *, unsigned int, void *), void *data)
+{
+  unsigned i;
+  /* fixme: */
+  static struct _QD qd;
+  qd.queue = queue;
+  qd.process = process;
+  qd.data = data;
+  queue_lock (queue);
+  for (i = 1; i < queue->nthreads_total; i++){
+    int rc;
+    rc = pthread_create (&queue->threads[i], NULL, queue_start_thread, &qd);
+    if (rc) {
+      fprintf (stderr, "ERROR; return code from pthread_create() is %d\n", rc);
+      return (rc);
+    }
+  }
+  queue_unlock (queue);
   return 0;
 }
 
@@ -43,6 +95,7 @@ queue_finalize (Queue *queue)
 {
   pthread_cond_destroy (&queue->cond);
   pthread_mutex_destroy (&queue->mutex);
+  free (queue->threads);
   return 0;
 }
 
@@ -75,18 +128,16 @@ queue_broadcast (Queue *queue)
 }
 
 void
-maker_queue_setup (MakerQueue *mq)
+maker_queue_setup (MakerQueue *mq, unsigned int nthreads)
 {
-	memset (mq, 0, sizeof (MakerQueue));
-	pthread_mutex_init (&mq->queue.mutex, NULL);
-	pthread_cond_init (&mq->queue.cond, NULL);
+  memset (mq, 0, sizeof (MakerQueue));
+  queue_init (&mq->queue, nthreads);
 }
 
 void
 maker_queue_release (MakerQueue *mq)
 {
-	pthread_cond_destroy (&mq->queue.cond);
-	pthread_mutex_destroy (&mq->queue.mutex);
+  queue_finalize (&mq->queue);
 }
 
 void
