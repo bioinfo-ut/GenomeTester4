@@ -6,6 +6,7 @@
 #include <stdio.h>
 
 #include <database.h>
+#include <matrix.h>
 #include <queue.h>
 #include <sequence.h>
 #include <utils.h>
@@ -22,325 +23,111 @@ struct _SeqFile {
   unsigned long long csize;
 };
 
+static void load_db_or_die (KMerDB *db, const char *db_name, const char *id);
+static unsigned int get_reads (KMerDB *db, KMerDB *gdb, Read reads[], SeqFile files[], const char *kmers[], unsigned int nkmers);
 static void print_db_reads (GT4Index *index, SeqFile *files, unsigned long long kmer_idx, unsigned int kmer_dir, FILE *ofs);
+static void print_kmer_statistics (NMatrix *mat);
 
-/* Nucleotide values */
-#define A 0
-#define C 1
-#define G 2
-#define T 3
-#define N 4
-#define GAP 5
-#define NONE 6
+static unsigned int create_alignment (unsigned int a_pos[], unsigned int b_pos[], const unsigned int a[], unsigned int na, const unsigned int b[], unsigned int nb);
+static unsigned int build_alignment (NCell *alignment[], unsigned int alignment_size, KMerDB *db, KMerDB *gdb, NMatrix *mat, unsigned int min_cov);
+static void align_seq (NMatrix *mat, NCell *a[], unsigned int alen, unsigned int seq_idx);
 
-static const char *n2c = "ACGTN- ";
-
-/* Position codes */
-#define BEFORE -1
-#define AFTER -2
-#define UNKNOWN -3
-
-typedef struct _NKMer NKMer;
-typedef struct _NPos NPos;
-typedef struct _NSeq NSeq;
-typedef struct _NLink NLink;
-typedef struct _NCell NCell;
-typedef struct _NMatrix NMatrix;
-
-struct _NKMer {
-  unsigned long value;
-  unsigned int seq;
-  unsigned int pos;
-  unsigned int count;
-};
-
-struct _NPos {
-  unsigned int nucl;
-  unsigned int has_kmer;
-  unsigned long long kmer;
-  /* Sorted list of cells aligned with this position */
-  NCell *cells;
-};
-
-struct _NSeq {
-  unsigned int len;
-  const char *str;
-  NPos pos[1];
-};
-
-struct _NLink {
-  int pos;
-  /* Chain of the same seq position */
-  NCell *prev;
-  NCell *next;
-};
-
-struct _NCell {
-  /* Neighbours in alignment */
-  NCell *prev;
-  NCell *next;
-  NCell *next_allocated;
-  /* Help for path solution */
-  unsigned int count;
-  NLink links[1];
-};
-
-struct _NMatrix {
-  unsigned int n_seqs;
-  /* KMers, sorted by value, seq, pos */
-  unsigned int n_kmers;
-  NKMer *kmers;
-  /* Unique kmers, sorted by count */
-  unsigned int n_unique_kmers;
-  NKMer *unique_kmers;
-  /* Cells, in no particular order */
-  NCell *cells;
-  NCell *free_cells;
-  NSeq *seqs[1];
-};
-
-static NSeq *n_seq_new (const char *str);
-static unsigned int n_seq_get_kmer (NSeq *seq, unsigned int pos, unsigned long long *kmer);
-static NMatrix *n_matrix_new (unsigned int n_seqs, const char *seqs[]);
-static NCell *n_matrix_new_cell (NMatrix *mat);
-static void n_matrix_free_cell (NMatrix *mat, NCell *cell);
-static int n_matrix_compare_cells (NMatrix *mat, NCell *lhs, NCell *rhs);
-static void n_matrix_link_cell (NMatrix *mat, NCell *cell, unsigned int seq, unsigned int pos);
-static void n_matrix_unlink_cell (NMatrix *mat, NCell *cell, unsigned int seq);
-static unsigned int n_matrix_can_merge_cells (NMatrix *mat, NCell *a, NCell *b);
-static void n_matrix_merge_cells (NMatrix *mat, NCell *cell, NCell *other);
-static NCell *n_matrix_get_seq_cell (NMatrix *mat, unsigned int seq, int pos);
-
-static int
-n_matrix_compare_cells (NMatrix *mat, NCell *lhs, NCell *rhs)
-{
-  unsigned int i;
-  for (i = 0; i < mat->n_seqs; i++) {
-    if (lhs->links[i].pos == UNKNOWN) continue;
-    if (rhs->links[i].pos == UNKNOWN) continue;
-    if (lhs->links[i].pos == BEFORE) {
-      if (rhs->links[i].pos == BEFORE) continue;
-      if (rhs->links[i].pos == AFTER) return -1;
-      return -1;
-    }
-    if (lhs->links[i].pos == AFTER) {
-      if (rhs->links[i].pos == AFTER) continue;
-      if (rhs->links[i].pos == BEFORE) return 1;
-      return 1;
-    }
-    if (rhs->links[i].pos == BEFORE) return 1;
-    if (rhs->links[i].pos == AFTER) return -1;
-    if (lhs->links[i].pos < rhs->links[i].pos) return -1;
-    if (lhs->links[i].pos > rhs->links[i].pos) return 1;
-  }
-  return 0;
-}
-
-static void
-n_matrix_link_cell (NMatrix *mat, NCell *cell, unsigned int seq, unsigned int pos)
-{
-  NCell *prev, *cur;
-  if (cell->links[seq].pos != UNKNOWN) {
-    fprintf (stderr, "n_matrix_link_cell: Cell already linked at seq %u pos %u\n", seq, pos);
-  }
-  cell->links[seq].pos = pos;
-  prev = NULL;
-  for (cur = mat->seqs[seq]->pos[pos].cells; cur; cur = cur->links[seq].next) {
-    if (n_matrix_compare_cells (mat, cell, cur) < 0) break;
-    prev = cur;
-  }
-  cell->links[seq].next = cur;
-  if (cur) cur->links[seq].prev = cell;
-  cell->links[seq].prev = prev;
-  if (prev) {
-    prev->links[seq].next = cell;
-  } else {
-    mat->seqs[seq]->pos[pos].cells = cell;
-  }
-}
-
-static void
-n_matrix_unlink_cell (NMatrix *mat, NCell *cell, unsigned int seq)
-{
-  NCell *prev, *cur, *next;
-  unsigned int pos = cell->links[seq].pos;
-  if (pos == UNKNOWN) {
-    fprintf (stderr, "n_matrix_unlink_cell; Cell not linked at seq %u\n", seq);
-  }
-  prev = NULL;
-  for (cur = mat->seqs[seq]->pos[pos].cells; cur; cur = cur->links[seq].next) {
-    if (cur == cell) break;
-    prev = cur;
-  }
-  next = cur->links[seq].next;
-  if (prev) {
-    prev->links[seq].next = next;
-  } else {
-    mat->seqs[seq]->pos[pos].cells = next;
-  }
-  if (next) next->links[seq].prev = prev;
-  cur->links[seq].prev = NULL;
-  cur->links[seq].next = NULL;
-  cell->links[seq].pos = UNKNOWN;
-}
-
-static unsigned int
-n_matrix_can_merge_cells (NMatrix *mat, NCell *a, NCell *b)
-{
-  unsigned int i;
-  for (i = 0; i < mat->n_seqs; i++) {
-    if ((a->links[i].pos != UNKNOWN) && (b->links[i].pos != UNKNOWN)) return 0;
-  }
-  return 1;
-}
-
-static void
-n_matrix_merge_cells (NMatrix *mat, NCell *cell, NCell *other)
-{
-  unsigned int i;
-  for (i = 0; i < mat->n_seqs; i++) {
-    unsigned int pos = other->links[i].pos;
-    if (pos != UNKNOWN) {
-      n_matrix_unlink_cell (mat, other, i);
-      n_matrix_link_cell (mat, cell, i, pos);
-    }
-  }
-  n_matrix_free_cell (mat, other);
-}
-
-static NCell *
-n_matrix_get_seq_cell (NMatrix *mat, unsigned int seq, int pos)
-{
-  if (pos < 0) return NULL;
-  if (pos >= mat->seqs[seq]->len) return NULL;
-  return mat->seqs[seq]->pos[pos].cells;
-}
-
-static int
-compare_kmers (const NKMer *lhs, const NKMer *rhs)
-{
-  if (lhs->value < rhs->value) return -1;
-  if (lhs->value > rhs->value) return 1;
-  if (lhs->seq < rhs->seq) return -1;
-  if (lhs->seq > rhs->seq) return 1;
-  if (lhs->pos < rhs->pos) return -1;
-  if (lhs->pos > rhs->pos) return 1;
-  return 0;
-}
-
-static int
-compare_kmer_counts (const NKMer *lhs, const NKMer *rhs)
-{
-  if (lhs->count < rhs->count) return 1;
-  if (lhs->count > rhs->count) return -1;
-  return 0;
-}
+static unsigned int print_chains = 0;
 
 int
 main (int argc, const char *argv[])
 {
   unsigned int i;
-  const char *dbb = NULL;
+  const char *db_name = NULL;
+  const char *gdb_name = NULL;
   const char *kmers[1024];
   unsigned int nkmers = 0;
-  unsigned int print_reads = 0, print_kmers = 0, print_chains = 0;
-  unsigned long long word, rword;
-  unsigned int code, node_idx, node_kmer, kmer_idx;
+  const unsigned char *ref_chr = NULL;
+  unsigned int ref_start = 0, ref_end = 0;
+  const char *ref = NULL;
+  unsigned int print_reads = 0, print_kmers = 0, analyze_kmers = 0;
+  unsigned int die = 0;
 
-  KMerDB db;
-  SeqFile *files;
+  KMerDB db, gdb;
+  SeqFile *files, *g_files;
   unsigned int nreads;
   Read reads[1024];
   char *seqs[1024];
   NMatrix *mat;
-  NCell *cell;
     
   for (i = 1; i < argc; i++) {
-    if (!strcmp (argv[i], "-dbb")) {
+    if (!strcmp (argv[i], "-dbb") || !strcmp (argv[i], "-db")) {
       i += 1;
       if (i >= argc) exit (1);
-      dbb = argv[i];
+      db_name = argv[i];
+    } else if (!strcmp (argv[i], "-gdb")) {
+      i += 1;
+      if (i >= argc) exit (1);
+      gdb_name = argv[i];
+    } else if (!strcmp (argv[i], "-reference")) {
+      if ((i + 4) >= argc) exit (1);
+      ref_chr = (const unsigned char *) argv[i + 1];
+      ref_start = atoi (argv[i + 2]);
+      ref_end = atoi (argv[i + 3]);
+      ref = (const unsigned char *) argv[i + 4];
+      i += 4;
     } else if (!strcmp (argv[i], "--print_reads")) {
       print_reads = 1;
     } else if (!strcmp (argv[i], "--print_kmers")) {
       print_kmers = 1;
     } else if (!strcmp (argv[i], "--print_chains")) {
       print_chains = 1;
+    } else if (!strcmp (argv[i], "--analyze_kmers")) {
+      analyze_kmers = 1;
     } else  {
       kmers[nkmers++] = argv[i];
     }
   }
 
-  /* Read binary database */
-  const unsigned char *cdata;
-  unsigned long long csize;
-
-  if (debug) fprintf (stderr, "Loading binary database %s\n", dbb);
-  cdata = gt4_mmap (dbb, &csize);
-  if (!cdata) {
-    fprintf (stderr, "Cannot mmap %s\n", dbb);
+  /* Check arguments */
+  if (!db_name || !gdb_name) {
+    fprintf (stderr, "No DB/GDB specified\n");
     exit (1);
   }
-  scout_mmap (cdata, csize);
-  if (!read_database_from_binary (&db, cdata, csize)) {
-    fprintf (stderr, "Cannot read binary database %s\n", dbb);
-    exit (1);
-  }
-  if (debug) fprintf (stderr, "Finished loading binary database (index = %u)\n", db.index.read_blocks != NULL);
 
+  /* Read databases */
+  load_db_or_die (&db, db_name, "reads");
+  load_db_or_die (&gdb, gdb_name, "genome");
+
+  /* Set up file lists */
   files = (SeqFile *) malloc (db.index.n_files * sizeof (SeqFile));
   for (i = 0; i < db.index.n_files; i++) {
     files[i].name = db.index.files[i];
-  }
-
-  /* Build a list of unique reads */
-  nreads = 0;
-  for (i = 0; i < nkmers; i++) {
-    unsigned long long first_read;
-    unsigned int num_reads, j, kmer_dir;
-    word = string_to_word (kmers[i], strlen (kmers[i]));
-    rword = get_reverse_complement (word, strlen (kmers[i]));
-    if (rword < word) word = rword;
-    code = trie_lookup (&db.trie, word);
-    if (!code) {
-      fprintf (stderr, "No such kmer\n");
-      exit (0);
-    }
-    kmer_dir = ((code & 0x80000000) != 0);
-    if (debug > 0) fprintf (stderr, "Kmer %s word %llu code %u\n", kmers[i], word, code);
-    code &= 0x7fffffff;
-    node_idx = (code >> db.kmer_bits) - 1;
-    node_kmer = code & ((1 << db.kmer_bits) - 1);
-    kmer_idx = db.nodes[node_idx].kmers + node_kmer;
-    if (debug > 0) fprintf (stderr, "Node %u kmer %u idx %u dir %u\n", node_idx, node_kmer, kmer_idx, kmer_dir);
-  
-    if (debug > 1) print_db_reads (&db.index, files, kmer_idx, kmer_dir, stderr);
-
-    first_read = gt4_index_get_kmer_info (&db.index, kmer_idx, &num_reads);
-    if (debug > 0) fprintf (stderr, "Num reads %u\n", num_reads);
-    for (j = 0; j < num_reads; j++) {
-      unsigned long long kmer_pos, name_pos;
-      unsigned int file_idx, dir;
-      unsigned int k;
-      kmer_pos = gt4_index_get_read_info (&db.index, first_read + j, &file_idx, &name_pos, &dir);
-      for (k = 0; k < nreads; k++) {
-        if ((reads[k].file_idx == file_idx) && (reads[k].name_pos == name_pos)) break;
-      }
-      if (k >= nreads) {
-        if (debug) fprintf (stderr, "Adding read %u dir %u\n", nreads, dir);
-        reads[nreads].name_pos = name_pos;
-        reads[nreads].kmer_pos = kmer_pos;
-        reads[nreads].file_idx = file_idx;
-        /* fixme: What to do if two kmers have conflicting read directions? */
-        reads[nreads].dir = (dir != kmer_dir);
-        nreads += 1;
-      } else {
-        if (debug > 2) fprintf (stderr, "  Already registered as %u\n", k);
+    if (!files[i].cdata) {
+      files[i].cdata = gt4_mmap (files[i].name, &files[i].csize);
+      if (!files[i].cdata) {
+        fprintf (stderr, "Cannot load read file %s\n", files[i].name);
+        die = 1;
       }
     }
   }
+  g_files = (SeqFile *) malloc (gdb.index.n_files * sizeof (SeqFile));
+  for (i = 0; i < gdb.index.n_files; i++) {
+    g_files[i].name = gdb.index.files[i];
+    if (!g_files[i].cdata) {
+      g_files[i].cdata = gt4_mmap (g_files[i].name, &g_files[i].csize);
+      if (!g_files[i].cdata) {
+        fprintf (stderr, "Cannot load genome file %s\n", g_files[i].name);
+        die = 1;
+      }
+    }
+  }
+  if (die) {
+    fprintf (stderr, "Terminating\n");
+    exit (1);
+  }
+
+  /* Get all unique reads */
+  nreads = get_reads (&db, &gdb, reads, files, kmers, nkmers);
   if (debug) fprintf (stderr, "Total %u unique reads\n", nreads);
-  /* Chenge directionality of reads if needed */
+
+  /* Create actual sequences */
+  /* Change directionality of reads if needed */
   for (i = 0; i < nreads; i++) {
     if (!files[reads[i].file_idx].cdata) {
       files[reads[i].file_idx].cdata = gt4_mmap (files[reads[i].file_idx].name, &files[reads[i].file_idx].csize);
@@ -367,7 +154,7 @@ main (int argc, const char *argv[])
   }
 
   /* Create matrix */
-  mat = n_matrix_new (nreads, (const char **) seqs);
+  mat = n_matrix_new (nreads, (const char **) seqs, WORDLEN);
   if (debug > 2) {
     for (i = 0; i < mat->n_seqs; i++) {
       unsigned int j;
@@ -394,13 +181,158 @@ main (int argc, const char *argv[])
       fprintf (stdout, "%u %s %u\n", i, c, mat->unique_kmers[i].count);
     }
   }
+  if (analyze_kmers) {
+    print_kmer_statistics (mat);
+  }
+
+  NCell *alignment[2048];
+  unsigned int alen = build_alignment (alignment, 2048, &db, &gdb, mat, 15);
+  unsigned int a[2048];
+  unsigned int b[2048];
+  unsigned int a_pos[2048];
+  unsigned int b_pos[2048];
+  unsigned int r[2048] = { 0 };
+  for (i = 0; i < alen; i++) a[i] = alignment[i]->consensus;
+  NSeq *b_seq = n_seq_new (ref, WORDLEN);
+  for (i = 0; i <= b_seq->len; i++) b[i] = b_seq->pos[i].nucl;
+  unsigned int n_ref_align = create_alignment (a_pos, b_pos, a, alen, b, b_seq->len);
+  for (i = 0; i < n_ref_align; i++) {
+    r[a_pos[i]] = b_seq->pos[b_pos[i]].nucl;
+    alignment[a_pos[i]]->ref_pos = ref_start + b_pos[i];
+  }
+  
+  /* Compose alignment */
+  int n_p[1024];
+  for (i = 0; i < 1024; i++) n_p[i] = BEFORE;
+  int file_idx = -1;
+  unsigned int pos[1024] = { 0 };
+  unsigned int ac[1024];
+  unsigned int rc[1024];
+  unsigned int nc[6 * 1024] = { 0 };
+  unsigned int ac_len = 0;
+  i = 0;
+  unsigned int next_rp = 0;
+  while (i < alen) {
+    /* Check whether any sequence needs additional nucleotides */
+    NCell *cell = alignment[i];
+    /* fprintf (stdout, "%u\t%u\n", cell->file_idx, cell->ref_pos); */
+    unsigned int has_gap = 0, has_rgap = 0;
+    unsigned int j;
+    for (j = 0; j < mat->n_seqs; j++) {
+      int s_p = cell->links[j].pos;
+      if ((s_p >= 0) && (n_p[j] >= 0) && (n_p[j] < s_p)) {
+        has_gap = 1;
+        break;
+      }
+    }
+    if (next_rp && (cell->ref_pos > 0) && (cell->ref_pos > next_rp)) {
+      fprintf (stderr, "Has gap %u %u\n", cell->ref_pos, next_rp);
+      has_rgap = 1;
+    }
+    if (has_gap) {
+      ac[ac_len] = GAP;
+      rc[ac_len] = GAP;
+      for (j = 0; j < mat->n_seqs; j++) {
+        int s_p = cell->links[j].pos;
+        if (n_p[j] < 0) {
+        } else if ((n_p[j] >= 0) && (n_p[j] < s_p)) {
+          nc[6 * ac_len + mat->seqs[j]->pos[n_p[j]].nucl] += 1;
+          n_p[j] += 1;
+          if (n_p[j] >= mat->seqs[j]->len) n_p[j] = -1;
+        } else {
+          nc[6 * ac_len + GAP] += 1;
+        }
+      }
+      ac_len += 1;
+    } else if (has_rgap) {
+      pos[ac_len] = next_rp;
+      ac[ac_len] = GAP;
+      rc[ac_len] = b_seq->pos[next_rp - ref_start].nucl;
+      next_rp += 1;
+      ac_len += 1;
+    } else {
+      if ((int) cell->file_idx > file_idx) file_idx = (int) cell->file_idx;
+      if (cell->ref_pos > 0) pos[ac_len] = cell->ref_pos;
+      ac[ac_len] = cell->consensus;
+      rc[ac_len] = r[i];
+      if (cell->ref_pos > 0) next_rp = cell->ref_pos + 1;
+      for (j = 0; j < mat->n_seqs; j++) {
+        int s_p = cell->links[j].pos;
+        if (s_p >= 0) {
+          if ((n_p[j] < 0) || (s_p == n_p[j])) {
+            nc[6 * ac_len + mat->seqs[j]->pos[s_p].nucl] += 1;
+            n_p[j] = s_p + 1;
+            if (n_p[j] >= mat->seqs[j]->len) n_p[j] = -1;
+          } else {
+            nc[6 * ac_len + GAP] += 1;
+          }
+        } else {
+        }
+      }
+      ac_len += 1;
+      i += 1;
+    }
+  }
+
+  fprintf (stdout, "CHR\tREF\tPOS\tCONS\tTOTAL\tA\tC\tG\tT\tN\tGAP\tALLELES\n");
+  for (i = 0; i < ac_len; i++) {
+    unsigned int j, sum;
+    sum = 0;
+    for (j = 0; j < 6; j++) sum += nc[6 * i + j];
+    /* if (sum < 10) continue;*/
+    if ((sum > 0) && (nc[6 * i + GAP] >= (2 * sum / 3))) continue;
+    if (pos[i] > 0) {
+      fprintf (stdout, "%s\t%u\t", ref_chr, pos[i]);
+    } else {
+      fprintf (stdout, "\t\t");
+    }
+    fprintf (stdout, "%c\t%c\t%u", n2c[rc[i]], n2c[ac[i]], sum);
+    unsigned int s[6] = {0};
+    for (j = 0; j < 6; j++) {
+      if ((sum >= 10) && (nc[6 * i + j] > (sum / 3))) s[j] = 1;
+      fprintf (stdout, "\t%d", nc[6 * i + j]);
+    }
+    fprintf (stdout, "\t");
+    for (j = 0; j < 6; j++) {
+      if (s[j]) fprintf (stdout, "%c", n2c[j]);
+    }
+    fprintf (stdout, "\n");
+  }
+
+  return 0;
+}
+
+static unsigned int
+build_alignment (NCell *alignment[], unsigned int alignment_size, KMerDB *db, KMerDB *gdb, NMatrix *mat, unsigned int min_cov)
+{
+  unsigned int i;
+  NCell *cell;
   /* Fill matrix */
   fprintf (stderr, "Building matrix\n");
   /* Iterate over all unique kmers */
   for (i = 0; i < mat->n_unique_kmers; i++) {
     NCell *cells[WORDLEN] = { 0 };
-    NCell *prev = NULL;
     unsigned int j;
+
+    unsigned int file_idx = 0;
+    unsigned long long kmer_pos = 0;
+    unsigned int dir = 0;
+    unsigned int code = trie_lookup (&gdb->trie, mat->unique_kmers[i].value);
+    if (code) {
+      dir = ((code & 0x8000000) != 0);
+      code &= 0x7fffffff;
+      unsigned int node = (code >> gdb->kmer_bits) - 1;
+      unsigned int kmer = code & ((1 << gdb->kmer_bits) - 1);
+      unsigned int kmer_idx = gdb->nodes[node].kmers + kmer;
+      unsigned long long first_read;
+      unsigned int num_reads;
+      first_read = gt4_index_get_kmer_info (&gdb->index, kmer_idx, &num_reads);
+      if (num_reads == 1) {
+        unsigned long long name_pos;
+        kmer_pos = gt4_index_get_read_info (&gdb->index, first_read, &file_idx, &name_pos, &dir);
+      }
+    }
+    
     if (print_chains) {
       fprintf (stdout, "Kmer %u, reads", i);
     }
@@ -426,28 +358,14 @@ main (int argc, const char *argv[])
           assert (!mat->seqs[seq_idx]->pos[pos + k].cells);
           cells[k] = n_matrix_new_cell (mat);
         }
+        if (kmer_pos > 0) {
+          cells[k]->file_idx = file_idx;
+          cells[k]->ref_pos = (dir) ? kmer_pos + WORDLEN - 1 - k : kmer_pos + k;
+        }
         if (!mat->seqs[seq_idx]->pos[pos + k].cells) {
           /* Link cell from current kmer to seq/pos */
           n_matrix_link_cell (mat, cells[k], seq_idx, pos + k);
         }
-#if 0
-        if (k > 0) {
-          /* Chain cells on this sequence */
-          if (prev->links[seq_idx].next && (prev->links[seq_idx].next != cells[k])) {
-            fprintf (stderr, "Inconsistent next link for seq %u\n", seq_idx);
-            fprintf (stderr, "Pos by current kmer: %d\n", cells[k]->links[seq_idx].pos);
-            fprintf (stderr, "Pos by current chain: %d\n", prev->links[seq_idx].next->links[seq_idx].pos);
-          } else if (cells[k]->links[seq_idx].prev && (cells[k]->links[seq_idx].prev != prev)) {
-            fprintf (stderr, "Inconsistent prev link for seq %u\n", seq_idx);
-            fprintf (stderr, "Pos by current kmer: %d\n", prev->links[seq_idx].pos);
-            fprintf (stderr, "Pos by current chain: %d\n", cells[k]->links[seq_idx].prev->links[seq_idx].pos);
-          } else {
-            prev->links[seq_idx].next = cells[k];
-            cells[k]->links[seq_idx].prev = prev;
-          }
-        }
-#endif
-        prev = cells[k];
       }
     }
     if (print_chains) fprintf (stdout, "\n");
@@ -463,6 +381,7 @@ main (int argc, const char *argv[])
       NCell *cell = seq->pos[j].cells;
       if (!cell) {
         cell = n_matrix_new_cell (mat);
+        cell->ref_pos = 666;
         n_matrix_link_cell (mat, cell, i, j);
       }
     }
@@ -564,8 +483,8 @@ main (int argc, const char *argv[])
     if (next) cell->next = next;
   }
 
-  fprintf (stderr, "Finding longest alignment\n");
   /* Get longest alignment */
+  fprintf (stderr, "Finding longest alignment\n");
   unsigned int max = 0;
   NCell *max_cell = NULL;
   for (cell = mat->cells; cell; cell = cell->next_allocated) {
@@ -589,14 +508,49 @@ main (int argc, const char *argv[])
     alen += 1;
     cell = cell->next;
   }
-  if (debug) fprintf (stderr, "Alignment length %u\n", alen);
+  if (debug) fprintf (stderr, "Initial alignment length %u\n", alen);
+  
+  /* Compact alignment */
+  cell = first_cell;
+  while (cell->next) {
+    if (n_matrix_can_merge_cells (mat, cell, cell->next)) {
+      NCell *next = cell->next->next;
+      n_matrix_merge_cells (mat, cell, cell->next);
+      cell->next = next;
+      alen -= 1;
+    } else {
+      cell = cell->next;
+    }
+  }
+  if (debug) fprintf (stderr, "Trimmed alignment length %u\n", alen);
   
   /* Create alignment */
-  NCell **alignment = (NCell **) malloc (alen * sizeof (NCell *));
   unsigned int apos = 0;
   for (cell = first_cell; cell; cell = cell->next) {
     alignment[apos++] = cell;
   }
+
+  /* Calculate consensus nucleotides */
+  for (i = 0; i < alen; i++) {
+    unsigned int n_counts[4] = { 0 };
+    unsigned int j, max;
+    NCell *cell = alignment[i];
+    for (j = 0; j < mat->n_seqs; j++) {
+      if (cell->links[j].pos >= 0) {
+        unsigned int n = mat->seqs[j]->pos[cell->links[j].pos].nucl;
+        if (n < 4) n_counts[n] += 1;
+      }
+    }
+    max = A;
+    for (j = 1; j < 4; j++) if (n_counts[j] > n_counts[max]) max = j;
+    cell->consensus = max;
+  }
+
+  /* Align cells back to consensus */
+  for (i = 0; i < mat->n_seqs; i++) {
+    align_seq (mat, alignment, alen, i);
+  }
+
   /* Try to merge cells in alignment */
   for (i = 0; i < alen; i++) {
     unsigned int j;
@@ -619,16 +573,7 @@ main (int argc, const char *argv[])
               n_matrix_merge_cells (mat, alignment[k], cc);
               break;
             } else {
-              unsigned int l;
               fprintf (stderr, "Cannot merge: alignment pos %u seq %u pos %u\n", i, j, s_p);
-              for (l = 0; l < mat->n_seqs; l++) {
-                fprintf (stderr, "%c", 'A' + alignment[k]->links[l].pos);
-              }
-              fprintf (stderr, "\n");
-              for (l = 0; l < mat->n_seqs; l++) {
-                fprintf (stderr, "%c", 'A' + cc->links[l].pos);
-              }
-              fprintf (stderr, "\n");
             }
           }
         }
@@ -654,223 +599,255 @@ main (int argc, const char *argv[])
         }
       }
     }
+    cell->count = 0;
+    for (j = 0; j < mat->n_seqs; j++) {
+      if (cell->links[j].pos >= 0) cell->count += 1;
+    }
+  }
+  /* Trim alignment */
+  int a_start = 0;
+  while (a_start < alen) {
+    if (alignment[a_start]->count >= min_cov) break;
+    a_start += 1;
+  }
+  int a_end = alen - 1;
+  while (a_end >= 0) {
+    if (alignment[a_end]->count >= min_cov) break;
+    a_end -= 1;
+  }
+  if (a_start >= a_end) return 0;
+  if (a_start > 0) {
+    int j;
+    for (j = a_start; j < a_end; j++) alignment[j - a_start] = alignment[j];
+    alen = a_end - a_start + 1;
+  }
+  return alen;
+}
+
+#define MM_PENALTY -1
+#define GAP_PENALTY -4
+
+static unsigned int
+create_alignment (unsigned int a_pos[], unsigned int b_pos[], const unsigned int a[], unsigned int na, const unsigned int b[], unsigned int nb)
+{
+  unsigned int i, j;
+  int *t = (int *) malloc (na * nb * 4);
+  for (j = 0; j < na; j++) {
+    int score = 0;
+    if ((a[j] != N) && (a[j] == b[0])) score = 1;
+    t[0 * na + j] = score;
+  }
+  for (i = 0; i < nb; i++) {
+    int score = 0;
+    if ((b[i] != N) && (b[i] == a[0])) score = 1;
+    t[i * na + 0] = score;
+  }
+  for (i = 1; i < nb; i++) {
+    for (j = 1; j < na; j++) {
+      int score = t[(i - 1) * na + (j - 1)];
+      if ((t[i * na + (j - 1)] + GAP_PENALTY) > score) score = t[i * na + (j - 1)] + GAP_PENALTY;
+      if ((t[(i - 1) * na + j] + GAP_PENALTY) > score) score = t[(i - 1) * na + j] + GAP_PENALTY;
+      if ((a[j] != N) && (b[i] != N)) {
+        if (a[j] == b[i]) {
+          score += 1;
+        } else {
+          score += MM_PENALTY;
+        }
+      }
+      /* if (score < 0) score = 0; */
+      t[i * na + j] = score;
+    }
   }
 
-  for (i = 0; i < mat->n_seqs; i++) {
-    unsigned int j;
-    for (j = 0; j < alen; j++) {
-      NCell *cell = alignment[j];
-      char c;
-      if (cell->links[i].pos == BEFORE) {
-        c = '<';
-      } else if (cell->links[i].pos == AFTER) {
-        c = '>';
-      } else if (cell->links[i].pos == UNKNOWN) {
-        c = '?';
-      } else {
-        char *n = "ACGTN.,";
-        c = n[mat->seqs[i]->pos[cell->links[i].pos].nucl];
-      }
-      fprintf (stderr, "%c", c);
+#if 0
+  char *n = "ACGTN";
+  fprintf (stderr, " ");
+  for (j = 0; j < na; j++) {
+    fprintf (stderr, "   %c", n[a[j]]);
+  }
+  fprintf (stderr, "\n");
+  for (i = 0; i < nb; i++) {
+    fprintf (stderr, "%c", n[b[i]]);
+    for (j = 0; j < na; j++) {
+      fprintf (stderr, " %3d", t[i * na + j]);
     }
     fprintf (stderr, "\n");
   }
+  fprintf (stderr, "\n");
+#endif
 
-  int *align = (int *) malloc (mat->n_seqs * alen * sizeof (int));
-  for (i = 0; i < mat->n_seqs * alen; i++) align[i] = -1;
-  for (i = 0; i < alen; i++) {
-    unsigned int j;
-    for (j = 0; j < mat->n_seqs; j++) {
-      if (alignment[i]->links[j].pos >= 0) align[j * alen + i] = alignment[i]->links[j].pos;
+  int max_i = nb - 1, max_j = 0;
+  for (j = 0; j < na; j++) {
+    if (t[(nb - 1) * na + j] > t[(nb - 1) * na + max_j]) {
+      max_i = nb - 1;
+      max_j = j;
     }
   }
-
-  /* Printout */
-  unsigned int max_s = 0;
-  unsigned int s[4096];
-  float q[4096];
-  for (i = 0; i < alen; i++) {
-    unsigned int j;
-    unsigned int s_n[4] = { 0 };
-    for (j = 0; j < mat->n_seqs; j++) {
-      if (align[j * alen + i] < 0) continue;
-      if (align[j * alen + i] >= mat->seqs[j]->len) continue;
-      unsigned int nucl = mat->seqs[j]->pos[align[j * alen + i]].nucl;
-      if (nucl > T) continue;
-      s_n[nucl] += 1;
-    }
-    s[i] = s_n[A] + s_n[C] + s_n[G] + s_n[T];
-    if (s[i] > max_s) max_s = s[i];
-    unsigned int max = A;
-    for (j = A; j <= T; j++) {
-      if (s_n[j] > s_n[max]) max = j;
-    }
-    if (s[i] != 0) {
-      q[i] = (float) s_n[max] / s[i];
-    } else {
-      q[i] = 0;
+  for (i = 0; i < nb; i++) {
+    if (t[i * na + (na - 1)] > t[max_i * na + max_j]) {
+      max_i = i;
+      max_j = na - 1;
     }
   }
-  for (i = 0; i < alen; i++) {
-    fprintf (stdout, "%c", '1' + (unsigned int) (8 * s[i] / max_s));
-  }
-  fprintf (stdout, "\n");
-  for (i = 0; i < alen; i++) {
-    fprintf (stdout, "%c", '1' + (unsigned int) (8 * q[i]));
-  }
-  fprintf (stdout, "\n");
-  for (i = 0; i < mat->n_seqs; i++) {
-    unsigned int j;
-    for (j = 0; j < alen; j++) {
-      if (align[i * alen + j] < 0) {
-        fprintf (stdout, " ");
-      } else if (align[i * alen + j] < mat->seqs[i]->len) {
-        unsigned int nucl = mat->seqs[i]->pos[align[i * alen + j]].nucl;
-        fprintf (stdout, "%c", n2c[nucl]);
-      } else {
-        break;
-      }
+  /* fprintf (stderr, "%d %d\n", max_i, max_j); */
+  unsigned int len = 0;
+  a_pos[0] = max_j;
+  b_pos[0] = max_i;
+  len += 1;
+  while ((max_i >= 0) && (max_j >= 0)) {
+    int score = -1;
+    int best_i = i - 1;
+    int best_j = j - 1;
+    if ((max_i > 0) && (max_j >= 0)) {
+      best_i = max_i - 1;
+      best_j = max_j - 1;
+      score = t[best_i * na + best_j];
     }
-    fprintf (stdout, "\n");
+    if ((max_i > 0) && (t[(max_i - 1) * na + max_j] > score)) {
+      best_i = max_i - 1;
+      best_j = max_j;
+      score = t[best_i * na + best_j];
+    }
+    if ((max_j > 0) && (t[max_i * na + (max_j - 1)] > score)) {
+      best_i = max_i;
+      best_j = max_j - 1;
+      score = t[best_i * na + best_j];
+    }
+    if (score <= 0) break;
+    max_i = best_i;
+    max_j = best_j;
+    /* fprintf (stderr, "%d %d\n", max_i, max_j); */
+    a_pos[len] = max_j;
+    b_pos[len] = max_i;
+    len += 1;
   }
-  
-  return 0;
-}
-
-static NSeq *
-n_seq_new (const char *str)
-{
-  NSeq *seq;
-  unsigned long long len;
-  unsigned int i;
-  len = strlen (str);
-  seq = (NSeq *) malloc (sizeof (NSeq) + (len - 1) * sizeof (NPos));
-  seq->len = len;
-  seq->str = str;
   for (i = 0; i < len; i++) {
-    static unsigned int *c2n = NULL;
-    if (!c2n) {
-      unsigned int j;
-      c2n = (unsigned int *) malloc (256 * 4);
-      for (j = 0; j < 256; j++) c2n[j] = N;
-      c2n['a'] = c2n['A'] = A;
-      c2n['c'] = c2n['C'] = C;
-      c2n['g'] = c2n['G'] = G;
-      c2n['t'] = c2n['T'] = c2n['u'] = c2n['U'] = T;
-    }
-    seq->pos[i].nucl = c2n[(unsigned int) str[i]];
-    seq->pos[i].has_kmer = 0;
-    seq->pos[i].kmer = 0;
-    seq->pos[i].cells = NULL;
+    unsigned int t = a_pos[i];
+    a_pos[i] = a_pos[len - 1 - i];
+    a_pos[len - 1 - i] = t;
+    t = b_pos[i];
+    b_pos[i] = b_pos[len - 1 - i];
+    b_pos[len - 1 - i] = t;
   }
-  for (i = 0; i <= (len - WORDLEN); i++) {
-    seq->pos[i].has_kmer = n_seq_get_kmer (seq, i, &seq->pos[i].kmer);
+#if 0
+  for (i = 0; i < len; i++) {
+    fprintf (stderr, "%c", n[a[a_pos[i]]]);
   }
-  return seq;
-}
-
-static unsigned int
-n_seq_get_kmer (NSeq *seq, unsigned int pos, unsigned long long *kmer)
-{
-  unsigned long long val = 0;
-  unsigned int i;
-  for (i = 0; i < WORDLEN; i++) {
-    if (seq->pos[pos + i].nucl >= N) return 0;
-    val = val << 2;
-    val |= seq->pos[pos + i].nucl;
+  fprintf (stderr, "\n");
+  for (i = 0; i < len; i++) {
+    fprintf (stderr, "%c", n[b[b_pos[i]]]);
   }
-  *kmer = val;
-  return 1;
-}
-
-static NMatrix *
-n_matrix_new (unsigned int n_seqs, const char *seqs[])
-{
-  NMatrix *mat;
-  unsigned int i, size_kmers = 256;
-  mat = (NMatrix *) malloc (sizeof (NMatrix) + (n_seqs - 1) * sizeof (NSeq *));
-  mat->n_seqs = n_seqs;
-  mat->n_kmers = 0;
-  mat->kmers = (NKMer *) malloc (size_kmers * sizeof (NKMer));
-  mat->n_unique_kmers = 0;
-  mat->unique_kmers = NULL;
-  mat->cells = NULL;
-  mat->free_cells = NULL;
-  for (i = 0; i < n_seqs; i++) {
-    unsigned int j;
-    mat->seqs[i] = n_seq_new (seqs[i]);
-    for (j = 0; j < mat->seqs[i]->len; j++) {
-      if (mat->seqs[i]->pos[j].has_kmer) {
-        if (mat->n_kmers >= size_kmers) {
-          size_kmers = size_kmers << 1;
-          mat->kmers = (NKMer *) realloc (mat->kmers, size_kmers * sizeof (NKMer));
-        }
-        mat->kmers[mat->n_kmers].value = mat->seqs[i]->pos[j].kmer;
-        mat->kmers[mat->n_kmers].seq = i;
-        mat->kmers[mat->n_kmers].pos = j;
-        mat->kmers[mat->n_kmers].count = 1;
-        mat->n_kmers += 1;
-      }
-    }
-  }
-  /* Sort kmers */
-  qsort (mat->kmers, mat->n_kmers, sizeof (NKMer), (int (*) (const void *, const void *)) compare_kmers);
-  /* Fill unique kmers */
-  mat->unique_kmers = (NKMer *) malloc (mat->n_kmers * sizeof (NKMer));
-  if (mat->n_kmers) {
-    i = 0;
-    while (i < mat->n_kmers) {
-      unsigned int j;
-      mat->unique_kmers[mat->n_unique_kmers] = mat->kmers[i];
-      for (j = i + 1; (j < mat->n_kmers) && (mat->kmers[j].value == mat->unique_kmers[mat->n_unique_kmers].value); j++) {
-        mat->unique_kmers[mat->n_unique_kmers].count += 1;
-      }
-      mat->n_unique_kmers += 1;
-      i = j;
-    }
-    qsort (mat->unique_kmers, mat->n_unique_kmers, sizeof (NKMer), (int (*) (const void *, const void *)) compare_kmer_counts);
-  }
-  
-  return mat;
-}
-
-static NCell *
-n_matrix_new_cell (NMatrix *mat)
-{
-  NCell *cell;
-  unsigned int i;
-  if (mat->free_cells) {
-    cell = mat->free_cells;
-    mat->free_cells = cell->next_allocated;
-  } else {
-    cell = (NCell *) malloc (sizeof (NCell) + (mat->n_seqs - 1) * sizeof (NLink));
-  }
-  cell->prev = NULL;
-  cell->next = NULL;
-  cell->count = 0;
-  for (i = 0; i < mat->n_seqs; i++) {
-    cell->links[i].pos = UNKNOWN;
-    cell->links[i].prev = NULL;
-    cell->links[i].next = NULL;
-  }
-  cell->next_allocated = mat->cells;
-  mat->cells = cell;
-  return cell;
+  fprintf (stderr, "\n");
+#endif
+  free (t);
+  return len;
 }
 
 static void
-n_matrix_free_cell (NMatrix *mat, NCell *cell)
+align_seq (NMatrix *mat, NCell *a[], unsigned int alen, unsigned int seq_idx)
 {
-  if (cell == mat->cells) {
-    mat->cells = cell->next_allocated;
-  } else {
-    NCell *prev;
-    prev = mat->cells;
-    while (prev->next_allocated != cell) prev = prev->next_allocated;
-    prev->next_allocated = cell->next_allocated;
+  unsigned int an[4096];
+  unsigned int bn[4096];
+  unsigned int a_pos[4096], b_pos[4096];
+  unsigned int i, j;
+  for (j = 0; j < alen; j++) {
+    an[j] = a[j]->consensus;
   }
-  cell->next_allocated = mat->free_cells;
-  mat->free_cells = cell;
+  for (i = 0; i < mat->seqs[seq_idx]->len; i++) {
+    bn[i] = mat->seqs[seq_idx]->pos[i].nucl;
+  }
+  unsigned int len = create_alignment (a_pos, b_pos, an, alen, bn, mat->seqs[seq_idx]->len);
+  for (i = 0; i < alen; i++) {
+    if (a[i]->links[seq_idx].pos >= 0) n_matrix_unlink_cell (mat, a[i], seq_idx);
+  }
+  for (i = 0; i < len; i++) {
+    if (a[a_pos[i]]->links[seq_idx].pos < 0) n_matrix_link_cell (mat, a[a_pos[i]], seq_idx, b_pos[i]);
+  }
+}
+
+static void
+load_db_or_die (KMerDB *db, const char *db_name, const char *id)
+{
+  const unsigned char *cdata;
+  unsigned long long csize;
+  /* Read database */
+  if (debug) fprintf (stderr, "Loading [%s] database %s\n", id, db_name);
+  cdata = gt4_mmap (db_name, &csize);
+  if (!cdata) {
+    fprintf (stderr, "Cannot mmap %s\n", db_name);
+    exit (1);
+  }
+  scout_mmap (cdata, csize);
+  if (!read_database_from_binary (db, cdata, csize)) {
+    fprintf (stderr, "Cannot read [%s] database %s\n", id, db_name);
+    exit (1);
+  }
+  if (debug) fprintf (stderr, "Finished loading [%s] database (index = %u)\n", id, db->index.read_blocks != NULL);
+}
+
+static unsigned int
+get_reads (KMerDB *db, KMerDB *gdb, Read reads[], SeqFile files[], const char *kmers[], unsigned int nkmers)
+{
+  unsigned int nreads = 0, i;
+
+  for (i = 0; i < nkmers; i++) {
+    unsigned long long first_read;
+    unsigned int num_reads, j, kmer_dir;
+    unsigned long long word, rword;
+    unsigned int code, node_idx, node_kmer, kmer_idx;
+  
+    word = string_to_word (kmers[i], strlen (kmers[i]));
+    rword = get_reverse_complement (word, strlen (kmers[i]));
+    if (rword < word) word = rword;
+    code = trie_lookup (&db->trie, word);
+    if (!code) {
+      fprintf (stderr, "No such kmer: %s\n", kmers[i]);
+      exit (0);
+    }
+    kmer_dir = ((code & 0x80000000) != 0);
+    if (debug > 0) fprintf (stderr, "Kmer %s word %llu code %u\n", kmers[i], word, code);
+    code &= 0x7fffffff;
+    node_idx = (code >> db->kmer_bits) - 1;
+    node_kmer = code & ((1 << db->kmer_bits) - 1);
+    kmer_idx = db->nodes[node_idx].kmers + node_kmer;
+    if (debug > 0) fprintf (stderr, "Node %u kmer %u idx %u dir %u\n", node_idx, node_kmer, kmer_idx, kmer_dir);
+  
+    if (debug > 1) print_db_reads (&db->index, files, kmer_idx, kmer_dir, stderr);
+
+    first_read = gt4_index_get_kmer_info (&db->index, kmer_idx, &num_reads);
+    if (debug > 0) fprintf (stderr, "Num reads %u\n", num_reads);
+    for (j = 0; j < num_reads; j++) {
+      unsigned long long kmer_pos, name_pos;
+      unsigned int file_idx, dir;
+      unsigned int k;
+      kmer_pos = gt4_index_get_read_info (&db->index, first_read + j, &file_idx, &name_pos, &dir);
+      for (k = 0; k < nreads; k++) {
+        if ((reads[k].file_idx == file_idx) && (reads[k].name_pos == name_pos)) break;
+      }
+      if (k >= nreads) {
+        if (debug) fprintf (stderr, "Adding read %u dir %u\n", nreads, dir);
+        reads[nreads].name_pos = name_pos;
+        reads[nreads].kmer_pos = kmer_pos;
+        reads[nreads].file_idx = file_idx;
+        /* fixme: What to do if two kmers have conflicting read directions? */
+        reads[nreads].dir = (dir != kmer_dir);
+        nreads += 1;
+      } else {
+        if (debug > 2) fprintf (stderr, "  Already registered as %u\n", k);
+      }
+    }
+    
+    if (debug > 0) {
+      first_read = gt4_index_get_kmer_info (&gdb->index, kmer_idx, &num_reads);
+      for (j = 0; j < num_reads; j++) {
+        unsigned long long kmer_pos, name_pos;
+        unsigned int file_idx, dir;
+        kmer_pos = gt4_index_get_read_info (&gdb->index, first_read + j, &file_idx, &name_pos, &dir);
+        fprintf (stderr, "Genome: %s:%llu\n", gdb->index.files[file_idx], kmer_pos);
+      }
+    }
+  }
+  return nreads;
 }
 
 static void
@@ -930,3 +907,35 @@ print_db_reads (GT4Index *index, SeqFile *files, unsigned long long kmer_idx, un
     fprintf (ofs, "\n");
   }
 }
+
+static void
+print_kmer_statistics (NMatrix *mat)
+{
+  unsigned int i;
+  for (i = 0; i < mat->n_unique_kmers; i++) {
+    char c[32] = { 0 };
+    unsigned int j, k, l;
+    unsigned int t[1024] = { 0 };
+    for (j = 0; j < mat->n_kmers; j++) {
+      if (mat->kmers[j].value != mat->unique_kmers[i].value) continue;
+      for (k = 0; k < mat->n_kmers; k++) {
+        if (mat->kmers[k].value == mat->kmers[j].value) continue;
+        if (mat->kmers[k].seq != mat->kmers[j].seq) continue;
+        for (l = 0; l < mat->n_unique_kmers; l++) {
+          if (mat->unique_kmers[l].value == mat->kmers[k].value) {
+            /* Kmers i & l are in the same read */
+            t[l] += 1;
+            break;
+          }
+        }
+      }
+    }
+    word2string (c, mat->unique_kmers[i].value, WORDLEN);
+    fprintf (stdout, "%u\t%s\t%u", i, c, mat->unique_kmers[i].count);
+    for (j = 0; j < mat->n_unique_kmers; j++) {
+      fprintf (stdout, "\t%u", t[j]);
+    }
+    fprintf (stdout, "\n");
+  }
+}
+

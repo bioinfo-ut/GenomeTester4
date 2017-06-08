@@ -252,8 +252,8 @@ train_model (SNPCall *calls, unsigned int ncalls, unsigned int max_training, uns
   keskmine = (s0 + s1) / ntrain;
   if (debug) fprintf (stderr, "done\n");
   if (debug) {
-    fprintf (stderr, "A %f B %f\n", s0, s1);
-    fprintf (stderr, "Training size %u mean %.g\n", ntrain, keskmine);
+    fprintf (stderr, "A %g B %g\n", s0, s1);
+    fprintf (stderr, "Training size %u mean %.1f\n", ntrain, keskmine);
     fprintf (stderr, "pB %.3f\n", *pB);
   }
   if (keskmine == 0) {
@@ -380,12 +380,15 @@ print_genotypes (const unsigned char *lines[], SNPCall *calls, unsigned int ncal
   POptim optim[32];
   unsigned int chunk_size = 5000;
   unsigned int pos = 0;
+  unsigned int iter = 0;
   PData *pdata = (PData *) malloc (nthreads * chunk_size * sizeof (PData));
+
   memset (optim, 0, sizeof (optim));
 
   while (pos < ncalls) {
     unsigned int cpos = pos;
     unsigned int tidx, j, t;
+    if (debug > 1) fprintf (stderr, "Printing iteration %u\n", iter++);
     for (tidx = 0; tidx < nthreads; tidx++) {
       unsigned int cend;
       if (cpos >= ncalls) break;
@@ -725,16 +728,18 @@ main (int argc, const char *argv[])
     } else if (model == MODEL_HAPLOID) {
       /* Haploid model */
       train_model (calls_a, na, max_training, nruns, params, &pB, 2, nthreads);
-    } else {
-      /* Estimate MAF */
-      pB = calculate_allele_freq (calls_a, NULL, na);
     }
-    if (info) {
-      if (model == MODEL_FULL) fprintf (stdout, "#Sex\t%s\n", (p_XX > p_X) ? "F" : "M");
-      fprintf (stdout, "#EstimatedCoverage\t%g\n", params[LAMBDA]);
-      fprintf (stdout, "#AverageMAF\t%g\n", pB);
-      fprintf (stdout, "#AutosomeModel\t%g %g %g %g %g %g %g\n", params[L_VIGA], params[P_0], params[P_1], params[P_2], params[LAMBDA], params[SIZE], params[SIZE2]);
-    }
+  } else {
+    /* Estimate MAF */
+    pB = calculate_allele_freq (calls_a, NULL, na);
+  }
+
+
+  if (info) {
+    if (model == MODEL_FULL) fprintf (stdout, "#Sex\t%s\n", (p_XX > p_X) ? "F" : "M");
+    fprintf (stdout, "#EstimatedCoverage\t%g\n", params[LAMBDA]);
+    fprintf (stdout, "#AverageMAF\t%g\n", pB);
+    fprintf (stdout, "#AutosomeModel\t%g %g %g %g %g %g %g\n", params[L_VIGA], params[P_0], params[P_1], params[P_2], params[LAMBDA], params[SIZE], params[SIZE2]);
   }
 
   /* Default X model is diploid */

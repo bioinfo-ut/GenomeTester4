@@ -223,6 +223,16 @@ log_combination_k_r_f (unsigned int k, float r)
 double
 dnbinom (unsigned int x, double size, double p)
 {
+#if 1
+  double c, p0, p1, val;
+  c = log_combination_k_r_1 (x, size);
+  assert (!isnan (c));
+  p0 = log (p) * x;
+  p1 = log (1 - p) * size;
+  val = c + p0 + p1;
+  assert (!isnan (val));
+  return exp (val);
+#else
   double c, p0, p1, val;
   if (size > 1000) {
     c = exp (log_combination_k_r_1 (x, size));
@@ -235,6 +245,7 @@ dnbinom (unsigned int x, double size, double p)
   val = c * p0 * p1;
   assert (!isnan (val));
   return val;
+#endif
 }
 
 double

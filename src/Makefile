@@ -84,6 +84,7 @@ GASSEMBLER_SOURCES = \
 	database.c database.h \
 	fasta.c fasta.h \
 	index.c index.h \
+	matrix.c matrix.h \
 	queue.c queue.h \
 	sequence.c sequence.h \
 	trie.c trie.h \
