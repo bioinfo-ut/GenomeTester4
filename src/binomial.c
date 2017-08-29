@@ -8,7 +8,7 @@
 
 #include "binomial.h"
 
-#define MAX_PROD 4096
+#define MAX_PROD 16384
 
 static double *t_log_factorial_d = NULL;
 static float *t_log_factorial_f = NULL;
@@ -199,13 +199,13 @@ log_dbinom (unsigned int x, unsigned int n, double p)
 }
 
 double
-combination_k_r_1 (unsigned int k, double r)
+combination_k_r (unsigned int k, double r)
 {
-  return exp (log_combination_k_r_1 (k, r));
+  return exp (log_combination_k_r (k, r));
 }
 
 double
-log_combination_k_r_1 (unsigned int k, double r)
+log_combination_k_r (unsigned int k, double r)
 {
   if (!k) return 0;
   double val = lgamma (k + r) - lgamma (r) - log_factorial (k);
@@ -223,29 +223,14 @@ log_combination_k_r_f (unsigned int k, float r)
 double
 dnbinom (unsigned int x, double size, double p)
 {
-#if 1
   double c, p0, p1, val;
-  c = log_combination_k_r_1 (x, size);
+  c = log_combination_k_r (x, size);
   assert (!isnan (c));
   p0 = log (p) * x;
   p1 = log (1 - p) * size;
   val = c + p0 + p1;
   assert (!isnan (val));
   return exp (val);
-#else
-  double c, p0, p1, val;
-  if (size > 1000) {
-    c = exp (log_combination_k_r_1 (x, size));
-  } else {
-    c = combination_k_r_1 (x, size);
-  }
-  assert (!isnan (c));
-  p0 =  pow (p, x);
-  p1 =  pow (1 - p, size);
-  val = c * p0 * p1;
-  assert (!isnan (val));
-  return val;
-#endif
 }
 
 double

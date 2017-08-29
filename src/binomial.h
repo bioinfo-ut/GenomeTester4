@@ -9,8 +9,8 @@ unsigned int combination (unsigned int n, unsigned int k);
 double combinations_d (unsigned int n, unsigned int k);
 double log_combinations_d (unsigned int n, unsigned int k);
 float log_combinations_f (unsigned int n, unsigned int k);
-double combination_k_r_1 (unsigned int k, double r);
-double log_combination_k_r_1 (unsigned int k, double r);
+double combination_k_r (unsigned int k, double r);
+double log_combination_k_r (unsigned int k, double r);
 float log_combination_k_r_f (unsigned int k, float r);
 
 double poisson (unsigned int k, double lambda);

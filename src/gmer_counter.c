@@ -239,7 +239,7 @@ main (int argc, const char *argv[])
       fprintf (stderr, "Cannot mmap %s\n", dbb);
       exit (1);
     }
-    scout_mmap (cdata, csize);
+    if (!lowmem) scout_mmap (cdata, csize);
     if (!read_database_from_binary (&db, cdata, csize)) {
       fprintf (stderr, "Cannot read binary database %s\n", dbb);
       exit (1);
@@ -269,6 +269,7 @@ main (int argc, const char *argv[])
   }
 
   if (nseqs > 0) {
+    memset (&snpq, 0, sizeof (SNPQueue));
     queue_init (&snpq.queue, nthreads);
     /* Read files */
     snpq.db = &db;
