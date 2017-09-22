@@ -1,6 +1,6 @@
 # GenomeTester4
 A toolkit for performing set operations - union, intersection and complement - on k-mer lists.  
-Copyright (C) University of Tartu 2015-2016.
+Copyright (C) University of Tartu 2015-2016.  
 Please cite: Kaplinski L, Lepamets M, Remm M. (2015). GenomeTester4: a toolkit for performing basic set operations – union, intersection and complement on k-mer lists. GigaScience, 4:58  
 
 Building GenomeTester4 binaries:  
