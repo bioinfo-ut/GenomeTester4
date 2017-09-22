@@ -19,7 +19,7 @@ make gmer_caller
 
 * Usage   
 First one has to prepare the database of specific k-mers for each allele of polymorphism of interest.  
-k-mer databases are available from http://bioinfo.ut.ee/FastGT/  
+Couple of pre-made k-mer databases are available from http://bioinfo.ut.ee/FastGT/  
   
 K-mers are counted from raw reads in FASTQ file using program gmer_counter:  
 ```
