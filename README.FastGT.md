@@ -41,11 +41,11 @@ Additional options for gmer_counter:
     -db DATABASE     - SNP/KMER database file
     -dbb DBBINARY    - binary database file
     -w FILENAME      - write binary database to file
-    -32              - use 32-bit integeres for counts (default 16-bit)
+    -32              - use 32-bit integers for counts (default 16-bit)
     --max_kmers NUM  - maximum number of kmers per node
     --header         - print header row
     --total          - print the total number of kmers per node
-    --unique         - print the number of nonzero kmers per node
+    --unique         - print the number of non-zero kmers per node
     --kmers          - print individual kmer counts (default if no other output)
     --compile_index  - Add read index to database and write it to file
     --distribution NUM  - print kmer distribution (up to given number)
