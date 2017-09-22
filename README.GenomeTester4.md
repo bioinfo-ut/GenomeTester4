@@ -1,5 +1,7 @@
 # GenomeTester4 package
-
+Copyright (C) University of Tartu 2015-2017  
+Please cite: Kaplinski L, Lepamets M, Remm M. (2015). GenomeTester4: a toolkit for performing basic set operations – union, intersection and complement on k-mer lists. GigaScience, 4:58.  
+  
 GenomeTester4 is a toolkit for creating and manipulating k-mer lists. It
 contains 3 programs: glistmaker, glistcompare and glistquery. It is
 developed by Department of Bioinformatics, University of Tartu and
@@ -64,9 +66,9 @@ frequencies in the first list.
   
 GenomeTester4 is written in standard C. The only external dependency should
 be pthreads library that is standard in all Linux systems.  
-Binaries compiled with full optimization are included in directory "bin".  
+Binaries compiled with full optimization are included in directory 'bin'.  
 If you for whatever reason have to compile these manually, just enter into
-src subdirectory and type:  
+subdirectory 'src' and type:  
 ```
 make clean
 make
