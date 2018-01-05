@@ -55,10 +55,11 @@ typedef struct _FastaReader {
 	unsigned int type;
 	/* Current reading state */
 	unsigned int state;
-	/* Current character, nucleotide and word number */
+	/* Current character, and word number */
 	unsigned long long cpos;
-	unsigned long long npos;
 	unsigned long long wpos;
+	/* Current nucleotide number relative to the start of subsequence */
+	unsigned long long seq_npos;
 	/* Current name */
 	unsigned long long name_pos;
 	unsigned int name_length;

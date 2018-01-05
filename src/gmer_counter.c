@@ -1,5 +1,6 @@
 #define __GMERCOUNTER_C__
 
+#include <assert.h>
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
@@ -28,12 +29,13 @@ unsigned int debug = 0;
 typedef struct _TaskTable TaskTable;
 struct _TaskTable {
   TaskTable *next;
+  GT4SequenceFile *seqfile;
   unsigned int nwords;
   unsigned long long *words;
   unsigned int *alleles;
   /* Read indexing */
   unsigned int file_idx;
-  /* unsigned long long _name_pos; */
+  unsigned long long name_npos;
   Read *reads;
 };
 
@@ -58,9 +60,8 @@ struct _SNPQueue {
 
 /* Main thread loop */
 static void process (Queue *queue, unsigned int idx, void *arg);
-#if 0
 static int start_sequence (FastaReader *reader, void *data);
-#endif
+static int end_sequence (FastaReader *reader, void *data);
 static int read_word (FastaReader *reader, unsigned long long word, void *data);
 static int compare_counts (const void *lhs, const void *rhs);
 static unsigned int get_pair_median (KMerDB *db);
@@ -75,14 +76,15 @@ print_usage (FILE *ofs) {
   fprintf (ofs, "    -w FILENAME      - write binary database to file\n");
   fprintf (ofs, "    -32              - use 32-bit integeres for counts (default 16-bit)\n");
   fprintf (ofs, "    --max_kmers NUM  - maximum number of kmers per node\n");
+  fprintf (ofs, "    --silent         - do not output kmer counts (useful if only compiling db or index is needed\n");
   fprintf (ofs, "    --header         - print header row\n");
   fprintf (ofs, "    --total          - print the total number of kmers per node\n");
   fprintf (ofs, "    --unique         - print the number of nonzero kmers per node\n");
   fprintf (ofs, "    --kmers          - print individual kmer counts (default if no other output)\n");
-  fprintf (ofs, "    --compile_index  - Add read index to database and write it to file\n");
+  fprintf (ofs, "    --compile_index FILENAME - Add read index to database and write it to file\n");
   fprintf (ofs, "    --distribution NUM  - print kmer distribution (up to given number)\n");
   fprintf (ofs, "    --num_threads    - number of worker threads (default %u)\n", DEFAULT_NUM_THREADS);
-  fprintf (ofs, "    --low_memory     - optimize for low memory usage\n");
+  fprintf (ofs, "    --prefetch       - prefetch memory mapped files (faster on high-memory systems)\n");
   fprintf (ofs, "    -D               - increase debug level\n");
 }
 
@@ -94,10 +96,11 @@ main (int argc, const char *argv[])
   const char *wdb = NULL;
   const char *index = NULL;
   unsigned int max_kmers_per_node = 1000000000;
-  unsigned int header = 0, total = 0, unique = 0, kmers = 0, distro = 0, big = 0, dm = 0;
-  unsigned int lowmem = 0;
+  unsigned int silent = 0, header = 0, total = 0, unique = 0, kmers = 0, distro = 0, big = 0, dm = 0;
+  unsigned int lowmem = 1;
   unsigned int nseqs = 0;
   const char *seqnames[1024];
+  GT4SequenceFile *seq_files[1024];
   unsigned long long i;
 
   unsigned int nthreads = DEFAULT_NUM_THREADS;
@@ -138,6 +141,8 @@ main (int argc, const char *argv[])
         exit (1);
       }
       max_kmers_per_node = strtol (argv[i], NULL, 10);
+    } else if (!strcmp (argv[i], "--silent")) {
+      silent = 1;
     } else if (!strcmp (argv[i], "--header")) {
       header = 1;
     } else if (!strcmp (argv[i], "--total")) {
@@ -172,8 +177,8 @@ main (int argc, const char *argv[])
         exit (1);
       }
       nthreads = strtol (argv[i], NULL, 10);
-    } else if (!strcmp (argv[i], "--low_memory")) {
-      lowmem = 1;
+    } else if (!strcmp (argv[i], "--prefetch")) {
+      lowmem = 0;
     } else if (!strcmp (argv[i], "--count_trie_allocations")) {
       gt4_trie_debug |= GT4_TRIE_COUNT_ALLOCATIONS;
     } else if (!strcmp (argv[i], "-D")) {
@@ -280,6 +285,8 @@ main (int argc, const char *argv[])
       } else {
         tf = task_file_new (seqnames[i], !lowmem);
       }
+      seq_files[i] = tf->seqfile;
+      gt4_sequence_file_ref (seq_files[i]);
       tf->next = snpq.files;
       tf->idx = i;
       snpq.files = tf;
@@ -329,6 +336,8 @@ main (int argc, const char *argv[])
       unsigned long long max_name_pos = 0;
       unsigned int max_file_idx = 0, max_kmer_pos = 0;
       unsigned long long read_start = 0;
+      
+      gt4_db_clear_index (&db);
 
       /* Files */
       db.index.n_files = nseqs;
@@ -338,6 +347,7 @@ main (int argc, const char *argv[])
       }
       max_file_idx = nseqs - 1;
 
+      if (debug) fprintf (stderr, "Calculate bitsizes\n");
       for (i = 0; i < db.n_nodes; i++) {
         unsigned int j;
         for (j = 0; j < db.nodes[i].nkmers; j++) {
@@ -345,7 +355,8 @@ main (int argc, const char *argv[])
           ReadList *rl;
           kmer_idx = db.nodes[i].kmers + j;
           for (rl = snpq.reads[kmer_idx]; rl; rl = rl->next) {
-            if (rl->read.name_pos > max_name_pos) max_name_pos = rl->read.name_pos;
+            unsigned long long name_pos = seq_files[rl->read.file_idx]->subseqs[rl->read.subseq].name_pos;
+            if (name_pos > max_name_pos) max_name_pos = name_pos;
             if (rl->read.kmer_pos > max_kmer_pos) max_kmer_pos = rl->read.kmer_pos;
           }
         }
@@ -370,20 +381,33 @@ main (int argc, const char *argv[])
       if (debug) fprintf (stderr, "NBits file %u npos %u kmer %u\n", db.index.nbits_file, db.index.nbits_npos, db.index.nbits_kmer);
       db.index.n_kmers = db.n_kmers;
       db.index.read_blocks = (unsigned long long *) malloc (db.n_kmers * sizeof (unsigned long long));
+      if (debug) fprintf (stderr, "Calculate number of reads\n");
       for (i = 0; i < db.n_kmers; i++) {
         ReadList *rl;
         for (rl = snpq.reads[i]; rl; rl = rl->next) db.index.n_reads += 1;
       }
       db.index.reads = (unsigned long long *) malloc (db.index.n_reads * sizeof (unsigned long long));
+      if (debug) fprintf (stderr, "Writing reads\n");
       for (i = 0; i < db.n_kmers; i++) {
         unsigned int read_idx = 0;
         ReadList *rl;
         for (rl = snpq.reads[i]; rl; rl = rl->next) {
+          unsigned long long name_pos = seq_files[rl->read.file_idx]->subseqs[rl->read.subseq].name_pos;
           unsigned long long code = ((unsigned long long) rl->read.dir << (db.index.nbits_file + db.index.nbits_npos + db.index.nbits_kmer)) |
             ((unsigned long long) rl->read.file_idx << (db.index.nbits_npos + db.index.nbits_kmer)) |
-            (rl->read.name_pos << db.index.nbits_kmer) |
+            (name_pos << db.index.nbits_kmer) |
             rl->read.kmer_pos;
           db.index.reads[read_start + read_idx] = code;
+#if 0
+          unsigned long long _name_pos = (code >> db.index.nbits_kmer) & ((1ULL << db.index.nbits_npos) - 1);
+          unsigned long long _file_idx = (code >> (db.index.nbits_npos + db.index.nbits_kmer)) & ((1ULL << db.index.nbits_file) - 1);
+          unsigned long long _dir = (code >> (db.index.nbits_npos + db.index.nbits_kmer + db.index.nbits_file)) & 1;
+          unsigned long long _kmer_pos = code & ((1ULL << db.index.nbits_kmer) - 1);
+          assert (_name_pos == name_pos);
+          assert (_file_idx == rl->read.file_idx);
+          assert (_dir == rl->read.dir);
+          assert (_kmer_pos == rl->read.kmer_pos);
+#endif
           read_idx += 1;
         }
         db.index.read_blocks[i] = (unsigned long long) read_start << 24 | read_idx;
@@ -405,79 +429,81 @@ main (int argc, const char *argv[])
         fprintf (stderr, "Done\n");
       }
     }
-  
-    for (i = 0; i < db.n_nodes; i++) {
-      unsigned int j;
-      fprintf (stdout, "%s\t%u", db.names + db.nodes[i].name, db.nodes[i].nkmers);
-      if (total) {
-        unsigned long long total = 0;
-        for (j = 0; j < db.nodes[i].nkmers; j++) {
+
+    if (!silent) {
+      for (i = 0; i < db.n_nodes; i++) {
+        unsigned int j;
+        fprintf (stdout, "%s\t%u", db.names + db.nodes[i].name, db.nodes[i].nkmers);
+        if (total) {
+          unsigned long long total = 0;
+          for (j = 0; j < db.nodes[i].nkmers; j++) {
+            if (db.count_bits == 16) {
+              total += db.kmers_16[db.nodes[i].kmers + j];
+            } else {
+              total += db.kmers_32[db.nodes[i].kmers + j];
+            }
+          }
+          fprintf (stdout, "\t%llu", total);
+        }
+        if (unique) {
+          unsigned int uniq = 0;
+          for (j = 0; j < db.nodes[i].nkmers; j++) {
+            if (db.count_bits == 16) {
+              if (db.kmers_16[db.nodes[i].kmers + j]) uniq += 1;
+            } else {
+              if (db.kmers_16[db.nodes[i].kmers + j]) uniq += 1;
+            }
+          }
+          fprintf (stdout, "\t%u", uniq);
+        }
+        if (kmers) {
+          for (j = 0; j < db.nodes[i].nkmers; j++) {
+            if (db.count_bits == 16) {
+              fprintf (stdout, "\t%u", db.kmers_16[db.nodes[i].kmers + j]);
+            } else {
+              fprintf (stdout, "\t%u", db.kmers_32[db.nodes[i].kmers + j]);
+            }
+          }
+        }
+        if (distro) {
+          static unsigned int c_len = 0;
+          static unsigned int *c = NULL;
+          if (c_len < db.nodes[i].nkmers) {
+            c_len = c_len << 1;
+            if (c_len < db.nodes[i].nkmers) c_len = db.nodes[i].nkmers;
+            c = (unsigned int *) realloc (c, c_len * 4);
+          }
+          unsigned int current, count;
           if (db.count_bits == 16) {
-            total += db.kmers_16[db.nodes[i].kmers + j];
+            for (j = 0; j < db.nodes[i].nkmers; j++) c[j] = db.kmers_16[db.nodes[i].kmers + j];
           } else {
-            total += db.kmers_32[db.nodes[i].kmers + j];
+            memcpy (c, db.kmers_32 + db.nodes[i].kmers, db.nodes[i].nkmers * 4);
+          }
+          qsort (c, db.nodes[i].nkmers, 4, compare_counts);
+          current = 0;
+          j = 0;
+          while (current <= distro) {
+            count = 0;
+            while ((j < db.nodes[i].nkmers) && (c[j] == current)) {
+              count += 1;
+              j += 1;
+            }
+            fprintf (stdout, "\t%u", count);
+            current += 1;
           }
         }
-        fprintf (stdout, "\t%llu", total);
-      }
-      if (unique) {
-        unsigned int uniq = 0;
-        for (j = 0; j < db.nodes[i].nkmers; j++) {
-          if (db.count_bits == 16) {
-            if (db.kmers_16[db.nodes[i].kmers + j]) uniq += 1;
-          } else {
-            if (db.kmers_16[db.nodes[i].kmers + j]) uniq += 1;
+        if (index) {
+          for (j = 0; j < db.nodes[i].nkmers; j++) {
+            unsigned int kmer_idx;
+            ReadList *rl;
+            kmer_idx = db.nodes[i].kmers + j;
+            for (rl = snpq.reads[kmer_idx]; rl; rl = rl->next) {
+              fprintf (stdout, " (%u/%u/%u)", rl->read.file_idx, rl->read.subseq, rl->read.kmer_pos);
+            }
           }
         }
-        fprintf (stdout, "\t%u", uniq);
+        fprintf (stdout, "\n");
       }
-      if (kmers) {
-        for (j = 0; j < db.nodes[i].nkmers; j++) {
-          if (db.count_bits == 16) {
-            fprintf (stdout, "\t%u", db.kmers_16[db.nodes[i].kmers + j]);
-          } else {
-            fprintf (stdout, "\t%u", db.kmers_32[db.nodes[i].kmers + j]);
-          }
-        }
-      }
-      if (distro) {
-        static unsigned int c_len = 0;
-        static unsigned int *c = NULL;
-        if (c_len < db.nodes[i].nkmers) {
-          c_len = c_len << 1;
-          if (c_len < db.nodes[i].nkmers) c_len = db.nodes[i].nkmers;
-          c = (unsigned int *) realloc (c, c_len * 4);
-        }
-        unsigned int current, count;
-        if (db.count_bits == 16) {
-          for (j = 0; j < db.nodes[i].nkmers; j++) c[j] = db.kmers_16[db.nodes[i].kmers + j];
-        } else {
-          memcpy (c, db.kmers_32 + db.nodes[i].kmers, db.nodes[i].nkmers * 4);
-        }
-        qsort (c, db.nodes[i].nkmers, 4, compare_counts);
-        current = 0;
-        j = 0;
-        while (current <= distro) {
-          count = 0;
-          while ((j < db.nodes[i].nkmers) && (c[j] == current)) {
-            count += 1;
-            j += 1;
-          }
-          fprintf (stdout, "\t%u", count);
-          current += 1;
-        }
-      }
-      if (index) {
-        for (j = 0; j < db.nodes[i].nkmers; j++) {
-          unsigned int kmer_idx;
-          ReadList *rl;
-          kmer_idx = db.nodes[i].kmers + j;
-          for (rl = snpq.reads[kmer_idx]; rl; rl = rl->next) {
-            fprintf (stdout, " (%u/%llu/%u)", rl->read.file_idx, rl->read.name_pos, rl->read.kmer_pos);
-          }
-        }
-      }
-      fprintf (stdout, "\n");
     }
   }
   
@@ -511,14 +537,17 @@ process (Queue *queue, unsigned int idx, void *arg)
       snpq->free_tables = tt->next;
       pthread_mutex_unlock (&snpq->queue.mutex);
       /* Read words from file */
+      if (tt->seqfile) gt4_sequence_file_unref (tt->seqfile);
+      tt->seqfile = tf->seqfile;
+      gt4_sequence_file_ref (tt->seqfile);
       tt->nwords = 0;
       tt->file_idx = tf->idx;
-      if (debug > 0) fprintf (stderr, "Thread %d: reading file %s from %llu\n", idx, tf->filename, tf->reader.cpos);
-      if (task_file_read_nwords (tf, BLOCK_SIZE, snpq->db->wordsize, NULL, NULL, NULL, NULL, read_word, tt)) {
-        fprintf (stderr, "Cannot create FastaReader fro %s\n", tf->filename);
+      if (debug > 0) fprintf (stderr, "Thread %d: reading file %s from %llu\n", idx, tt->seqfile->path, tf->reader.cpos);
+      if (task_file_read_nwords (tf, BLOCK_SIZE, snpq->db->wordsize, start_sequence, end_sequence, NULL, NULL, read_word, tt)) {
+        fprintf (stderr, "Cannot create FastaReader fro %s\n", tt->seqfile->path);
         exit (1);
       }
-      if (debug > 1) fprintf (stderr, "Thread %d: finished reading %s at %llu\n", idx, tf->filename, tf->reader.cpos);
+      if (debug > 1) fprintf (stderr, "Thread %d: finished reading %s at %llu\n", idx, tt->seqfile->path, tf->reader.cpos);
       pthread_mutex_lock (&snpq->queue.mutex);
       if (tf->reader.in_eof) {
         task_file_delete (tf);
@@ -579,6 +608,8 @@ process (Queue *queue, unsigned int idx, void *arg)
           snpq->reads[kmer_idx] = rl;
         }
       }
+      gt4_sequence_file_unref (tt->seqfile);
+      tt->seqfile = NULL;
       tt->next = snpq->free_tables;
       snpq->free_tables = tt;
       pthread_cond_broadcast (&snpq->queue.cond);
@@ -601,16 +632,29 @@ process (Queue *queue, unsigned int idx, void *arg)
   if (debug > 1) fprintf (stderr, "Thread %u exiting (remaining %d)\n", idx, snpq->queue.nthreads_running);
 }
 
-#if 0
+
 static int
 start_sequence (FastaReader *reader, void *data)
 {
   TaskTable *tt = (TaskTable *) data;
   if (debug > 2) fprintf (stderr, "%s\n", reader->name);
-  tt->name_pos = reader->name_pos;
+  gt4_sequence_file_lock (tt->seqfile);
+  gt4_sequence_file_add_subsequence (tt->seqfile, reader->name_pos, reader->name_length);
+  tt->seqfile->subseqs[tt->seqfile->n_subseqs - 1].sequence_pos = reader->cpos;
+  gt4_sequence_file_unlock (tt->seqfile);
   return 0;
 }
-#endif
+
+static int
+end_sequence (FastaReader *reader, void *data)
+{
+  TaskTable *tt = (TaskTable *) data;
+  if (debug > 2) fprintf (stderr, "%s\n", reader->name);
+  gt4_sequence_file_lock (tt->seqfile);
+  tt->seqfile->subseqs[tt->seqfile->n_subseqs - 1].sequence_len = reader->cpos - tt->seqfile->subseqs[tt->seqfile->n_subseqs - 1].sequence_pos;
+  gt4_sequence_file_unlock (tt->seqfile);
+  return 0;
+}
 
 static int
 read_word (FastaReader *reader, unsigned long long word, void *data)
@@ -619,8 +663,8 @@ read_word (FastaReader *reader, unsigned long long word, void *data)
   tt->words[tt->nwords] = word;
   if (tt->reads) {
     tt->reads[tt->nwords].file_idx = tt->file_idx;
-    tt->reads[tt->nwords].name_pos = reader->name_pos;
-    tt->reads[tt->nwords].kmer_pos = reader->cpos - reader->name_pos;
+    tt->reads[tt->nwords].subseq = tt->seqfile->n_subseqs - 1;
+    tt->reads[tt->nwords].kmer_pos = reader->seq_npos + 1 - reader->wordlength;
     tt->reads[tt->nwords].dir = (word != reader->wordfw);
   }
   tt->nwords += 1;
@@ -712,6 +756,7 @@ task_table_new (unsigned int index)
 void
 task_table_free (TaskTable *tt)
 {
+  if (tt->seqfile) gt4_sequence_file_unref (tt->seqfile);
   free (tt->words);
   free (tt->alleles);
   if (tt->reads) {

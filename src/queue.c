@@ -144,9 +144,7 @@ void
 maker_queue_add_file (MakerQueue *mq, const char *filename)
 {
         TaskFile *task;
-        task = (TaskFile *) malloc (sizeof (TaskFile));
-        memset (task, 0, sizeof (TaskFile));
-        task->filename = filename;
+        task = task_file_new (filename, 0);
         task->next = mq->files;
         mq->files = task;
 }
@@ -275,7 +273,7 @@ task_file_new (const char *filename, unsigned int scout)
 {
   TaskFile *tf = (TaskFile *) malloc (sizeof (TaskFile));
   memset (tf, 0, sizeof (TaskFile));
-  tf->filename = filename;
+  tf->seqfile = gt4_sequence_file_new (filename, 1);
   tf->scout = scout;
   return tf;
 }
@@ -285,7 +283,7 @@ task_file_new_from_stream (FILE *ifs, const char *filename, unsigned int close_o
 {
   TaskFile *tf = (TaskFile *) malloc (sizeof (TaskFile));
   memset (tf, 0, sizeof (TaskFile));
-  tf->filename = filename;
+  tf->seqfile = gt4_sequence_file_new (filename, 1);
   tf->ifs = ifs;
   tf->close_on_delete = close_on_delete;
   return tf;
@@ -297,9 +295,7 @@ task_file_delete (TaskFile *tf)
   if (tf->has_reader) {
     fasta_reader_release (&tf->reader);
   }
-  if (tf->cdata) {
-    munmap ((void *) tf->cdata, tf->csize);
-  }
+  gt4_sequence_file_unref (tf->seqfile);
   if (tf->close_on_delete) {
     fclose (tf->ifs);
   }
@@ -322,20 +318,17 @@ task_file_read_nwords (TaskFile *tf, unsigned long long maxwords, unsigned int w
   if (!tf->has_reader) {
     if (tf->ifs) {
       fasta_reader_init_from_file (&tf->reader, wordsize, 1, tf->ifs);
-    } else if (!tf->cdata) {
-      unsigned long long csize;
-      tf->cdata = gt4_mmap ((const char *) tf->filename, &csize);
-      if (!tf->cdata) {
-        fprintf (stderr, "Cannot mmap %s\n", tf->filename);
-        return 1;
+    } else if (!tf->seqfile->cdata) {
+      gt4_sequence_file_map_sequence (tf->seqfile);
+      if (!tf->seqfile->cdata) {
+        fprintf (stderr, "Cannot mmap %s\n", tf->seqfile->path);
+        return 0;
       }
-      tf->csize = csize;
-      if (tf->scout) scout_mmap (tf->cdata, tf->csize);
-      fasta_reader_init_from_data (&tf->reader, wordsize, 1, tf->cdata, tf->csize);
+      if (tf->scout) scout_mmap (tf->seqfile->cdata, tf->seqfile->csize);
+      fasta_reader_init_from_data (&tf->reader, wordsize, 1, tf->seqfile->cdata, tf->seqfile->csize);
     }
     tf->has_reader = 1;
   }
-  fasta_reader_read_nwords (&tf->reader, maxwords, start_sequence, end_sequence, read_character, read_nucleotide, read_word, data);
-  return 0;
+  return fasta_reader_read_nwords (&tf->reader, maxwords, start_sequence, end_sequence, read_character, read_nucleotide, read_word, data);
 }
 

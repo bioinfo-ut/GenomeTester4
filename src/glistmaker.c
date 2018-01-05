@@ -499,31 +499,11 @@ process (Queue *queue, unsigned int idx, void *arg)
                         pthread_mutex_unlock (&mq->queue.mutex);
                         
                         /* Process file reader task */
-                        if (debug > 1) fprintf (stderr, "Thread %d: Processign file %s (%llu) -> %s (%llu)\n", idx, task->filename, (unsigned long long) task->reader.cpos, table->id, table->nwordslots);
-                        if (!task->reader.wordlength) {
-                        	/* Initialize reader */
-                                if (debug > 0) fprintf (stderr, "Thread %d: Creating FastaReader for %s -> %s\n", idx, task->filename, table->id);
-                        	if (!strcmp (task->filename, "-")) {
-                        		fasta_reader_init_from_file (&task->reader, mq->wordlen, 1, stdin);
-                        	} else {
-                                	const unsigned char *cdata;
-                                	unsigned long long csize;
-                                	cdata = (const unsigned char *) gt4_mmap (task->filename, &csize);
-                                	if (cdata) {
-                                		/* scout_mmap (cdata, csize); */
-                                		task->cdata = cdata;
-                                		task->csize = csize;
-                                		fasta_reader_init_from_data (&task->reader, mq->wordlen, 1, cdata, csize);
-					} else {
-                                        	/* Cannot mmap file */
-                                        	/* fixme: Error procesing */
-					}
-                                }
-                        }
+                        if (debug > 1) fprintf (stderr, "Thread %d: Processign file %s (%llu) -> %s (%llu)\n", idx, task->seqfile->path, (unsigned long long) task->reader.cpos, table->id, table->nwordslots);
                         readsize = (mq->tablesize < table->nwordslots) ? table->nwordslots : mq->tablesize;
-                        if (debug > 0) fprintf (stderr, "Thread %d: Reading %lld bytes from %s, position %llu/%llu\n", idx, readsize, task->filename, (unsigned long long) task->reader.cpos, (unsigned long long) task->csize);
+                        if (debug > 0) fprintf (stderr, "Thread %d: Reading %lld bytes from %s, position %llu/%llu\n", idx, readsize, task->seqfile->path, (unsigned long long) task->reader.cpos, (unsigned long long) task->seqfile->csize);
                         s_t = get_time ();
-                        result = fasta_reader_read_nwords (&task->reader, readsize,  NULL, NULL, NULL, NULL, process_word, table);
+                        result = task_file_read_nwords (task, readsize, mq->wordlen, NULL, NULL, NULL, NULL, process_word, table);
                         e_t = get_time ();
 			d_t = e_t - s_t;
                         if (result) {
@@ -536,11 +516,8 @@ process (Queue *queue, unsigned int idx, void *arg)
                         mq->unsorted[mq->nunsorted++] = table;
                         if (task->reader.in_eof) {
                                 /* Finished this task */
-                                if (debug > 0) fprintf (stderr, "Thread %d: FastaReader for %s finished\n", idx, task->filename);
-                                if (task->cdata) {
-                                	munmap ((void *) task->cdata, task->csize);
-				}
-                                free (task);
+                                if (debug > 0) fprintf (stderr, "Thread %d: FastaReader for %s finished\n", idx, task->seqfile->path);
+                                task_file_delete (task);
                         } else {
                                 /* Reshedule task */
                                 task->next = mq->files;

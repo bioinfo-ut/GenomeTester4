@@ -7,7 +7,14 @@
 
 #include "database.h"
 
-extern unsigned int debug;
+unsigned int db_debug = 0;
+#define debug db_debug
+
+void
+gt4_db_clear_index (KMerDB *db)
+{
+  memset (&db->index, 0, sizeof (db->index));
+}
 
 static unsigned int
 count_lines_from_text (const unsigned char *cdata, size_t csize, unsigned int *wordsize, unsigned int *n_kmers, unsigned int *max_kmers, unsigned int *names_size)
@@ -492,7 +499,7 @@ ReadList
   static unsigned int n_lists = 0;
   static unsigned int block_size = 0;
   if (n_lists >= block_size) {
-    block_size = 1024 * 1024;
+    block_size = 8 * 1024 * 1024;
     lists = (ReadList *) malloc (block_size * sizeof (ReadList));
     n_lists = 0;
   }

@@ -6,6 +6,10 @@
 #include "index.h"
 #include "trie.h"
 
+#ifndef __DATABASE_C__
+extern unsigned int db_debug;
+#endif
+
 typedef struct _Node Node;
 
 struct _Node {
@@ -46,14 +50,14 @@ struct _KMerDB {
 typedef struct _Read Read;
 
 struct _Read {
-  /* Position of name entry */
-  unsigned long long name_pos;
+  /* Subsequence index */
+  unsigned int subseq;
   /* Start of kmer relative to the start of name */
-  unsigned int kmer_pos;
+  unsigned int kmer_pos : 18;
   /* File number */
-  unsigned int file_idx;
+  unsigned int file_idx : 12;
   /* Direction */
-  unsigned int dir;
+  unsigned int dir : 1;
 };
 
 /* Read list */
@@ -104,5 +108,7 @@ unsigned int read_db_from_text (KMerDB *db, const unsigned char *cdata, unsigned
 unsigned int write_db_to_file (KMerDB *db, FILE *ofs, unsigned int kmers);
 
 unsigned int read_database_from_binary (KMerDB *db, const unsigned char *cdata, unsigned long long csize);
+
+void gt4_db_clear_index (KMerDB *db);
 
 #endif

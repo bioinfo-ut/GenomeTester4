@@ -12,6 +12,7 @@ LISTMAKER_SOURCES = \
 	fasta.c fasta.h \
 	buffer.c buffer.h \
 	sequence.c sequence.h \
+	sequence-file.c sequence-file.h \
 	queue.c queue.h \
 	common.c common.h \
 	utils.c utils.h
@@ -23,6 +24,7 @@ LISTMAKER2_SOURCES = \
 	fasta.c fasta.h \
 	buffer.c buffer.h \
 	sequence.c sequence.h \
+	sequence-file.c sequence-file.h \
 	queue.c queue.h \
 	common.c common.h \
 	trie.c trie.h \
@@ -35,6 +37,7 @@ LISTQUERY_SOURCES = \
 	fasta.c fasta.h \
 	buffer.c buffer.h \
 	sequence.c sequence.h \
+	sequence-file.c sequence-file.h \
 	common.c common.h \
 	queue.c queue.h \
 	utils.c utils.h
@@ -46,18 +49,10 @@ LISTCOMPARE_SOURCES = \
 	fasta.c \
 	buffer.c \
 	sequence.c \
+	sequence-file.c sequence-file.h \
 	common.c \
 	queue.c queue.h \
 	utils.c
-
-GDISTRIBUTION_SOURCES = \
-	gdistribution.c \
-	wordmap.c wordmap.h \
-	wordtable.c wordtable.h \
-	utils.c utils.h \
-	queue.c queue.h \
-	fasta.c fasta.h \
-	sequence.c sequence.h
 
 GMER_COUNTER_SOURCES = \
 	gmer_counter.c \
@@ -65,6 +60,8 @@ GMER_COUNTER_SOURCES = \
 	trie.c trie.h \
 	wordmap.c wordmap.h \
 	sequence.c sequence.h \
+	sequence-file.c sequence-file.h \
+	sequence-stream.c sequence-stream.h \
 	wordtable.c wordtable.h \
 	fasta.c fasta.h \
 	thread-pool.c thread-pool.h \
@@ -81,12 +78,14 @@ GMER_CALLER_SOURCES = \
 	gmer_caller.c
 
 GASSEMBLER_SOURCES = \
+	binomial.c binomial.h \
 	database.c database.h \
 	fasta.c fasta.h \
 	index.c index.h \
 	matrix.c matrix.h \
 	queue.c queue.h \
 	sequence.c sequence.h \
+	sequence-file.c sequence-file.h \
 	trie.c trie.h \
 	utils.c utils.h \
 	wordmap.c wordmap.h \
@@ -136,9 +135,6 @@ glistquery: $(LISTQUERY_SOURCES)
 glistcompare: $(LISTCOMPARE_SOURCES)
 	$(CXX) $(LISTCOMPARE_SOURCES) -o glistcompare $(LIBS) $(CXXFLAGS)
 
-gdistribution: $(GDISTRIBUTION_SOURCES)
-	$(CXX) $(GDISTRIBUTION_SOURCES) -o gdistribution $(LIBS) $(DEBUGFLAGS) -Wall
-	
 gmer_counter: $(GMER_COUNTER_SOURCES)
 	$(CXX) $(GMER_COUNTER_SOURCES) -o gmer_counter $(LIBS) $(CXXFLAGS) -Wall
 

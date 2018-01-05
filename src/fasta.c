@@ -156,24 +156,33 @@ fasta_reader_read_nwords (FastaReader *reader, unsigned long long maxwords,
       reader->state = FASTA_READER_STATE_NAME;
       reader->name_pos = reader->cpos;
       reader->name_length = 0;
+      reader->cpos += 1;
       break;
     case FASTA_READER_STATE_NAME:
       if (cval == '\n') {
+        unsigned int nlen;
         /* Name is complete */
-        reader->name[reader->name_length] = 0;
-        if (start_sequence) {
-	  int result = start_sequence (reader, data);
-	  if (result) return result;
-	}
+        nlen = reader->name_length;
+        if (nlen >= MAX_NAME_SIZE) nlen = MAX_NAME_SIZE;
+        reader->name[nlen] = 0;
+        /* Set up parsing state */
 	reader->state = FASTA_READER_STATE_SEQUENCE;
 	reader->wordfw = 0;
 	reader->wordrv = 0;
 	reader->currentlength = 0;
+	/* Call start sequence from the next position */
+	reader->cpos += 1;
+        if (start_sequence) {
+	  int result = start_sequence (reader, data);
+	  if (result) return result;
+	}
       } else {
 	/* Append character to name */
 	if (reader->name_length < MAX_NAME_SIZE) {
-	  reader->name[reader->name_length++] = cval;
+	  reader->name[reader->name_length] = cval;
 	}
+	reader->name_length += 1;
+	reader->cpos += 1;
       }
       break;
     case FASTA_READER_STATE_SEQUENCE:
@@ -185,6 +194,7 @@ fasta_reader_read_nwords (FastaReader *reader, unsigned long long maxwords,
 	}
 	/* Start new name */
 	reader->state = FASTA_READER_STATE_NAME;
+	reader->seq_npos = 0;
 	reader->name_pos = reader->cpos;
 	reader->name_length = 0;
       } else if ((reader->type == GT4FR_FASTQ) && (cval == '\n')) {
@@ -210,7 +220,6 @@ fasta_reader_read_nwords (FastaReader *reader, unsigned long long maxwords,
 	    int result = read_nucleotide (reader, nuclval, data);
 	    if (result) return result;
 	  }
-	  reader->npos += 1;
 	  reader->wordfw <<= 2;
 	  reader->wordfw |= nuclval;
 	  if (reader->canonize) {
@@ -232,12 +241,17 @@ fasta_reader_read_nwords (FastaReader *reader, unsigned long long maxwords,
 	    reader->wpos += 1;
 	    nwords += 1;
 	  }
+	  /* We increase nucleotide position for N too */
+	  if (cval > ' ') {
+	    reader->seq_npos += 1;
+	  }
 	} else if (cval >= ' ') {
 	  reader->wordfw = 0;
 	  reader->wordrv = 0;
 	  reader->currentlength = 0;
 	}
       }
+      reader->cpos += 1;
       break;
     case FASTA_READER_STATE_QUALITY:
       if (cval == '\n') {
@@ -247,13 +261,13 @@ fasta_reader_read_nwords (FastaReader *reader, unsigned long long maxwords,
       	if (cval != '@') return -1;
       	reader->cpos += 1;
 	reader->state = FASTA_READER_STATE_NAME;
+	reader->seq_npos = 0;
 	reader->name_pos = reader->cpos;
 	reader->name_length = 0;
       }
+      reader->cpos += 1;
       break;
     }
-    /* Next character */
-    reader->cpos += 1;
   }
   return 0;
 }

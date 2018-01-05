@@ -27,8 +27,9 @@
 #include <stdio.h>
 #include <pthread.h>
 
-#include "wordtable.h"
 #include "fasta.h"
+#include "sequence-file.h"
+#include "wordtable.h"
 
 /*
  * Queue stub
@@ -119,13 +120,11 @@ void maker_queue_release (MakerQueue *mq);
 
 struct _TaskFile {
         TaskFile *next;
-        const char *filename;
+        GT4SequenceFile *seqfile;
         /* File index */
         unsigned int idx;
         FILE *ifs;
         unsigned int close_on_delete;
-        const unsigned char *cdata;
-        unsigned long long csize;
         unsigned int scout;
         unsigned int has_reader;
         FastaReader reader;

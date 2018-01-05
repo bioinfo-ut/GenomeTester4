@@ -1,10 +1,28 @@
 #define __GT4_MATRIX_C__
 
+#include <assert.h>
 #include <malloc.h>
 #include <string.h>
 #include <stdlib.h>
 
 #include <matrix.h>
+
+unsigned int
+c2n (unsigned char c)
+{
+  static unsigned int *_c2n = NULL;
+  if (!_c2n) {
+    unsigned int j;
+    _c2n = (unsigned int *) malloc (256 * 4);
+    for (j = 0; j < 256; j++) _c2n[j] = N;
+    _c2n['a'] = _c2n['A'] = A;
+    _c2n['c'] = _c2n['C'] = C;
+    _c2n['g'] = _c2n['G'] = G;
+    _c2n['t'] = _c2n['T'] = _c2n['u'] = _c2n['U'] = T;
+    _c2n['-'] = GAP;
+  }
+  return _c2n[c];
+}
 
 static int
 compare_kmers (const NKMer *lhs, const NKMer *rhs)
@@ -31,12 +49,15 @@ n_seq_new (const char *str, unsigned int wlen)
 {
   NSeq *seq;
   unsigned long long len;
-  unsigned int i;
+  unsigned int i, j;
   len = strlen (str);
-  seq = (NSeq *) malloc (sizeof (NSeq) + (len - 1) * sizeof (NPos));
+  seq = (NSeq *) malloc (sizeof (NSeq));
+  memset (seq, 0, sizeof (NSeq));
   seq->wlen = wlen;
   seq->len = len;
   seq->str = str;
+  seq->pos = (NPos *) malloc (len * sizeof (NPos));
+  memset (seq->pos, 0, len * sizeof (NPos));
   for (i = 0; i < len; i++) {
     static unsigned int *c2n = NULL;
     if (!c2n) {
@@ -53,10 +74,25 @@ n_seq_new (const char *str, unsigned int wlen)
     seq->pos[i].kmer = 0;
     seq->pos[i].cells = NULL;
   }
-  for (i = 0; i <= (len - wlen); i++) {
-    seq->pos[i].has_kmer = n_seq_get_kmer (seq, i, &seq->pos[i].kmer);
+  for (i = 0; (i + wlen) <= len; i++) {
+    if (n_seq_get_kmer (seq, i, &seq->pos[i].kmer)) {
+      seq->pos[i].has_kmer = 1;
+      for (j = 0; j < i; j++) {
+        if (seq->pos[j].has_kmer && (seq->pos[j].kmer == seq->pos[i].kmer)) {
+          seq->pos[j].non_unique_kmer = 1;
+          seq->pos[i].non_unique_kmer = 1;
+        }
+      }
+    }
   }
   return seq;
+}
+
+void
+n_seq_delete (NSeq *seq)
+{
+  free (seq->pos);
+  free (seq);
 }
 
 unsigned int
@@ -71,6 +107,16 @@ n_seq_get_kmer (NSeq *seq, unsigned int pos, unsigned long long *kmer)
   }
   *kmer = val;
   return 1;
+}
+
+unsigned int
+n_seq_get_kmer_unique_pos (NSeq *seq, unsigned long long word)
+{
+  unsigned int i;
+  for (i = 0; i < seq->len; i++) {
+    if (seq->pos[i].has_kmer && !seq->pos[i].non_unique_kmer && (seq->pos[i].kmer == word)) break;
+  }
+  return i;
 }
 
 NMatrix *
@@ -91,7 +137,7 @@ n_matrix_new (unsigned int n_seqs, const char *seqs[], unsigned int wlen)
     unsigned int j;
     mat->seqs[i] = n_seq_new (seqs[i], wlen);
     for (j = 0; j < mat->seqs[i]->len; j++) {
-      if (mat->seqs[i]->pos[j].has_kmer) {
+      if (mat->seqs[i]->pos[j].has_kmer && !mat->seqs[i]->pos[j].non_unique_kmer) {
         if (mat->n_kmers >= size_kmers) {
           size_kmers = size_kmers << 1;
           mat->kmers = (NKMer *) realloc (mat->kmers, size_kmers * sizeof (NKMer));
@@ -113,9 +159,11 @@ n_matrix_new (unsigned int n_seqs, const char *seqs[], unsigned int wlen)
     while (i < mat->n_kmers) {
       unsigned int j, last_seq;
       unsigned int duplicate = 0;
+      unsigned long long value;
       mat->unique_kmers[mat->n_unique_kmers] = mat->kmers[i];
+      value = mat->kmers[i].value;
       last_seq = mat->kmers[i].seq;
-      for (j = i + 1; (j < mat->n_kmers) && (mat->kmers[j].value == mat->unique_kmers[mat->n_unique_kmers].value); j++) {
+      for (j = i + 1; (j < mat->n_kmers) && (mat->kmers[j].value == value); j++) {
         if (mat->kmers[j].seq == last_seq) duplicate = 1;
         mat->unique_kmers[mat->n_unique_kmers].count += 1;
         last_seq = mat->kmers[j].seq;
@@ -127,6 +175,42 @@ n_matrix_new (unsigned int n_seqs, const char *seqs[], unsigned int wlen)
   }
   
   return mat;
+}
+
+void
+n_matrix_delete (NMatrix *mat)
+{
+  unsigned int i;
+  while (mat->cells) n_matrix_free_cell (mat, mat->cells);
+  while (mat->free_cells) {
+    NCell *cell = mat->free_cells;
+    mat->free_cells = cell->next_allocated;
+    free (cell);
+  }
+  for (i = 0; i < mat->n_seqs; i++) n_seq_delete (mat->seqs[i]);
+  free (mat->kmers);
+  free (mat->unique_kmers);
+  free (mat);
+}
+
+unsigned int
+n_matrix_get_kmer_first_index (NMatrix *mat, unsigned long long value)
+{
+  unsigned int i;
+  for (i = 0; i < mat->n_kmers; i++) {
+    if (mat->kmers[i].value == value) break;
+  }
+  return i;
+}
+
+unsigned int
+n_matrix_get_kmer_unique_index (NMatrix *mat, unsigned long long value)
+{
+  unsigned int i;
+  for (i = 0; i < mat->n_unique_kmers; i++) {
+    if (mat->unique_kmers[i].value == value) break;
+  }
+  return i;
 }
 
 NCell *
@@ -144,6 +228,7 @@ n_matrix_new_cell (NMatrix *mat)
   cell->prev = NULL;
   cell->next = NULL;
   cell->count = 0;
+  cell->score = 0;
   for (i = 0; i < mat->n_seqs; i++) {
     cell->links[i].pos = UNKNOWN;
     cell->links[i].prev = NULL;
@@ -192,6 +277,41 @@ n_matrix_compare_cells (NMatrix *mat, NCell *lhs, NCell *rhs)
     if (lhs->links[i].pos > rhs->links[i].pos) return 1;
   }
   return 0;
+}
+
+NCell *
+n_matrix_link_sequences (NMatrix *mat, unsigned int seqs[], unsigned int positions[], unsigned int nseqs)
+{
+  unsigned int best_count = 0, i;
+  NCell *best_cell = NULL;
+  for (i = 0; i < nseqs; i++) {
+    NCell *cell;
+    for (cell = mat->seqs[seqs[i]]->pos[positions[i]].cells; cell; cell = cell->links[seqs[i]].next) {
+      unsigned int count = 0, j;
+      assert (cell->links[seqs[i]].pos == positions[i]);
+      for (j = 0; j < nseqs; j++) {
+        if (cell->links[seqs[j]].pos < 0) continue;
+        if (cell->links[seqs[j]].pos != positions[j]) break;
+        count += 1;
+      }
+      if (j >= nseqs) {
+        /* This cell can be linked */
+        if (count > best_count) {
+          best_count = count;
+          best_cell = cell;
+        }
+      }
+    }
+  }
+  if (!best_cell) best_cell = n_matrix_new_cell (mat);
+  for (i = 0; i < nseqs; i++) {
+    if (best_cell->links[seqs[i]].pos < 0) {
+      n_matrix_link_cell (mat, best_cell, seqs[i], positions[i]);
+    } else {
+      assert (best_cell->links[seqs[i]].pos == positions[i]);
+    }
+  }
+  return best_cell;
 }
 
 void
@@ -280,3 +400,31 @@ n_matrix_get_seq_cell (NMatrix *mat, unsigned int seq, int pos)
   return mat->seqs[seq]->pos[pos].cells;
 }
 
+int
+n_matrix_calculate_cell_score (NMatrix *mat, NCell *cell)
+{
+  unsigned int max, i;
+  unsigned int count[7] = { 0 };
+  int best;
+  for (i = 0; i < mat->n_seqs; i++) {
+    if (cell->links[i].pos < 0) continue;
+    count[mat->seqs[i]->pos[cell->links[i].pos].nucl] += 1;
+  }
+  max = A;
+  for (i = C; i <= T; i++) if (count[i] > count[max]) max = i;
+  best = count[max];
+  for (i = A; i <= T; i++) if (i != max) best -= count[i];
+  best -= 2 * count[GAP];
+  return best;
+}
+
+NCell *
+n_matrix_calculate_scores (NMatrix *mat)
+{
+  NCell *cell, *best_cell = NULL;
+  for (cell = mat->cells; cell; cell = cell->next_allocated) {
+    cell->score = n_matrix_calculate_cell_score (mat, cell);
+    if (!best_cell || (best_cell->score < cell->score)) best_cell = cell;
+  }
+  return best_cell;
+}
