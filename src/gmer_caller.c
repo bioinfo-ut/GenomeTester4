@@ -195,7 +195,7 @@ calculate_allele_freq (SNPCall *calls, unsigned int set[], unsigned int set_size
 {
   double ppB, npB;
   unsigned int i;
-  
+
   ppB = npB = 0;
   for (i = 0; i < set_size; i++) {
     unsigned int c0, c1;
@@ -229,7 +229,7 @@ train_model (SNPCall *calls, unsigned int ncalls, unsigned int max_training, uns
   L3Data l3;
   unsigned int i;
   unsigned int chunk_size;
-  
+
   /* Train model */
   if (debug) fprintf (stderr, "Building training set...");
   ntrain = MIN (ncalls, max_training);
@@ -493,7 +493,7 @@ main (int argc, const char *argv[])
   unsigned int model = MODEL_FULL;
   unsigned int params_specified = 0;
   unsigned int coverage_specified = 0;
-  
+
   unsigned int i;
   float pB;
   int aidx;
@@ -521,7 +521,7 @@ main (int argc, const char *argv[])
 
   /* Initialize combination table for multithreaded use */
   init_combination_tables ();
-  
+
   aidx = 1;
   while (aidx < argc) {
     if (!strcmp (argv[aidx], "-D")) {
@@ -611,7 +611,7 @@ main (int argc, const char *argv[])
   }
 
   if (!call_fn) {
-    fprintf (stderr, "No input file sppecified\n");
+    fprintf (stderr, "No input file specified\n");
     print_usage (stderr);
   }
   if ((nthreads < 1) || (nthreads > MAX_THREADS)) {
@@ -624,9 +624,9 @@ main (int argc, const char *argv[])
     params[P_1] = 0.985023f;
     params[P_2] = 0.014934f;
   }
-  
+
   pool = aosora_thread_pool_new (nthreads);
-  
+
   /* Read calls */
   if (debug) fprintf (stderr, "Reading %s...", call_fn);
   cdata = (const unsigned char *) gt4_mmap (call_fn, &csize);
@@ -811,7 +811,7 @@ mlogL3 (float l_viga, float p_0, float p_1, float p_2, float lambda, float size,
     int j;
 
     genotype_probabilities (a, pB, var1[i], var2[i], l_viga, p_0, p_1, p_2, lambda, size, size2);
-    
+
     abi = 0;
     for (j = 0; j < NUM_GENOTYPES; j++) {
       assert (!isnan (a[j]));
@@ -857,7 +857,7 @@ distanceL3 (int ndim, const float params[], void *data)
   l3 = (L3Data *) data;
 
   if (debug > 1) print_params (params, "Params", stderr);
-  
+
   l_viga = logit_1_clamped (l3->params[0], MIN_P, 0.1f);
   assert (!isnan (l_viga));
   p_0 = logit_1_clamped (l3->params[1], MIN_P, 1 - MIN_P);
@@ -889,7 +889,7 @@ distanceL3 (int ndim, const float params[], void *data)
   if (delta0 < 0) {
     result = result + 10000 + 100 * delta0;
   }
-  
+
   delta1 = size + size2 * l_viga;
   if (delta1 < 0) {
     result = result + 10000 + 100 * delta1;
