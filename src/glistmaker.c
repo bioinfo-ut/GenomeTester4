@@ -29,12 +29,13 @@
 #include <pthread.h>
 #include <unistd.h>
 
+#include "common.h"
 #include "utils.h"
 #include "fasta.h"
 #include "wordtable.h"
 #include "sequence.h"
 #include "queue.h"
-#include "common.h"
+#include "version.h"
 
 #define MAX_FILES 200
 
@@ -83,7 +84,7 @@ main (int argc, const char *argv[])
 	for (argidx = 1; argidx < argc; argidx++) {
 
 		if (!strcmp (argv[argidx], "-v") || !strcmp (argv[argidx], "--version")) {
-			fprintf (stdout, "glistmaker v%d.%d\n", VERSION_MAJOR, VERSION_MINOR);
+			fprintf (stdout, "glistmaker version %d.%d (%s)\n", VERSION_MAJOR, VERSION_MINOR, VERSION_QUALIFIER);
 			return 0;
 
 		} else if (!strcmp (argv[argidx], "-h") || !strcmp (argv[argidx], "--help") || !strcmp (argv[argidx], "-?")) {
@@ -501,7 +502,7 @@ process (Queue *queue, unsigned int idx, void *arg)
                         /* Process file reader task */
                         if (debug > 1) fprintf (stderr, "Thread %d: Processign file %s (%llu) -> %s (%llu)\n", idx, task->seqfile->path, (unsigned long long) task->reader.cpos, table->id, table->nwordslots);
                         readsize = (mq->tablesize < table->nwordslots) ? table->nwordslots : mq->tablesize;
-                        if (debug > 0) fprintf (stderr, "Thread %d: Reading %lld bytes from %s, position %llu/%llu\n", idx, readsize, task->seqfile->path, (unsigned long long) task->reader.cpos, (unsigned long long) task->seqfile->csize);
+                        if (debug > 0) fprintf (stderr, "Thread %d: Reading %lld bytes from %s, position %llu/%llu\n", idx, readsize, task->seqfile->path, (unsigned long long) task->reader.cpos, (unsigned long long) task->seqfile->block.csize);
                         s_t = get_time ();
                         result = task_file_read_nwords (task, readsize, mq->wordlen, NULL, NULL, NULL, NULL, process_word, table);
                         e_t = get_time ();
@@ -514,7 +515,8 @@ process (Queue *queue, unsigned int idx, void *arg)
                         pthread_mutex_lock (&mq->queue.mutex);
                         /* Add generated table to unsorted list */
                         mq->unsorted[mq->nunsorted++] = table;
-                        if (task->reader.in_eof) {
+                        /* fixme: We ignore error here - maybe should quit */
+                        if (result || task->reader.in_eof) {
                                 /* Finished this task */
                                 if (debug > 0) fprintf (stderr, "Thread %d: FastaReader for %s finished\n", idx, task->seqfile->path);
                                 task_file_delete (task);
@@ -672,6 +674,7 @@ merge_write_multi (wordtable *t[], unsigned int ntables, const char *filename, u
 void 
 print_help (int exitvalue)
 {
+	fprintf (stderr, "glistmaker version %u.%u (%s)\n", VERSION_MAJOR, VERSION_MINOR, VERSION_QUALIFIER);
 	fprintf (stderr, "Usage: glistmaker <INPUTFILES> [OPTIONS]\n");
 	fprintf (stderr, "Options:\n");
 	fprintf (stderr, "    -v, --version           - print version information and exit\n");

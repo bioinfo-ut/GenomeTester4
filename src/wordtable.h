@@ -25,7 +25,8 @@
  */
 
 #include <stdio.h>
-#include "wordmap.h"
+
+#include "word-map.h"
 
 #ifndef WORDTABLE_C
 extern unsigned int debug_tables;

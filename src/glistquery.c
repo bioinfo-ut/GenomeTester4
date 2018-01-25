@@ -26,12 +26,13 @@
 #include <stdlib.h>
 #include <limits.h>
 
+#include "common.h"
 #include "utils.h"
 #include "sequence.h"
 #include "wordtable.h"
-#include "wordmap.h"
+#include "word-map.h"
 #include "fasta.h"
-#include "common.h"
+#include "version.h"
 
 typedef struct _querystructure {
 	GT4WordMap *map;
@@ -78,7 +79,7 @@ int main (int argc, const char *argv[])
 	for (argidx = 1; argidx < argc; argidx++) {
 
 		if (!strcmp (argv[argidx], "-v") || !strcmp (argv[argidx], "--version")) {
-			fprintf (stdout, "glistquery v%d.%d\n", VERSION_MAJOR, VERSION_MINOR);
+			fprintf (stdout, "glistquery version %d.%d (%s)\n", VERSION_MAJOR, VERSION_MINOR, VERSION_QUALIFIER);
 			return 0;
 
 		} else if (!strcmp (argv[argidx], "-h") || !strcmp (argv[argidx], "--help") || !strcmp (argv[argidx], "-?")) {
@@ -218,20 +219,10 @@ int main (int argc, const char *argv[])
 		print_help (1);	  
 	}
 
-	map = gt4_wordmap_new (listfilename, !getstat && use_scouts);
+	map = gt4_word_map_new (listfilename, VERSION_MAJOR, !getstat && use_scouts);
 	if (!map) {
 		fprintf (stderr, "Error: Could not make wordmap from file %s!\n", listfilename);
 		return 1;
-	}
-	
-	if (map->header->version_major > VERSION_MAJOR || map->header->version_minor > VERSION_MINOR) {
-		fprintf (stderr, "Error: %s is created with a newer glistmaker version.", map->filename);
-		exit (1);
-	}
-
-	if (map->header->code != GT4_LIST_CODE) {
-		fprintf (stderr, "Error: %s is not a glistmaker v.4 file.\n", map->filename);
-		exit (1);
 	}
 	
 	if (getstat) {
@@ -314,7 +305,7 @@ void search_one_query_string (GT4WordMap *map, const char *querystring, paramete
 	unsigned long long query;
 
 	query = string_to_word (querystring, p->wordlength);
-	freq = wordmap_search_query (map, query, p, printall, 0, 0, NULL);
+	freq = word_map_search_query (map, query, p, printall, 0, 0, NULL);
 	if (!printall && freq >= minfreq && freq <= maxfreq) fprintf (stdout, "%s\t%u\n", querystring, freq);
 	return;
 }
@@ -380,13 +371,13 @@ int search_list (GT4WordMap *map, const char *querylistfilename, parameters *p, 
 	unsigned long long i, word = 0L;
 	unsigned int freq;
 	
-	qmap = gt4_wordmap_new (querylistfilename, use_scouts);
-	
+	qmap = gt4_word_map_new (querylistfilename, VERSION_MAJOR, use_scouts);
+
 	if (map->header->wordlength != qmap->header->wordlength) return GT_INCOMPATIBLE_WORDLENGTH_ERROR;
 	
 	for (i = 0; i < qmap->header->nwords; i++) {
 		word = *((unsigned long long *) (qmap->wordlist + i * (sizeof (unsigned long long) + sizeof (unsigned))));
-		freq = wordmap_search_query (map, word, p, printall, 0, 0, NULL);
+		freq = word_map_search_query (map, word, p, printall, 0, 0, NULL);
 		if (!printall && freq >= minfreq && freq <= maxfreq) fprintf (stdout, "%s\t%u\n", word_to_string (word, map->header->wordlength), freq);
 	}
 	return 0;
@@ -396,7 +387,7 @@ int process_word (FastaReader *reader, unsigned long long word, void *data)
 {
 	unsigned int freq = 0;
 	querystructure *qs = (querystructure *) data;
-	freq = wordmap_search_query (qs->map, word, qs->p, qs->printall, 0, 0, NULL);
+	freq = word_map_search_query (qs->map, word, qs->p, qs->printall, 0, 0, NULL);
 	if (!qs->printall && freq >= qs->minfreq && freq <= qs->maxfreq) fprintf (stdout, "%s\t%u\n", word_to_string (word, reader->wordlength), freq);
 	return 0;
 }
@@ -497,6 +488,7 @@ print_gc (GT4WordMap *map)
 
 void print_help (int exit_value)
 {
+  	fprintf (stderr, "glistquery version %u.%u (%s)\n", VERSION_MAJOR, VERSION_MINOR, VERSION_QUALIFIER);
 	fprintf (stderr, "Usage: glistquery <INPUTLIST> [OPTIONS]\n");
 	fprintf (stderr, "Options:\n");
 	fprintf (stderr, "    -v, --version             - print version information and exit\n");

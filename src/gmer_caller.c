@@ -10,6 +10,7 @@
 #include "utils.h"
 #include "simplex.h"
 #include "thread-pool.h"
+#include "version.h"
 
 static unsigned int debug = 0;
 
@@ -51,12 +52,15 @@ struct _L3Data {
   unsigned int *var1;
   unsigned int *var2;
   float pB;
+  float lambda_est;
+  float lambda_sigma;
   unsigned int n_threads;
   AosoraThreadPool *pool;
   L3Optim optims[MAX_THREADS];
 };
 
 #define MIN_P (1.0f / 8192)
+#define MAX_E 0.25f
 
 static float
 logit (float p)
@@ -96,7 +100,7 @@ print_params (const float params[], const char *prefix, FILE *ofs)
 {
   float l_viga, p_0, p_1, p_2, lambda, size, size2;
 
-  l_viga = logit_1_clamped (params[0], MIN_P, 0.1f);
+  l_viga = logit_1_clamped (params[0], MIN_P, MAX_E);
   p_0 = logit_1_clamped (params[1], MIN_P, 1 - MIN_P);
   p_1 = logit_1_clamped (params[2], MIN_P, 1 - MIN_P);
   p_2 = logit_1_clamped (params[3], MIN_P, 1 - MIN_P);
@@ -229,7 +233,7 @@ train_model (SNPCall *calls, unsigned int ncalls, unsigned int max_training, uns
   L3Data l3;
   unsigned int i;
   unsigned int chunk_size;
-
+  unsigned int max_c;
   /* Train model */
   if (debug) fprintf (stderr, "Building training set...");
   ntrain = MIN (ncalls, max_training);
@@ -237,10 +241,13 @@ train_model (SNPCall *calls, unsigned int ncalls, unsigned int max_training, uns
   if (debug) fprintf (stderr, "done\n");
 
   if (debug) fprintf (stderr, "Calculating mean...");
+  max_c = 0;
   s0 = s1 = ppB = npB = 0;
   for (i = 0; i < ntrain; i++) {
     unsigned int c0 = calls[train[i]].counts[0];
+    if (c0 > max_c) max_c = c0;
     unsigned int c1 = calls[train[i]].counts[1];
+    if (c1 > max_c) max_c = c0;
     s0 += c0;
     s1 += c1;
     if (c0 + c1) {
@@ -255,6 +262,7 @@ train_model (SNPCall *calls, unsigned int ncalls, unsigned int max_training, uns
     fprintf (stderr, "A %g B %g\n", s0, s1);
     fprintf (stderr, "Training size %u mean %.1f\n", ntrain, keskmine);
     fprintf (stderr, "pB %.3f\n", *pB);
+    fprintf (stderr, "Max count %u\n", max_c);
   }
   if (keskmine == 0) {
     fprintf (stderr, "No calls in training sample, aborting model optimization\n");
@@ -265,9 +273,12 @@ train_model (SNPCall *calls, unsigned int ncalls, unsigned int max_training, uns
     return;
   }
 
+  /* Update coverage estimation if needed */
+  if (v[LAMBDA] == 0) v[LAMBDA] = mul * keskmine;
+
   /* Genoomis mitteesineva k-meeri keskmine kohtamiste arv readide seas (keskmine vigade arv) - l_viga */
   /* OPTIMIZING_PARAM = logit (ACTUAL_PARAM) */
-  params[0] = logit_clamped (v[0], MIN_P, 0.1f);
+  params[0] = logit_clamped (v[0], MIN_P, MAX_E);
   /* N-täheliste genotüüpide tõenäosused */
   /* OPTIMIZING_PARAM = logit (ACTUAL_PARAM) */
   params[1] = logit_clamped (v[1], MIN_P, 1 - MIN_P); /* p0 */
@@ -275,7 +286,7 @@ train_model (SNPCall *calls, unsigned int ncalls, unsigned int max_training, uns
   params[3] = logit_clamped (v[3], MIN_P, 1 - MIN_P); /* p2 */
   /* Keskmine katvus */
   /* OPTIMIZING_PARAM = log (ACTUAL_PARAM) */
-  params[4] = logf (mul * keskmine);
+  params[LAMBDA] = logf (v[LAMBDA]);
   params[5] = v[5]; /* size */
   params[6] = logf (-v[6]); /* size2 */
 
@@ -286,6 +297,8 @@ train_model (SNPCall *calls, unsigned int ncalls, unsigned int max_training, uns
   l3.pB = *pB;
   l3.var1 = malloc (ntrain * sizeof (float));
   l3.var2 = malloc (ntrain * sizeof (float));
+  l3.lambda_est = v[LAMBDA];
+  l3.lambda_sigma = l3.lambda_est / 4;
   for (i = 0; i < ntrain; i++) {
     l3.var1[i] = calls[train[i]].counts[0];
     l3.var2[i] = calls[train[i]].counts[1];
@@ -318,7 +331,7 @@ train_model (SNPCall *calls, unsigned int ncalls, unsigned int max_training, uns
   free (l3.var2);
 
   /* Kui mitu sellist k-meeri-lugemit näeme siis, kui antud k-meeri tegelikult genoomis ei esinenud... */
-  v[0] = logit_1_clamped (params[0], MIN_P, 0.1f);
+  v[0] = logit_1_clamped (params[0], MIN_P, MAX_E);
   /* Tõenäosus omada midagi 0-korduses, 1-s korduses, 2-s korduses (nagu autosoomis) */
   /* Tõenäosus nÃ¤ha midagi enam kui kahes korduses (p_lisa) leitakse valemiga 1-p_0-p_1-p_2 */
   v[1] = logit_1_clamped (params[1], MIN_P, 1 - MIN_P);
@@ -457,9 +470,11 @@ print_genotypes (const unsigned char *lines[], SNPCall *calls, unsigned int ncal
 static void
 print_usage (FILE *ofs)
 {
+  fprintf (ofs, "gmer_caller version %u.%u (%s)\n", VERSION_MAJOR, VERSION_MINOR, VERSION_QUALIFIER);
   fprintf (ofs, "Usage:\n");
   fprintf (ofs, "  gmer_caller ARGUMENTS COUNTS_FILE\n");
   fprintf (ofs, "Arguments:\n");
+  fprintf (ofs, "    -v | --version      - Print version information and exit\n");
   fprintf (ofs, "    --training_size NUM - Use NUM markers for training (default 100000)\n");
   fprintf (ofs, "    --runs NUMBER       - Perfom NUMBER runs of model training (use 0 for no training)\n");
   fprintf (ofs, "    --num_threads NUM   - Use NUM threads (min 1, max %u, default %u)\n", MAX_THREADS, MAX_THREADS / 2);
@@ -524,7 +539,10 @@ main (int argc, const char *argv[])
 
   aidx = 1;
   while (aidx < argc) {
-    if (!strcmp (argv[aidx], "-D")) {
+    if (!strcmp (argv[aidx], "-v") || !strcmp (argv[aidx], "--version")) {
+      fprintf (stdout, "gmer_caller version %u.%u (%s)\n", VERSION_MAJOR, VERSION_MINOR, VERSION_QUALIFIER);
+      exit (0);
+    } else if (!strcmp (argv[aidx], "-D")) {
       debug += 1;
     } else if (!strcmp (argv[aidx], "--runs")) {
       aidx += 1;
@@ -574,7 +592,7 @@ main (int argc, const char *argv[])
         print_usage (stderr);
         exit (1);
       }
-      prob_cutoff = atof (argv[aidx]);
+      /* prob_cutoff = atof (argv[aidx]); */
     } else if (!strcmp (argv[aidx], "--params")) {
       aidx += 1;
       if ((aidx + 6) >= argc) {
@@ -736,6 +754,7 @@ main (int argc, const char *argv[])
 
 
   if (info) {
+    fprintf (stdout, "#gmer_counter version %u.%u (%s)\n", VERSION_MAJOR, VERSION_MINOR, VERSION_QUALIFIER);
     if (model == MODEL_FULL) fprintf (stdout, "#Sex\t%s\n", (p_XX > p_X) ? "F" : "M");
     fprintf (stdout, "#EstimatedCoverage\t%g\n", params[LAMBDA]);
     fprintf (stdout, "#AverageMAF\t%g\n", pB);
@@ -807,22 +826,17 @@ mlogL3 (float l_viga, float p_0, float p_1, float p_2, float lambda, float size,
   sum = 0;
   for (i = 0; i < n_calls; i++) {
     double a[NUM_GENOTYPES];
-    double abi;
+    double call_sum = 0;
     int j;
 
     genotype_probabilities (a, pB, var1[i], var2[i], l_viga, p_0, p_1, p_2, lambda, size, size2);
-
-    abi = 0;
     for (j = 0; j < NUM_GENOTYPES; j++) {
       assert (!isnan (a[j]));
-      abi += a[j];
+      call_sum += a[j];
     }
-    assert (!isnan (abi));
-
-    /* abi[abi<1e-30]=1e-30 */
-    if (abi < 1e-30) abi = 1e-30;
-    /* l = sum(log(abi))+3000000 */
-    sum += log (abi);
+    assert (!isnan (call_sum));
+    if (call_sum < 1e-30) call_sum = 1e-30;
+    sum += log (call_sum);
   }
 
   return -sum;
@@ -833,7 +847,7 @@ optim_run (void *data)
 {
   L3Optim *optim = (L3Optim *) data;
   float l_viga, p_0, p_1, p_2, lambda, size, size2;
-  l_viga = logit_1_clamped (optim->l3->params[0], MIN_P, 0.1f);
+  l_viga = logit_1_clamped (optim->l3->params[0], MIN_P, MAX_E);
   p_0 = logit_1_clamped (optim->l3->params[1], MIN_P, 1 - MIN_P);
   p_1 = logit_1_clamped (optim->l3->params[2], MIN_P, 1 - MIN_P);
   p_2 = logit_1_clamped (optim->l3->params[3], MIN_P, 1 - MIN_P);
@@ -842,6 +856,7 @@ optim_run (void *data)
   size2 = -expf (optim->l3->params[6]);
   if (debug > 2) fprintf (stderr, "Optimization: %u-%u\n", optim->first_call, optim->first_call + optim->n_calls);
   optim->sum = mlogL3 (l_viga, p_0, p_1, p_2, lambda, size, size2, optim->n_calls, optim->l3->pB, optim->l3->var1 + optim->first_call, optim->l3->var2 + optim->first_call);
+  optim->sum += optim->n_calls * (optim->l3->lambda_est - lambda) * (optim->l3->lambda_est - lambda) / (optim->l3->lambda_sigma * optim->l3->lambda_sigma);
 }
 
 static float
@@ -857,8 +872,7 @@ distanceL3 (int ndim, const float params[], void *data)
   l3 = (L3Data *) data;
 
   if (debug > 1) print_params (params, "Params", stderr);
-
-  l_viga = logit_1_clamped (l3->params[0], MIN_P, 0.1f);
+  l_viga = logit_1_clamped (l3->params[0], MIN_P, MAX_E);
   assert (!isnan (l_viga));
   p_0 = logit_1_clamped (l3->params[1], MIN_P, 1 - MIN_P);
   assert (!isnan (p_0));

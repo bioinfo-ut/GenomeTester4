@@ -28,6 +28,7 @@
 #include <stdio.h>
 
 #include "buffer.h"
+#include "sequence-source.h"
 
 #define MAX_NAME_SIZE 1000
 
@@ -50,6 +51,8 @@ typedef struct _FastaReader {
 	void (* free_io_data) (void *data);
 	void *read_data;
 	unsigned int in_eof;
+	GT4SequenceSourceImplementation *impl;
+	GT4SequenceSourceInstance *inst;
 	
 	/* FastQ or FastA */
 	unsigned int type;
@@ -77,6 +80,7 @@ int fasta_reader_release (FastaReader *reader);
 
 int fasta_reader_init_from_data (FastaReader *reader, unsigned int wordlength, unsigned int canonize, const unsigned char *cdata, unsigned long long csize);
 int fasta_reader_init_from_file (FastaReader *reader, unsigned int wordlength, unsigned int canonize, FILE *ifs);
+int fasta_reader_init_from_source (FastaReader *reader, unsigned int wordlength, unsigned int canonize, GT4SequenceSourceImplementation *impl, GT4SequenceSourceInstance *inst);
 
 /* Read maximum of nwords words from FastA or fastQ file starting from position cpos */
 int fasta_reader_read_nwords (FastaReader *reader, unsigned long long maxwords,

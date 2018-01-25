@@ -24,6 +24,7 @@
 #include <string.h>
 #include <sys/mman.h>
 
+#include "sequence-zstream.h"
 #include "utils.h"
 #include "queue.h"
 
@@ -143,10 +144,48 @@ maker_queue_release (MakerQueue *mq)
 void
 maker_queue_add_file (MakerQueue *mq, const char *filename)
 {
-        TaskFile *task;
-        task = task_file_new (filename, 0);
-        task->next = mq->files;
-        mq->files = task;
+        TaskFile *tf;
+#if 0
+        FILE *ifs;
+        ifs = fopen (filename, "r");
+        tf = task_file_new_from_stream (ifs, filename, 1);
+#else
+  unsigned int len = strlen (filename);
+  if ((len > 3) && !strcmp (filename + len - 3, ".gz")) {
+    if (queue_debug) fprintf (stderr, "Opening compressed stream %s\n", filename);
+    GT4SequenceZStream *zstream = gt4_sequence_zstream_new (filename);
+    TaskFile *tf = task_file_new_from_source (AZ_OBJECT (zstream), filename, 0);
+    tf->next = mq->files;
+    //tf->idx = mq->nfiles++;
+    mq->files = tf;
+  } else if (!strcmp (filename, "-")) {
+    tf = task_file_new_from_stream (stdin, filename, 0);
+    tf->next = mq->files;
+    //tf->idx = mq->nfiles++;
+    mq->files = tf;
+  } else {
+    unsigned int nseqs, i;
+    GT4SequenceBlock *seqs[32];
+    GT4SequenceFile *seqf = gt4_sequence_file_new (filename, 1);
+    gt4_sequence_file_map_sequence (seqf);
+    nseqs = (unsigned int) (seqf->block.csize / 10000000000ULL) + 1;
+    if (nseqs > 32) nseqs = 32;
+    nseqs = gt4_sequence_block_split (&seqf->block, seqs, nseqs);
+    for (i = 0; i < nseqs; i++) {
+      TaskFile *tf = task_file_new_from_source (AZ_OBJECT (seqs[i]), "block", 0);
+      if (queue_debug) fprintf (stderr, "%s:%u from %llu to %llu\n", filename, i, (unsigned long long) seqs[i]->cdata - (unsigned long long) seqf->block.cdata, (unsigned long long) seqs[i]->cdata - (unsigned long long) seqf->block.cdata + seqs[i]->csize);
+      tf->next = mq->files;
+      //tf->idx = mq->nfiles++;
+      mq->files = tf;
+    }
+    az_object_unref (AZ_OBJECT (seqf));
+  }
+
+
+        //tf = task_file_new (filename, 0);
+#endif
+        //tf->next = mq->files;
+        //mq->files = tf;
 }
 
 wordtable *
@@ -274,6 +313,8 @@ task_file_new (const char *filename, unsigned int scout)
   TaskFile *tf = (TaskFile *) malloc (sizeof (TaskFile));
   memset (tf, 0, sizeof (TaskFile));
   tf->seqfile = gt4_sequence_file_new (filename, 1);
+  tf->source = (AZObject *) tf->seqfile;
+  az_object_ref (AZ_OBJECT(tf->source));
   tf->scout = scout;
   return tf;
 }
@@ -284,7 +325,22 @@ task_file_new_from_stream (FILE *ifs, const char *filename, unsigned int close_o
   TaskFile *tf = (TaskFile *) malloc (sizeof (TaskFile));
   memset (tf, 0, sizeof (TaskFile));
   tf->seqfile = gt4_sequence_file_new (filename, 1);
-  tf->ifs = ifs;
+  tf->stream = gt4_sequence_stream_new_from_stream (ifs, close_on_delete);
+  tf->source = (AZObject *) tf->stream;
+  az_object_ref (AZ_OBJECT(tf->source));
+  tf->close_on_delete = close_on_delete;
+  return tf;
+}
+
+TaskFile *
+task_file_new_from_source (AZObject *source, const char *filename, unsigned int close_on_delete)
+{
+  TaskFile *tf = (TaskFile *) malloc (sizeof (TaskFile));
+  memset (tf, 0, sizeof (TaskFile));
+  tf->seqfile = gt4_sequence_file_new (filename, 1);
+  tf->stream = NULL;
+  tf->source = source;
+  az_object_ref (AZ_OBJECT(tf->source));
   tf->close_on_delete = close_on_delete;
   return tf;
 }
@@ -296,9 +352,10 @@ task_file_delete (TaskFile *tf)
     fasta_reader_release (&tf->reader);
   }
   gt4_sequence_file_unref (tf->seqfile);
-  if (tf->close_on_delete) {
-    fclose (tf->ifs);
+  if (tf->stream) {
+    az_object_shutdown (AZ_OBJECT (tf->stream));
   }
+  az_object_unref (AZ_OBJECT (tf->source));
   free (tf);
 }
 
@@ -316,19 +373,19 @@ task_file_read_nwords (TaskFile *tf, unsigned long long maxwords, unsigned int w
   void *data)
 {
   if (!tf->has_reader) {
-    if (tf->ifs) {
-      fasta_reader_init_from_file (&tf->reader, wordsize, 1, tf->ifs);
-    } else if (!tf->seqfile->cdata) {
-      gt4_sequence_file_map_sequence (tf->seqfile);
-      if (!tf->seqfile->cdata) {
-        fprintf (stderr, "Cannot mmap %s\n", tf->seqfile->path);
-        return 0;
+    GT4SequenceSourceImplementation *impl;
+    GT4SequenceSourceInstance *inst;
+    impl = (GT4SequenceSourceImplementation *) az_object_get_interface (AZ_OBJECT(tf->source), GT4_TYPE_SEQUENCE_SOURCE, (void **) &inst);
+    if (!inst->open) {
+      if (!gt4_sequence_source_open (impl, inst)) {
+        fprintf (stderr, "Cannot open sequence source of %s\n", tf->seqfile->path);
+        return 1;
       }
-      if (tf->scout) scout_mmap (tf->seqfile->cdata, tf->seqfile->csize);
-      fasta_reader_init_from_data (&tf->reader, wordsize, 1, tf->seqfile->cdata, tf->seqfile->csize);
+      /* fixme: move scouting inside SequenceFile */
+      if (tf->scout && (tf->source == (AZObject *) tf->seqfile)) scout_mmap (tf->seqfile->block.cdata, tf->seqfile->block.csize);
     }
+    fasta_reader_init_from_source (&tf->reader, wordsize, 1, impl, inst);
     tf->has_reader = 1;
   }
   return fasta_reader_read_nwords (&tf->reader, maxwords, start_sequence, end_sequence, read_character, read_nucleotide, read_word, data);
 }
-

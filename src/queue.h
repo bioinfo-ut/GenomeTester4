@@ -29,6 +29,7 @@
 
 #include "fasta.h"
 #include "sequence-file.h"
+#include "sequence-stream.h"
 #include "wordtable.h"
 
 /*
@@ -121,9 +122,11 @@ void maker_queue_release (MakerQueue *mq);
 struct _TaskFile {
         TaskFile *next;
         GT4SequenceFile *seqfile;
+        GT4SequenceStream *stream;
+        /* Sequence source */
+        AZObject *source;
         /* File index */
         unsigned int idx;
-        FILE *ifs;
         unsigned int close_on_delete;
         unsigned int scout;
         unsigned int has_reader;
@@ -132,6 +135,7 @@ struct _TaskFile {
 
 TaskFile *task_file_new (const char *filename, unsigned int scout);
 TaskFile *task_file_new_from_stream (FILE *ifs, const char *filename, unsigned int close_on_delete);
+TaskFile *task_file_new_from_source (AZObject *source, const char *filename, unsigned int close_on_delete);
 void task_file_delete (TaskFile *tf);
 /* Frontend to mmap and FastaReader */
 unsigned int task_file_read_nwords (TaskFile *tf, unsigned long long maxwords, unsigned int wordsize,

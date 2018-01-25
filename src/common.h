@@ -26,9 +26,6 @@
 
 #include <stdio.h>
 
-#define VERSION_MAJOR 4
-#define VERSION_MINOR 0
-
 /* errors and warnings */
 #define GT_INCOMPATIBLE_WORDLENGTH_ERROR 2
 #define GT_INCOMPATIBLE_VERSION_WARNING 3

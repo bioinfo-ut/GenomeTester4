@@ -112,6 +112,26 @@ fasta_reader_init_from_file (FastaReader *reader, unsigned int wordlength, unsig
 	return result;
 }
 
+static int
+source_read (void *data)
+{
+  FastaReader *reader = (FastaReader *) data;
+  return gt4_sequence_source_read (reader->impl, reader->inst);
+}
+
+int
+fasta_reader_init_from_source (FastaReader *reader, unsigned int wordlength, unsigned int canonize, GT4SequenceSourceImplementation *impl, GT4SequenceSourceInstance *inst)
+{
+  unsigned int result;
+  arikkei_return_val_if_fail (impl != NULL, -1);
+  arikkei_return_val_if_fail (inst != NULL, -1);
+  result = fasta_reader_init (reader, wordlength, canonize, source_read, reader);
+  if (!result) {
+    reader->impl = impl;
+    reader->inst = inst;
+  }
+  return result;
+}
 
 int
 fasta_reader_read_nwords (FastaReader *reader, unsigned long long maxwords,

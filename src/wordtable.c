@@ -28,9 +28,9 @@
 
 #include "sequence.h"
 #include "wordtable.h"
-#include "wordmap.h"
 #include "common.h"
 #include "utils.h"
+#include "version.h"
 
 unsigned int debug_tables;
 unsigned long long total_memory = 0;

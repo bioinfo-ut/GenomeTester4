@@ -12,8 +12,10 @@
 #include "sequence.h"
 #include "fasta.h"
 #include "queue.h"
-#include "wordmap.h"
+#include "word-map.h"
 #include "database.h"
+#include "sequence-zstream.h"
+#include "version.h"
 
 #define MAX_LINES 10000000000
 #define MAX_FILESIZE 10000000000
@@ -33,6 +35,9 @@ struct _TaskTable {
   unsigned int nwords;
   unsigned long long *words;
   unsigned int *alleles;
+  /* Stats */
+  unsigned long long n_nucl;
+  unsigned long long n_gc;
   /* Read indexing */
   unsigned int file_idx;
   unsigned long long name_npos;
@@ -52,6 +57,12 @@ struct _SNPQueue {
   TaskTable *free_tables;
   /* Filled tables */
   TaskTable *full_tables;
+  /* Stats */
+  unsigned long long n_nucl;
+  unsigned long long n_gc;
+  unsigned long long n_kmers_total;
+  unsigned long long n_kmers;
+  unsigned long long n_kmer_gc;
   /* Data */
   KMerDB *db;
   /* Read lists */
@@ -62,15 +73,18 @@ struct _SNPQueue {
 static void process (Queue *queue, unsigned int idx, void *arg);
 static int start_sequence (FastaReader *reader, void *data);
 static int end_sequence (FastaReader *reader, void *data);
+static int read_nucleotide (FastaReader *reader, unsigned int nucleotide, void *data);
 static int read_word (FastaReader *reader, unsigned long long word, void *data);
 static int compare_counts (const void *lhs, const void *rhs);
 static unsigned int get_pair_median (KMerDB *db);
 
 static void
 print_usage (FILE *ofs) {
+  fprintf (ofs, "gmer_counter version %u.%u (%s)\n", VERSION_MAJOR, VERSION_MINOR, VERSION_QUALIFIER);
   fprintf (ofs, "Usage:\n");
   fprintf (ofs, "  gmer_counter ARGUMENTS SEQUENCES...\n");
   fprintf (ofs, "Arguments:\n");
+  fprintf (ofs, "    -v | --version   - Print version information and exit\n");
   fprintf (ofs, "    -db DATABASE     - SNP/KMER database file\n");
   fprintf (ofs, "    -dbb DBBINARY    - binary database file\n");
   fprintf (ofs, "    -w FILENAME      - write binary database to file\n");
@@ -85,7 +99,49 @@ print_usage (FILE *ofs) {
   fprintf (ofs, "    --distribution NUM  - print kmer distribution (up to given number)\n");
   fprintf (ofs, "    --num_threads    - number of worker threads (default %u)\n", DEFAULT_NUM_THREADS);
   fprintf (ofs, "    --prefetch       - prefetch memory mapped files (faster on high-memory systems)\n");
+  fprintf (ofs, "    --recover        - recover from FastA/FastQ errors (useful for corrupted streams)\n");
+  fprintf (ofs, "    --stats          - print some statistics about sequence and kmers\n");
   fprintf (ofs, "    -D               - increase debug level\n");
+  fprintf (ofs, "    -DDB             - increase database debug level\n");
+}
+
+static unsigned int recover = 0;
+static unsigned int stats = 0;
+
+static void
+add_task (SNPQueue *snpq, const char *filename)
+{
+  TaskFile *tf;
+  unsigned int len = strlen (filename);
+  if ((len > 3) && !strcmp (filename + len - 3, ".gz")) {
+    fprintf (stderr, "Opening compressed stream %s\n", filename);
+    GT4SequenceZStream *zstream = gt4_sequence_zstream_new (filename);
+    TaskFile *tf = task_file_new_from_source (AZ_OBJECT (zstream), filename, 0);
+    tf->next = snpq->files;
+    tf->idx = snpq->nfiles++;
+    snpq->files = tf;
+  } else if (!strcmp (filename, "-")) {
+    tf = task_file_new_from_stream (stdin, filename, 0);
+    tf->next = snpq->files;
+    tf->idx = snpq->nfiles++;
+    snpq->files = tf;
+  } else {
+    unsigned int nseqs, i;
+    GT4SequenceBlock *seqs[32];
+    GT4SequenceFile *seqf = gt4_sequence_file_new (filename, 1);
+    gt4_sequence_file_map_sequence (seqf);
+    nseqs = (unsigned int) (seqf->block.csize / 10000000000ULL) + 1;
+    if (nseqs > 32) nseqs = 32;
+    nseqs = gt4_sequence_block_split (&seqf->block, seqs, nseqs);
+    for (i = 0; i < nseqs; i++) {
+      TaskFile *tf = task_file_new_from_source (AZ_OBJECT (seqs[i]), "block", 0);
+      if (debug) fprintf (stderr, "%s:%u from %llu to %llu\n", filename, i, (unsigned long long) seqs[i]->cdata - (unsigned long long) seqf->block.cdata, (unsigned long long) seqs[i]->cdata - (unsigned long long) seqf->block.cdata + seqs[i]->csize);
+      tf->next = snpq->files;
+      tf->idx = snpq->nfiles++;
+      snpq->files = tf;
+    }
+    az_object_unref (AZ_OBJECT (seqf));
+  }
 }
 
 int
@@ -110,7 +166,10 @@ main (int argc, const char *argv[])
 
   
   for (i = 1; i < argc; i++) {
-    if (!strcmp (argv[i], "-db")) {
+    if (!strcmp (argv[i], "-v") || !strcmp (argv[i], "--version")) {
+      fprintf (stdout, "gmer_counter version %d.%d (%s)\n", VERSION_MAJOR, VERSION_MINOR, VERSION_QUALIFIER);
+      exit (0);
+    } else if (!strcmp (argv[i], "-db")) {
       /* Database */
       i += 1;
       if (i >= argc) {
@@ -179,11 +238,18 @@ main (int argc, const char *argv[])
       nthreads = strtol (argv[i], NULL, 10);
     } else if (!strcmp (argv[i], "--prefetch")) {
       lowmem = 0;
+    } else if (!strcmp (argv[i], "--recover")) {
+      recover = 1;
+    } else if (!strcmp (argv[i], "--stats")) {
+      stats = 1;
     } else if (!strcmp (argv[i], "--count_trie_allocations")) {
       gt4_trie_debug |= GT4_TRIE_COUNT_ALLOCATIONS;
     } else if (!strcmp (argv[i], "-D")) {
       /* Debug */
       debug += 1;
+    } else if (!strcmp (argv[i], "-DDB")) {
+      /* Debug */
+      db_debug += 1;
     } else {
       if (nseqs >= 1024) {
         fprintf (stderr, "Maximum number of input sequence files is 1024\n");
@@ -227,6 +293,7 @@ main (int argc, const char *argv[])
       exit (1);
     }
     if (!lowmem) scout_mmap (cdata, csize);
+    if (debug) fprintf (stderr, "Loading text database %s\n", db_name);
     if (!read_db_from_text (&db, cdata, csize, max_kmers_per_node, (big) ? 32 : 16)) {
       fprintf (stderr, "Cannot read text database %s\n", dbb);
       exit (1);
@@ -280,17 +347,21 @@ main (int argc, const char *argv[])
     snpq.db = &db;
     for (i = 0; i < nseqs; i++) {
       TaskFile *tf;
-      if (!strcmp (seqnames[i], "-")) {
-        tf = task_file_new_from_stream (stdin, seqnames[i], 0);
+      if (index) {
+        if (!strcmp (seqnames[i], "-")) {
+          tf = task_file_new_from_stream (stdin, seqnames[i], 0);
+        } else {
+          tf = task_file_new (seqnames[i], !lowmem);
+        }
+        seq_files[i] = tf->seqfile;
+        gt4_sequence_file_ref (seq_files[i]);
+        tf->next = snpq.files;
+        tf->idx = i;
+        snpq.files = tf;
+        snpq.nfiles += 1;
       } else {
-        tf = task_file_new (seqnames[i], !lowmem);
+        add_task (&snpq, seqnames[i]);
       }
-      seq_files[i] = tf->seqfile;
-      gt4_sequence_file_ref (seq_files[i]);
-      tf->next = snpq.files;
-      tf->idx = i;
-      snpq.files = tf;
-      snpq.nfiles += 1;
     }
     for (i = 0; i < DEFAULT_NUM_TABLES; i++) {
       TaskTable *tt = task_table_new (index != NULL);
@@ -308,12 +379,12 @@ main (int argc, const char *argv[])
       queue_wait (&snpq.queue);
     }
     queue_unlock (&snpq.queue);
-    queue_finalize (&snpq.queue);
 
     if (debug) {
       fprintf (stderr, "Finished reading files\n");
     }
 
+    fprintf (stdout, "#gmer_counter version %u.%u (%s)\n", VERSION_MAJOR, VERSION_MINOR, VERSION_QUALIFIER);
     if (db_name) fprintf (stdout, "#TextDatabase\t%s\n", db_name);
     if (dbb) fprintf (stdout, "#BinaryDatabase\t%s\n", dbb);
         
@@ -321,7 +392,19 @@ main (int argc, const char *argv[])
       unsigned int med = get_pair_median (&db);
       fprintf (stdout, "#PairMedian\t%u\n", med);
     }
-    
+
+    if (stats) {
+      fprintf (stdout, "LENGTH\tGC\tTOTAL_KMERS\tLIST_KMERS\tLIST_KMER_GC\n");
+      fprintf (stdout, "%llu", snpq.n_nucl);
+      fprintf (stdout, "\t%.3f", (double) snpq.n_gc / snpq.n_nucl);
+      fprintf (stdout, "\t%llu", snpq.n_kmers_total);
+      fprintf (stdout, "\t%llu", snpq.n_kmers);
+      fprintf (stdout, "\t%.3f\n", (double) snpq.n_kmer_gc / (snpq.n_kmers * db.wordsize));
+    }
+
+    /* Need queue for stats */
+    queue_finalize (&snpq.queue);
+
     if (header) {
       fprintf (stdout, "NODE\tN_KMERS");
       if (total) fprintf (stdout, "\tTOTAL");
@@ -530,6 +613,7 @@ process (Queue *queue, unsigned int idx, void *arg)
     if ((snpq->files) && (snpq->free_tables)) {
       TaskFile *tf;
       TaskTable *tt;
+      unsigned int result;
       /* Create new file reading task */
       tf = snpq->files;
       snpq->files = tf->next;
@@ -542,14 +626,17 @@ process (Queue *queue, unsigned int idx, void *arg)
       gt4_sequence_file_ref (tt->seqfile);
       tt->nwords = 0;
       tt->file_idx = tf->idx;
+      tt->n_nucl = 0;
+      tt->n_gc = 0;
       if (debug > 0) fprintf (stderr, "Thread %d: reading file %s from %llu\n", idx, tt->seqfile->path, tf->reader.cpos);
-      if (task_file_read_nwords (tf, BLOCK_SIZE, snpq->db->wordsize, start_sequence, end_sequence, NULL, NULL, read_word, tt)) {
-        fprintf (stderr, "Cannot create FastaReader fro %s\n", tt->seqfile->path);
-        exit (1);
+      result = task_file_read_nwords (tf, BLOCK_SIZE, snpq->db->wordsize, start_sequence, end_sequence, NULL, (stats) ? read_nucleotide : NULL, read_word, tt);
+      if (result) {
+        fprintf (stderr, "Error reading from file %s\n", tt->seqfile->path);
+        if (!recover) exit (1);
       }
       if (debug > 1) fprintf (stderr, "Thread %d: finished reading %s at %llu\n", idx, tt->seqfile->path, tf->reader.cpos);
       pthread_mutex_lock (&snpq->queue.mutex);
-      if (tf->reader.in_eof) {
+      if (result || tf->reader.in_eof) {
         task_file_delete (tf);
         snpq->nfiles -= 1;
       } else {
@@ -570,15 +657,18 @@ process (Queue *queue, unsigned int idx, void *arg)
       pthread_mutex_unlock (&snpq->queue.mutex);
       if (debug > 1) fprintf (stderr, "Thread %d: table lookup\n", idx);
       for (i = 0; i < tt->nwords; i++) {
-        if (debug > 1) {
-          if ((i % 10000) == 0) fprintf (stderr, ".");
-        }
+        if ((debug > 1) && ((i % 10000) == 0)) fprintf (stderr, ".");
         tt->alleles[i] = trie_lookup (&snpq->db->trie, tt->words[i]);
       }
       if (debug > 1) fprintf (stderr, "Thread %d: finished lookup\n", idx);
-      pthread_mutex_lock (&snpq->queue.mutex);
 
+      pthread_mutex_lock (&snpq->queue.mutex);
       /* fixme: Create separate task / mutex */
+      if (stats) {
+        snpq->n_nucl += tt->n_nucl;
+        snpq->n_gc += tt->n_gc;
+        snpq->n_kmers_total += tt->nwords;
+      }
       for (i = 0; i <  tt->nwords; i++) {
         unsigned int code, node, kmer, kmer_idx;
         code = tt->alleles[i];
@@ -600,6 +690,15 @@ process (Queue *queue, unsigned int idx, void *arg)
           if (db->kmers_16[kmer_idx] < 65535) db->kmers_16[kmer_idx] += 1;
         } else {
           if (db->kmers_32[kmer_idx] < 0xffffffff) db->kmers_32[kmer_idx] += 1;
+        }
+        if (stats) {
+          unsigned int j;
+          snpq->n_kmers += 1;
+          for (j = 0; j < db->wordsize; j++) {
+            unsigned long long word = tt->words[i];
+            snpq->n_kmer_gc += ((word ^ (word >> 1)) & 1);
+            word = word >> 2;
+          }
         }
         if (snpq->reads) {
           ReadList *rl = gm4_read_list_new ();
@@ -668,6 +767,15 @@ read_word (FastaReader *reader, unsigned long long word, void *data)
     tt->reads[tt->nwords].dir = (word != reader->wordfw);
   }
   tt->nwords += 1;
+  return 0;
+}
+
+static int
+read_nucleotide (FastaReader *reader, unsigned int nucl, void *data)
+{
+  TaskTable *tt = (TaskTable *) data;
+  tt->n_nucl += 1;
+  tt->n_gc += ((nucl ^ (nucl >> 1)) & 1);
   return 0;
 }
 
