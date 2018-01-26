@@ -1,12 +1,12 @@
-#ifndef FASTA_H_
-#define FASTA_H_
+#ifndef __GT4_FASTA_H__
+#define __GT4_FASTA_H__
 
 /*
  * GenomeTester4
  *
  * A toolkit for creating and manipulating k-mer lists from biological sequences
  * 
- * Copyright (C) 2014 University of Tartu
+ * Copyright (C) 2014-2018 University of Tartu
  *
  * Authors: Maarja Lepamets and Lauris Kaplinski
  *
@@ -47,12 +47,9 @@ typedef struct _FastaReader {
 
 	/* I/O */
 	/* 0 - EOF, negative - error */
-	int (* read) (void *data);
-	void (* free_io_data) (void *data);
-	void *read_data;
-	unsigned int in_eof;
 	GT4SequenceSourceImplementation *impl;
 	GT4SequenceSourceInstance *inst;
+	unsigned int in_eof;
 	
 	/* FastQ or FastA */
 	unsigned int type;
@@ -75,12 +72,8 @@ typedef struct _FastaReader {
 } FastaReader;
 
 /* Set up FastA reader structure */
-int fasta_reader_init (FastaReader *reader, unsigned int wordlength, unsigned int canonize, int (* read) (void *), void *read_data);
+int fasta_reader_init (FastaReader *reader, unsigned int wordlength, unsigned int canonize, GT4SequenceSourceImplementation *impl, GT4SequenceSourceInstance *inst);
 int fasta_reader_release (FastaReader *reader);
-
-int fasta_reader_init_from_data (FastaReader *reader, unsigned int wordlength, unsigned int canonize, const unsigned char *cdata, unsigned long long csize);
-int fasta_reader_init_from_file (FastaReader *reader, unsigned int wordlength, unsigned int canonize, FILE *ifs);
-int fasta_reader_init_from_source (FastaReader *reader, unsigned int wordlength, unsigned int canonize, GT4SequenceSourceImplementation *impl, GT4SequenceSourceInstance *inst);
 
 /* Read maximum of nwords words from FastA or fastQ file starting from position cpos */
 int fasta_reader_read_nwords (FastaReader *reader, unsigned long long maxwords,

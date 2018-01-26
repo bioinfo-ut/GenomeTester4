@@ -7,6 +7,8 @@ CXX  = gcc
 
 LISTMAKER_SOURCES = \
 	glistmaker.c \
+	listmaker-queue.c listmaker-queue.h \
+	queue.c queue.h \
 	wordtable.c wordtable.h \
 	word-map.c word-map.h \
 	fasta.c fasta.h \
@@ -17,7 +19,6 @@ LISTMAKER_SOURCES = \
 	sequence-source.c sequence-source.h \
 	sequence-stream.c sequence-stream.h \
 	sequence-zstream.c sequence-zstream.h \
-	queue.c queue.h \
 	common.c common.h \
 	utils.c utils.h \
 	word-array-sorted.c word-array-sorted.h
@@ -41,6 +42,7 @@ LISTMAKER2_SOURCES = \
 
 LISTQUERY_SOURCES = \
 	glistquery.c \
+	listmaker-queue.c listmaker-queue.h \
 	wordtable.c wordtable.h \
 	word-map.c word-map.h \
 	fasta.c fasta.h \
@@ -58,6 +60,7 @@ LISTQUERY_SOURCES = \
 
 LISTCOMPARE_SOURCES = \
 	glistcompare.c \
+	listmaker-queue.c listmaker-queue.h \
 	wordtable.c \
 	word-map.c \
 	fasta.c \
@@ -77,6 +80,7 @@ LISTCOMPARE_SOURCES = \
 GMER_COUNTER_SOURCES = \
 	gmer_counter.c \
 	index.c index.h \
+	listmaker-queue.c listmaker-queue.h \
 	trie.c trie.h \
 	word-map.c word-map.h \
 	sequence.c sequence.h \

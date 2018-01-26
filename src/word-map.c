@@ -32,7 +32,7 @@
 #include "sequence.h"
 #include "common.h"
 #include "utils.h"
-#include "queue.h"
+#include "listmaker-queue.h"
 
 #include "word-map.h"
 

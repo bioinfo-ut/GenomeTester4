@@ -1,4 +1,4 @@
-#define __GMERCOUNTER_C__
+#define __GMER_COUNTER_C__
 
 #include <assert.h>
 #include <stdlib.h>
@@ -11,7 +11,7 @@
 #include "trie.h"
 #include "sequence.h"
 #include "fasta.h"
-#include "queue.h"
+#include "listmaker-queue.h"
 #include "word-map.h"
 #include "database.h"
 #include "sequence-zstream.h"
@@ -49,7 +49,7 @@ void task_table_free (TaskTable *tt);
 
 typedef struct _SNPQueue SNPQueue;
 struct _SNPQueue {
-  Queue queue;
+  GT4Queue queue;
   /* Files to process */
   unsigned int nfiles;
   TaskFile *files;
@@ -70,7 +70,7 @@ struct _SNPQueue {
 };
 
 /* Main thread loop */
-static void process (Queue *queue, unsigned int idx, void *arg);
+static void process (GT4Queue *queue, unsigned int idx, void *arg);
 static int start_sequence (FastaReader *reader, void *data);
 static int end_sequence (FastaReader *reader, void *data);
 static int read_nucleotide (FastaReader *reader, unsigned int nucleotide, void *data);
@@ -342,7 +342,8 @@ main (int argc, const char *argv[])
 
   if (nseqs > 0) {
     memset (&snpq, 0, sizeof (SNPQueue));
-    queue_init (&snpq.queue, nthreads);
+    az_instance_init (&snpq.queue, GT4_TYPE_QUEUE);
+    gt4_queue_setup (&snpq.queue, nthreads);
     /* Read files */
     snpq.db = &db;
     for (i = 0; i < nseqs; i++) {
@@ -372,13 +373,13 @@ main (int argc, const char *argv[])
       snpq.reads = (ReadList **) malloc (db.n_kmers * sizeof (ReadList *));
       memset (snpq.reads, 0, db.n_kmers * sizeof (ReadList *));
     }
-    queue_create_threads (&snpq.queue, process, &snpq);
+    gt4_queue_create_threads (&snpq.queue, process, &snpq);
     process (&snpq.queue, 0, &snpq);
-    queue_lock (&snpq.queue);
+    gt4_queue_lock (&snpq.queue);
     while (snpq.queue.nthreads_running > 1) {
-      queue_wait (&snpq.queue);
+      gt4_queue_wait (&snpq.queue);
     }
-    queue_unlock (&snpq.queue);
+    gt4_queue_unlock (&snpq.queue);
 
     if (debug) {
       fprintf (stderr, "Finished reading files\n");
@@ -403,7 +404,7 @@ main (int argc, const char *argv[])
     }
 
     /* Need queue for stats */
-    queue_finalize (&snpq.queue);
+    az_instance_finalize (&snpq.queue, GT4_TYPE_QUEUE);
 
     if (header) {
       fprintf (stdout, "NODE\tN_KMERS");
@@ -594,7 +595,7 @@ main (int argc, const char *argv[])
 }
 
 static void
-process (Queue *queue, unsigned int idx, void *arg)
+process (GT4Queue *queue, unsigned int idx, void *arg)
 {
   SNPQueue *snpq;
   KMerDB *db;
@@ -609,7 +610,7 @@ process (Queue *queue, unsigned int idx, void *arg)
   /* Do work */
   while (!finished) {
     /* Get exclusive lock on queue */
-    queue_lock (queue);
+    gt4_queue_lock (queue);
     if ((snpq->files) && (snpq->free_tables)) {
       TaskFile *tf;
       TaskTable *tt;

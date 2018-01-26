@@ -29,6 +29,7 @@
 #include "common.h"
 #include "utils.h"
 #include "sequence.h"
+#include "sequence-stream.h"
 #include "wordtable.h"
 #include "word-map.h"
 #include "fasta.h"
@@ -344,8 +345,7 @@ int search_n_query_strings (GT4WordMap *map, const char *queryfile, parameters *
 int
 search_fasta (GT4WordMap *map, const char *seqfilename, parameters *p, unsigned int minfreq, unsigned int maxfreq, int printall)
 {
-	const unsigned char *cdata;
-	unsigned long long csize;
+        GT4SequenceStream *stream;
 	querystructure qs = {0};
 	int result;
 	FastaReader r;
@@ -355,13 +355,16 @@ search_fasta (GT4WordMap *map, const char *seqfilename, parameters *p, unsigned 
 	qs.minfreq = minfreq;
 	qs.maxfreq = maxfreq;
 	qs.printall = printall;
-	cdata = gt4_mmap (seqfilename, &csize);
 
-	fasta_reader_init_from_data (&r, p->wordlength, 0, cdata, csize);
-	result = fasta_reader_read_nwords (&r, csize, NULL, NULL, NULL, NULL, process_word, (void *) &qs);
+	stream = gt4_sequence_stream_new (seqfilename);
+	fasta_reader_init (&r, p->wordlength, 0, GT4_SEQUENCE_STREAM_SEQUENCE_SOURCE_IMPLEMENTATION(stream), &stream->source_instance);
+
+	result = fasta_reader_read_nwords (&r, 1000000000000ULL, NULL, NULL, NULL, NULL, process_word, (void *) &qs);
 	/* v = fasta_reader_read_nwords (ff, size, p->wordlength, (void *) &qs, 0, 0, NULL, NULL, process_word); */
 	fasta_reader_release (&r);
-	gt4_munmap (cdata, csize);
+
+	az_object_unref (AZ_OBJECT (stream));
+
 	return result;
 }
 

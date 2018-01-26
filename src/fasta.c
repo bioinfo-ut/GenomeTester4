@@ -1,3 +1,5 @@
+#define __GT4_FASTA_C__
+
 /*
  * GenomeTester4
  *
@@ -34,14 +36,14 @@
 static unsigned int *c2n = NULL;
 
 int
-fasta_reader_init (FastaReader *reader, unsigned int wordlength, unsigned int canonize, int (* read) (void *), void *read_data)
+fasta_reader_init (FastaReader *reader, unsigned int wordlength, unsigned int canonize, GT4SequenceSourceImplementation *impl, GT4SequenceSourceInstance *inst)
 {
+  arikkei_return_val_if_fail (impl != NULL, -1);
+  arikkei_return_val_if_fail (inst != NULL, -1);
   memset (reader, 0, sizeof (FastaReader));
   reader->wordlength = wordlength;
   reader->mask = create_mask (wordlength);
   reader->canonize = canonize;
-  reader->read = read;
-  reader->read_data = read_data;
   if (!c2n) {
     c2n = (unsigned int *) malloc (256 * sizeof (unsigned int));
     memset (c2n, 0xff, 256 * sizeof (unsigned int));
@@ -50,87 +52,15 @@ fasta_reader_init (FastaReader *reader, unsigned int wordlength, unsigned int ca
     c2n['G'] = c2n['g'] = 2;
     c2n['T'] = c2n['t'] = c2n['U'] = c2n['u'] = 3;
   }
+  reader->impl = impl;
+  reader->inst = inst;
   return 0;
 }
 
 int
 fasta_reader_release (FastaReader *reader)
 {
-  if (reader->free_io_data) {
-    reader->free_io_data (reader->read_data);
-  }
   return 0;
-}
-
-struct BufferData {
-	const unsigned char *cdata;
-	unsigned long long csize;
-	unsigned long long cpos;
-};
-
-static int
-buffer_read (void *data)
-{
-	struct BufferData *bdata = (struct BufferData *) data;
-	if (bdata->cpos >= bdata->csize) return 0;
-	return bdata->cdata[bdata->cpos++];
-}
-
-static void
-buffer_free (void *data)
-{
-	free (data);
-}
-
-int
-fasta_reader_init_from_data (FastaReader *reader, unsigned int wordlength, unsigned int canonize, const unsigned char *cdata, unsigned long long csize)
-{
-	struct BufferData *bdata = (struct BufferData *) malloc (sizeof (struct BufferData));
-	int result;
-	bdata->cdata = cdata;
-	bdata->csize = csize;
-	bdata->cpos = 0;
-	result = fasta_reader_init (reader, wordlength, canonize, buffer_read, bdata);
-	reader->free_io_data = buffer_free;
-	return result;
-}
-
-static int
-file_read (void *data)
-{
-	FILE *ifs = (FILE *) data;
-	int cval = fgetc (ifs);
-	if (cval == EOF) return 0;
-	return cval;
-}
-
-int
-fasta_reader_init_from_file (FastaReader *reader, unsigned int wordlength, unsigned int canonize, FILE *ifs)
-{
-	int result;
-	result = fasta_reader_init (reader, wordlength, canonize, file_read, ifs);
-	return result;
-}
-
-static int
-source_read (void *data)
-{
-  FastaReader *reader = (FastaReader *) data;
-  return gt4_sequence_source_read (reader->impl, reader->inst);
-}
-
-int
-fasta_reader_init_from_source (FastaReader *reader, unsigned int wordlength, unsigned int canonize, GT4SequenceSourceImplementation *impl, GT4SequenceSourceInstance *inst)
-{
-  unsigned int result;
-  arikkei_return_val_if_fail (impl != NULL, -1);
-  arikkei_return_val_if_fail (inst != NULL, -1);
-  result = fasta_reader_init (reader, wordlength, canonize, source_read, reader);
-  if (!result) {
-    reader->impl = impl;
-    reader->inst = inst;
-  }
-  return result;
 }
 
 int
@@ -145,7 +75,8 @@ fasta_reader_read_nwords (FastaReader *reader, unsigned long long maxwords,
   unsigned long long nwords = 0;
 
   while (!reader->in_eof && (nwords < maxwords)) {
-    int cval = reader->read (reader->read_data);
+    /* int cval = reader->read (reader->read_data); */
+    int cval = gt4_sequence_source_read (reader->impl, reader->inst);
     /* Read error */
     if (cval < 0) return cval;
     /* EOF */
@@ -224,10 +155,10 @@ fasta_reader_read_nwords (FastaReader *reader, unsigned long long maxwords,
 	  if (result) return result;
 	}
 	/* Next characters should be '+\n' */
-	cval = reader->read (reader->read_data);
+	cval = gt4_sequence_source_read (reader->impl, reader->inst);
 	if (cval != '+') return -1;
 	reader->cpos += 1;
-	cval = reader->read (reader->read_data);
+	cval = gt4_sequence_source_read (reader->impl, reader->inst);
 	if (cval != '\n') return -1;
 	reader->cpos += 1;
 	reader->state = FASTA_READER_STATE_QUALITY;
@@ -276,7 +207,7 @@ fasta_reader_read_nwords (FastaReader *reader, unsigned long long maxwords,
     case FASTA_READER_STATE_QUALITY:
       if (cval == '\n') {
       	/* End of quality, next should be EOF or '@' */
-      	cval = reader->read (reader->read_data);
+      	cval = gt4_sequence_source_read (reader->impl, reader->inst);;
       	if (cval == 0) return 0;
       	if (cval != '@') return -1;
       	reader->cpos += 1;

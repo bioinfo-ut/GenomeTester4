@@ -30,11 +30,13 @@
 #include <unistd.h>
 
 #include "common.h"
+#include "listmaker-queue.h"
 #include "utils.h"
 #include "fasta.h"
 #include "wordtable.h"
 #include "sequence.h"
-#include "queue.h"
+#include "sequence-stream.h"
+#include "sequence-source.h"
 #include "version.h"
 
 #define MAX_FILES 200
@@ -53,7 +55,7 @@
 #define TIME_FF 3
 
 /* Main thread loop */
-static void process (Queue *queue, unsigned int idx, void *arg);
+static void process (GT4Queue *queue, unsigned int idx, void *arg);
 
 /* Merge tables directly to disk */
 static unsigned int merge_write_multi (wordtable **t, unsigned int ntables, const char *filename, unsigned int cutoff);
@@ -221,7 +223,7 @@ main (int argc, const char *argv[])
 	
 	if (nthreads > 1) {
 		/* CASE: SEVERAL THREADS */
-		MakerQueue mq;
+		GT4ListMakerQueue mq;
 	        int rc;
 	        unsigned int finished = 0;
 
@@ -241,7 +243,7 @@ main (int argc, const char *argv[])
 			fprintf (stderr, "Table size is %lld\n", mq.tablesize);
 		}
 
-		rc = queue_create_threads (&mq.queue, process, &mq);
+		rc = gt4_queue_create_threads (&mq.queue, process, &mq);
                 if (rc) {
                    	fprintf (stderr, "ERROR; return code from pthread_create() is %d\n", rc);
                    	exit (-1);
@@ -250,10 +252,10 @@ main (int argc, const char *argv[])
                 process (&mq.queue, 0, &mq);
 
                 while (!finished) {
-                        queue_lock (&mq.queue);
-                        queue_broadcast (&mq.queue);
+                        gt4_queue_lock (&mq.queue);
+                        gt4_queue_broadcast (&mq.queue);
                         if (mq.queue.nthreads_running < 2) finished = 1;
-                        queue_unlock (&mq.queue);
+                        gt4_queue_unlock (&mq.queue);
                         /* process (&mq.queue, 0, &mq); */
                         sleep (1);
 
@@ -265,17 +267,15 @@ main (int argc, const char *argv[])
 		}
 
                 if (debug) {
-                	fprintf (stderr, "Read %.2f\n", mq.queue.tokens[TIME_READ].dval);
-                	fprintf (stderr, "Sort %.2f\n", mq.queue.tokens[TIME_SORT].dval);
-                	fprintf (stderr, "Collate %.2f\n", mq.queue.tokens[TIME_FF].dval);
-                	fprintf (stderr, "Merge %.2f\n", mq.queue.tokens[TIME_MERGE].dval);
+                	fprintf (stderr, "Read %.2f\n", mq.tokens[TIME_READ].dval);
+                	fprintf (stderr, "Sort %.2f\n", mq.tokens[TIME_SORT].dval);
+                	fprintf (stderr, "Collate %.2f\n", mq.tokens[TIME_FF].dval);
+                	fprintf (stderr, "Merge %.2f\n", mq.tokens[TIME_MERGE].dval);
                 }
 
                 maker_queue_release (&mq);
         } else {
 		/* CASE: ONE THREAD */
-		const unsigned char *cdata;
-		unsigned long long csize;
 		wordtable *table, *temptable;
 		int v;
 		
@@ -285,19 +285,20 @@ main (int argc, const char *argv[])
 		
 		for (argidx = firstfasta; argidx <= firstfasta + nfasta - 1; argidx++) {
 			FastaReader reader;
+			AZObject *obj;
 
 			temptable->wordlength = wordlength;
 
 			if (!strcmp (argv[argidx], "-")) {
 				/* stdin */
-				fasta_reader_init_from_file (&reader, wordlength, 1, stdin);
+				GT4SequenceStream *stream = gt4_sequence_stream_new_from_stream (stdin, 0);
+				fasta_reader_init (&reader, wordlength, 1, GT4_SEQUENCE_STREAM_SEQUENCE_SOURCE_IMPLEMENTATION(stream), &stream->source_instance);
+				obj = AZ_OBJECT (stream);
 			} else {
-				cdata = gt4_mmap (argv[argidx], &csize);
-				if (!cdata) {
-					fprintf (stderr, "Error: Cannot read file %s!\n", argv[argidx]);
-					return 1;
-				}
-				fasta_reader_init_from_data (&reader, wordlength, 1, cdata, csize);
+				GT4SequenceFile *seqf = gt4_sequence_file_new (argv[argidx], 0);
+				gt4_sequence_file_map_sequence (seqf);
+				fasta_reader_init (&reader, wordlength, 1, GT4_SEQUENCE_FILE_SEQUENCE_SOURCE_IMPLEMENTATION(seqf), &seqf->block.source_instance);
+				obj = AZ_OBJECT (seqf);
 			}
 
 			/* reading words from FastA/FastQ */
@@ -324,6 +325,7 @@ main (int argc, const char *argv[])
 			/* empty the temporary table */
 			wordtable_empty (temptable);
 
+			az_object_unref (obj);
 		}
 
 		/* write the final list into a file */
@@ -340,20 +342,20 @@ main (int argc, const char *argv[])
 }
 
 static void
-process (Queue *queue, unsigned int idx, void *arg)
+process (GT4Queue *queue, unsigned int idx, void *arg)
 {
-        MakerQueue *mq;
+        GT4ListMakerQueue *mq;
         unsigned int finished;
         double s_t, e_t, d_t;
 
-        mq = (MakerQueue *) arg;
+        mq = (GT4ListMakerQueue *) arg;
 
         finished = 0;
         
         if (debug > 1) {
-        	queue_lock (queue);
+        	gt4_queue_lock (queue);
         	fprintf (stderr, "Thread %d started (total %d)\n", idx, queue->nthreads_running);
-        	queue_unlock (queue);
+        	gt4_queue_unlock (queue);
 	}
         /* Do work */
         while (!finished) {
@@ -438,7 +440,7 @@ process (Queue *queue, unsigned int idx, void *arg)
                         wordtable_empty (other);
                         other->wordlength = mq->wordlen;
                         mq->available[mq->navailable++] = other;
-                        mq->queue.tokens[TIME_MERGE].dval += d_t;
+                        mq->tokens[TIME_MERGE].dval += d_t;
                         /* Release mutex */
                         mq->ntasks[TASK_MERGE] -= 1;
                         pthread_cond_broadcast (&mq->queue.cond);
@@ -452,7 +454,7 @@ process (Queue *queue, unsigned int idx, void *arg)
                         table = mq->unsorted[--mq->nunsorted];
                         /* Now we can release mutex */
                         mq->ntasks[TASK_SORT] += 1;
-                        pthread_mutex_unlock (&mq->queue.mutex);
+                        gt4_queue_unlock (&mq->queue);
                         if (debug > 0) fprintf (stderr, "Thread %d: Sorting table %s (%llu/%llu)\n", idx, table->id, table->nwords, table->nwordslots);
                         s_t = get_time ();
                         wordtable_sort (table, 0);
@@ -466,16 +468,16 @@ process (Queue *queue, unsigned int idx, void *arg)
                                 print_error_message (result);
                         }
                         /* Lock mutex */
-                        pthread_mutex_lock (&mq->queue.mutex);
+                        gt4_queue_lock (&mq->queue);
                         /* Add sorted table to sorted list */
                         mq->sorted[mq->nsorted++] = table;
-                        mq->queue.tokens[TIME_SORT].dval += d_t;
+                        mq->tokens[TIME_SORT].dval += d_t;
                         d_t = e_t - s_t;
-                        mq->queue.tokens[TIME_FF].dval += d_t;
+                        mq->tokens[TIME_FF].dval += d_t;
                         /* Release mutex */
                         mq->ntasks[TASK_SORT] -= 1;
-                        pthread_cond_broadcast (&mq->queue.cond);
-                        pthread_mutex_unlock (&mq->queue.mutex);
+                        gt4_queue_broadcast (&mq->queue);
+                        gt4_queue_unlock (&mq->queue);
                         if (debug > 0) fprintf (stderr, "Thread %d: Finished sorting %s (%llu/%llu)\n", idx, table->id, table->nwords, table->nwordslots);
                 } else if (mq->files && (mq->ntasks[TASK_READ] < MAX_FILES) && (mq->navailable || (mq->ntablescreated < ntables))) {
                         /* Task 3 - read input file */
@@ -526,7 +528,7 @@ process (Queue *queue, unsigned int idx, void *arg)
                                 mq->files = task;
                         }
                         mq->ntasks[TASK_READ] -= 1;
-                        mq->queue.tokens[TIME_READ].dval += d_t;
+                        mq->tokens[TIME_READ].dval += d_t;
                         /* Release mutex */
                         pthread_cond_broadcast (&mq->queue.cond);
                         pthread_mutex_unlock (&mq->queue.mutex);
@@ -550,9 +552,9 @@ process (Queue *queue, unsigned int idx, void *arg)
 
         /* Exit if everything is done */
         if (debug) {
-        	queue_lock (queue);
+        	gt4_queue_lock (queue);
         	if (debug > 1) fprintf (stderr, "Thread %u exiting (remaining %d)\n", idx, queue->nthreads_running);
-        	queue_unlock (queue);
+        	gt4_queue_unlock (queue);
 	}
 }
 

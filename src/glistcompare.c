@@ -31,7 +31,7 @@
 #include "common.h"
 #include "utils.h"
 #include "sequence.h"
-#include "queue.h"
+#include "listmaker-queue.h"
 #include "version.h"
 
 #define USE_SCOUTS use_scouts
