@@ -47,7 +47,7 @@ void search_one_query_string (GT4WordMap *map, const char *querystring, paramete
 int search_n_query_strings (GT4WordMap *map, const char *queryfile, parameters *p, unsigned int minfreq, unsigned int maxfreq, int printall);
 int search_fasta (GT4WordMap *map, const char *seqfilename, parameters *p, unsigned int minfreq, unsigned int maxfreq, int printall);
 int search_list (GT4WordMap *map, const char *querylistfilename, parameters *p, unsigned int minfreq, unsigned int maxfreq, int printall);
-int process_word (FastaReader *reader, unsigned long long word, void *data);
+int process_word (GT4FastaReader *reader, unsigned long long word, void *data);
 int print_full_map (GT4WordMap *map);
 void get_statistics (GT4WordMap *map);
 void print_median (GT4WordMap *map);
@@ -348,7 +348,7 @@ search_fasta (GT4WordMap *map, const char *seqfilename, parameters *p, unsigned 
         GT4SequenceStream *stream;
 	querystructure qs = {0};
 	int result;
-	FastaReader r;
+	GT4FastaReader r;
 
 	qs.map = map;
 	qs.p = p;
@@ -386,7 +386,7 @@ int search_list (GT4WordMap *map, const char *querylistfilename, parameters *p, 
 	return 0;
 }
 
-int process_word (FastaReader *reader, unsigned long long word, void *data)
+int process_word (GT4FastaReader *reader, unsigned long long word, void *data)
 {
 	unsigned int freq = 0;
 	querystructure *qs = (querystructure *) data;

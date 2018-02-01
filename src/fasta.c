@@ -35,12 +35,25 @@
 
 static unsigned int *c2n = NULL;
 
+static unsigned int fasta_reader_type = 0;
+
+unsigned int
+gt4_fasta_reader_get_type (void)
+{
+  if (!fasta_reader_type) {
+    az_register_type (&fasta_reader_type, AZ_TYPE_STRUCT, (const unsigned char *) "GT4FastaReader",
+    sizeof (GT4FastaReaderClass), sizeof (GT4FastaReader),
+    NULL, NULL, NULL);
+  }
+  return fasta_reader_type;
+}
+
 int
-fasta_reader_init (FastaReader *reader, unsigned int wordlength, unsigned int canonize, GT4SequenceSourceImplementation *impl, GT4SequenceSourceInstance *inst)
+fasta_reader_init (GT4FastaReader *reader, unsigned int wordlength, unsigned int canonize, GT4SequenceSourceImplementation *impl, GT4SequenceSourceInstance *inst)
 {
   arikkei_return_val_if_fail (impl != NULL, -1);
   arikkei_return_val_if_fail (inst != NULL, -1);
-  memset (reader, 0, sizeof (FastaReader));
+  az_instance_init (reader, GT4_TYPE_FASTA_READER);
   reader->wordlength = wordlength;
   reader->mask = create_mask (wordlength);
   reader->canonize = canonize;
@@ -58,18 +71,19 @@ fasta_reader_init (FastaReader *reader, unsigned int wordlength, unsigned int ca
 }
 
 int
-fasta_reader_release (FastaReader *reader)
+fasta_reader_release (GT4FastaReader *reader)
 {
+  az_instance_finalize (reader, GT4_TYPE_FASTA_READER);
   return 0;
 }
 
 int
-fasta_reader_read_nwords (FastaReader *reader, unsigned long long maxwords,
-  int (*start_sequence) (FastaReader *, void *),
-  int (*end_sequence) (FastaReader *, void *),
-  int (*read_character) (FastaReader *, unsigned int character, void *),
-  int (*read_nucleotide) (FastaReader *, unsigned int nucleotide, void *),
-  int (*read_word) (FastaReader *, unsigned long long word, void *),
+fasta_reader_read_nwords (GT4FastaReader *reader, unsigned long long maxwords,
+  int (*start_sequence) (GT4FastaReader *, void *),
+  int (*end_sequence) (GT4FastaReader *, void *),
+  int (*read_character) (GT4FastaReader *, unsigned int character, void *),
+  int (*read_nucleotide) (GT4FastaReader *, unsigned int nucleotide, void *),
+  int (*read_word) (GT4FastaReader *, unsigned long long word, void *),
   void *data)
 {
   unsigned long long nwords = 0;

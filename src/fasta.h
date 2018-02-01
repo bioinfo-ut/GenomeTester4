@@ -24,13 +24,17 @@
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
+typedef struct _GT4FastaReader GT4FastaReader;
+typedef struct _GT4FastaReaderClass GT4FastaReaderClass;
+
+#define GT4_TYPE_FASTA_READER gt4_fasta_reader_get_type()
+
 #include <stdlib.h>
 #include <stdio.h>
 
-#include "buffer.h"
 #include "sequence-source.h"
 
-#define MAX_NAME_SIZE 1000
+#define MAX_NAME_SIZE 1023
 
 #define GT4FR_FASTA 1
 #define GT4FR_FASTQ 2
@@ -39,51 +43,57 @@
 #define FASTA_READER_STATE_SEQUENCE 2
 #define FASTA_READER_STATE_QUALITY 3
 
-typedef struct _FastaReader {
-	/* Read settings */
-	unsigned int wordlength;
-	unsigned long long mask;
-	unsigned int canonize;
+struct _GT4FastaReader {
+  /* Read settings */
+  unsigned int wordlength;
+  unsigned long long mask;
+  unsigned int canonize;
 
-	/* I/O */
-	/* 0 - EOF, negative - error */
-	GT4SequenceSourceImplementation *impl;
-	GT4SequenceSourceInstance *inst;
-	unsigned int in_eof;
-	
-	/* FastQ or FastA */
-	unsigned int type;
-	/* Current reading state */
-	unsigned int state;
-	/* Current character, and word number */
-	unsigned long long cpos;
-	unsigned long long wpos;
-	/* Current nucleotide number relative to the start of subsequence */
-	unsigned long long seq_npos;
-	/* Current name */
-	unsigned long long name_pos;
-	unsigned int name_length;
-	unsigned int name_idx;
-	unsigned char name[MAX_NAME_SIZE + 1];
-	/* Words */
-	unsigned long long wordfw;
-	unsigned long long wordrv;
-	unsigned int currentlength;
-} FastaReader;
+  /* I/O */
+  /* 0 - EOF, negative - error */
+  GT4SequenceSourceImplementation *impl;
+  GT4SequenceSourceInstance *inst;
+  unsigned int in_eof;
+  
+  /* FastQ or FastA */
+  unsigned int type;
+  /* Current reading state */
+  unsigned int state;
+  /* Current character, and word number */
+  unsigned long long cpos;
+  unsigned long long wpos;
+  /* Current nucleotide number relative to the start of subsequence */
+  unsigned long long seq_npos;
+  /* Current name */
+  unsigned long long name_pos;
+  unsigned int name_length;
+  unsigned int name_idx;
+  unsigned char name[MAX_NAME_SIZE + 1];
+  /* Words */
+  unsigned long long wordfw;
+  unsigned long long wordrv;
+  unsigned int currentlength;
+};
+
+struct _GT4FastaReaderClass {
+  AZClass klass;
+};
+
+unsigned int gt4_fasta_reader_get_type (void);
 
 /* Set up FastA reader structure */
-int fasta_reader_init (FastaReader *reader, unsigned int wordlength, unsigned int canonize, GT4SequenceSourceImplementation *impl, GT4SequenceSourceInstance *inst);
-int fasta_reader_release (FastaReader *reader);
+int fasta_reader_init (GT4FastaReader *reader, unsigned int wordlength, unsigned int canonize, GT4SequenceSourceImplementation *impl, GT4SequenceSourceInstance *inst);
+int fasta_reader_release (GT4FastaReader *reader);
 
 /* Read maximum of nwords words from FastA or fastQ file starting from position cpos */
-int fasta_reader_read_nwords (FastaReader *reader, unsigned long long maxwords,
-	/* Called as soon as the full sequence name is known */
-	int (*start_sequence) (FastaReader *, void *),
-	/* Called when the full sequence has been parsed */
-	int (*end_sequence) (FastaReader *, void *),
-	int (*read_character) (FastaReader *, unsigned int character, void *),
-	int (*read_nucleotide) (FastaReader *, unsigned int nucleotide, void *),
-	int (*read_word) (FastaReader *, unsigned long long word, void *),
-	void *data);
-                
-#endif /* FASTA_H_ */
+int fasta_reader_read_nwords (GT4FastaReader *reader, unsigned long long maxwords,
+  /* Called as soon as the full sequence name is known */
+  int (*start_sequence) (GT4FastaReader *, void *),
+  /* Called when the full sequence has been parsed */
+  int (*end_sequence) (GT4FastaReader *, void *),
+  int (*read_character) (GT4FastaReader *, unsigned int character, void *),
+  int (*read_nucleotide) (GT4FastaReader *, unsigned int nucleotide, void *),
+  int (*read_word) (GT4FastaReader *, unsigned long long word, void *),
+  void *data);
+
+#endif

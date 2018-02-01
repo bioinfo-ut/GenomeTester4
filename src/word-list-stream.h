@@ -38,6 +38,8 @@ typedef struct _GT4WordListStreamClass GT4WordListStreamClass;
 #define GT4_WORD_LIST_STREAM_FROM_SARRAY_INSTANCE(i) (GT4WordListStream *) AZ_BASE_ADDRESS(GT4WordListStream,sarray_instance,i)
 #define GT4_WORD_LIST_STREAM_SARRAY_IMPLEMENTATION(o) &((GT4WordListStreamClass *) ((AZObject *) (o))->klass)->sarray_implementation
 
+#define GT4_WORD_LIST_STREAM_BUF_SIZE (12 * 256)
+
 #include <stdio.h>
 
 #include <az/object.h>
@@ -48,7 +50,9 @@ typedef struct _GT4WordListStreamClass GT4WordListStreamClass;
 struct _GT4WordListStream {
   AZObject object;
   char *filename;
-  FILE *ifs;
+  int ifile;
+  unsigned char b[GT4_WORD_LIST_STREAM_BUF_SIZE];
+  unsigned int bp, bsize;
   GT4ListHeader header;
   /* GT4WordSArray instance */
   GT4WordSArrayInstance sarray_instance;

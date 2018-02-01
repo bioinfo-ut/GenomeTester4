@@ -150,3 +150,19 @@ gt4_queue_broadcast (GT4Queue *queue)
   pthread_cond_broadcast (&queue->cond);
 }
 
+void
+gt4_queue_add_task (GT4Queue *queue, GT4Task *task, unsigned int lock)
+{
+  if (lock) gt4_queue_lock (queue);
+  if (!queue->tasks || (queue->tasks->priority >= task->priority)) {
+    task->next = queue->tasks;
+    queue->tasks = task;
+  } else {
+    GT4Task *prev = queue->tasks;
+    while (prev->next && (prev->next->priority < task->priority)) prev = prev->next;
+    task->next = prev->next;
+    prev->next = task;
+  }
+  if (lock) gt4_queue_unlock (queue);
+}
+

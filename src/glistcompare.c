@@ -21,10 +21,14 @@
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
+#include <fcntl.h>
 #include <string.h>
 #include <stdio.h>
 #include <stdlib.h>
-
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <unistd.h>
+               
 #include "wordtable.h"
 #include "word-list-stream.h"
 #include "word-map.h"
@@ -56,7 +60,9 @@ enum SubsetMethods {
 static int compare_word_map_headers (GT4ListHeader *h1, GT4ListHeader *h2);
 /* Wordmap correctness is not tested */
 static int compare_wordmaps (AZObject *list1, AZObject *list2, int find_union, int find_intrsec, int find_diff, int find_ddiff, int subtract, int countonly, const char *out, unsigned int cutoff, int rule);
-static unsigned int union_multi (GT4WordMap *m[], unsigned int nmaps, const char *filename, unsigned int cutoff, unsigned int countonly);
+/* No actual writing will be done if ofile is 0 */
+/* Upon completion list header is filled regardless of whether actual writing was performed */
+static unsigned int union_multi (AZObject *m[], unsigned int nmaps, unsigned int cutoff, int ofile, GT4ListHeader *header);
 static unsigned int subset (GT4WordMap *map, unsigned int subset_method, unsigned long long subset_size, const char *filename);
 static int compare_wordmaps_mm (GT4WordMap *map1, GT4WordMap *map2, int find_diff, int find_ddiff, int subtract, int countonly, const char *out, unsigned int cutoff, unsigned int nmm, int rule);
 static unsigned long long fetch_relevant_words (wordtable *table, GT4WordMap *map, GT4WordMap *querymap, unsigned int cutoff, unsigned int nmm, FILE *f, int subtract, int countonly, unsigned long long *totalfreq);
@@ -317,27 +323,33 @@ int main (int argc, const char *argv[])
     az_object_shutdown (AZ_OBJECT (list1));
     az_object_shutdown (AZ_OBJECT (list2));
   } else {
-    GT4WordMap *maps[MAX_FILES];
+    AZObject *maps[MAX_FILES];
+    GT4WordSArrayInstance *inst;
+    GT4ListHeader header;
     unsigned int i;
-    char c[2048];
+    char name[2048];
+    int ofile = 0;
     for (i = 0; i < nfiles; i++) {
-      if (debug > 1) fprintf (stderr, "Trying to mmap %s\n", fnames[i]);
-      maps[i] = gt4_word_map_new (fnames[i], VERSION_MAJOR, USE_SCOUTS);
-      if (debug > 1) fprintf (stderr, "Result %p\n", maps[i]);
-      if (!maps[i]) {
-        fprintf (stderr, "Error: Cannot mmap %s\n", fnames[i]);
-        exit (1);
+      if (stream) {
+        maps[i] = (AZObject *) gt4_word_list_stream_new (fnames[i], VERSION_MAJOR);
+        if (!maps[i]) exit (1);
+      } else {
+        maps[i] = (AZObject *) gt4_word_map_new (fnames[i], VERSION_MAJOR, use_scouts);
+        if (!maps[i]) exit (1);
       }
-      if (maps[i]->header->version_major > VERSION_MAJOR || maps[i]->header->version_minor > VERSION_MINOR) {
-        fprintf (stderr, "Error: List %s is created with newer glistmaker version\n", fnames[i]);
+    }
+    az_object_get_interface (maps[0], GT4_TYPE_WORD_SARRAY, (void **) &inst);
+    if (!countonly) {
+      sprintf (name, "%s_%d_union.list", outputname, inst->word_length);
+      ofile = creat (name, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
+      if (ofile < 0) {
+        fprintf (stderr, "Creating output file %s failed\n", name);
         exit (1);
       }
     }
-    sprintf (c, "%s_%d_union.list", outputname, maps[0]->header->wordlength);
-    if (debug > 1) {
-      fprintf (stderr, "Combining %d lists into %s\n", nfiles, c);
-    }
-    v = union_multi (maps, nfiles, c, cutoff, countonly);
+    v = union_multi (maps, nfiles, cutoff, ofile, &header);
+    if (ofile > 0) close (ofile);
+    fprintf (stdout, "NUnique\t%llu\nNTotal\t%llu\n", header.nwords, header.totalfreq);
   }
   if (v) return print_error_message (v);
 
@@ -573,115 +585,98 @@ compare_wordmaps (AZObject *list1, AZObject *list2, int find_union, int find_int
   return 0;
 }
 
-
-#define BSIZE 100000
+#define TMP_BUF_SIZE (256 * 12)
 
 static unsigned int
-union_multi (GT4WordMap *m[], unsigned int nmaps, const char *filename, unsigned int cutoff, unsigned int countonly)
+union_multi (AZObject *m[], unsigned int nmaps, unsigned int cutoff, int ofile, GT4ListHeader *header)
 {
   GT4WordSArrayImplementation *impls[MAX_FILES];
   GT4WordSArrayInstance *insts[MAX_FILES];
-  unsigned long long nwords[MAX_FILES];
-  unsigned long long i[MAX_FILES];
-  unsigned int nfinished;
-
-  GT4ListHeader h;
-
-  FILE *ofs;
-  char *b;
-  unsigned int bp, j;
-
+  unsigned int n_sources;
+  unsigned int j;
   unsigned long long word;
-  unsigned int freq;
+  unsigned char b[TMP_BUF_SIZE];
+  unsigned int bp = 0;
+  unsigned long long total = 0;
   double t_s, t_e;
-
+  
+  n_sources = 0;
   for (j = 0; j < nmaps; j++) {
-    impls[j] = (GT4WordSArrayImplementation *) az_object_get_interface (AZ_OBJECT(m[j]), GT4_TYPE_WORD_SARRAY, (void **) &insts[j]);
-    gt4_word_sarray_get_first_word (impls[j], insts[j]);
+    impls[n_sources] = (GT4WordSArrayImplementation *) az_object_get_interface (AZ_OBJECT(m[j]), GT4_TYPE_WORD_SARRAY, (void **) &insts[n_sources]);
+    if (insts[n_sources]->num_words) {
+      gt4_word_sarray_get_first_word (impls[n_sources], insts[n_sources]);
+      total += insts[n_sources]->num_words;
+      n_sources += 1;
+    }
   }
 
-  h.code = GT4_LIST_CODE;
-  h.version_major = VERSION_MAJOR;
-  h.version_minor = VERSION_MINOR;
-  h.wordlength = m[0]->header->wordlength;
-  h.nwords = 0;
-  h.totalfreq = 0;
-
-  b = (char *) malloc (BSIZE + 12);
-  
-  ofs = fopen (filename, "w");
+  header->code = GT4_LIST_CODE;
+  header->version_major = VERSION_MAJOR;
+  header->version_minor = VERSION_MINOR;
+  header->wordlength = insts[0]->word_length;
+  header->nwords = 0;
+  header->totalfreq = 0;
+  header->padding = sizeof (GT4ListHeader);
 
   t_s = get_time ();
-  fwrite (&h, sizeof (GT4ListHeader), 1, ofs);
 
-  bp = 0;
-  nfinished = 0;
-  for (j = 0; j < nmaps; j++) {
-    i[j] = 0;
-    nwords[j] = m[j]->header->nwords;
-    if (!nwords[j]) nfinished += 1;
+  if (ofile) write (ofile, header, sizeof (GT4ListHeader));
+
+  word = 0xffffffffffffffff;
+  for (j = 0; j < n_sources; j++) {
+    if (insts[j]->word < word) word = insts[j]->word;
   }
     
-  memset (i, 0, sizeof (i));
-  
-  while (nfinished < nmaps) {
-    word = 0xffffffffffffffff;
-    freq = 0;
-    /* Find smalles word and total freq */
-    for (j = 0; j < nmaps; j++) {
-      if (i[j] < nwords[j]) {
-        /* This table is not finished */
-        if (WORDMAP_WORD(m[j], i[j]) < word) {
-          /* This table has smaller word */
-          word = WORDMAP_WORD(m[j], i[j]);
-          freq = WORDMAP_FREQ(m[j], i[j]);
-        } else if (WORDMAP_WORD(m[j], i[j]) == word) {
-          /* This table has equal word */
-          freq += WORDMAP_FREQ(m[j], i[j]);
-        }
-        __builtin_prefetch (&WORDMAP_WORD(m[j], i[j]) + 16);
-        __builtin_prefetch (&WORDMAP_FREQ(m[j], i[j]) + 16);
-      }
-    }
-    /* Now we have word and freq */
-    if (freq >= cutoff) {
-      memcpy (b + bp, &word, 8);
-      bp += 8;
-      memcpy (b + bp, &freq, 4);
-      bp += 4;
-      if (bp >= BSIZE) {
-        fwrite (b, 1, bp, ofs);
-        bp = 0;
-      }
-      h.nwords += 1;
-      h.totalfreq += freq;
-      if (debug && !(h.nwords % 100000000)) {
-        fprintf (stderr, "Words written: %llu\n", h.nwords);
-      }
-    }
-    /* Update pointers */
-    for (j = 0; j < nmaps; j++) {
-      if (i[j] < nwords[j]) {
-        /* This table is not finished */
-        if (WORDMAP_WORD(m[j], i[j]) == word) {
-          i[j] += 1;
-          if (i[j] >= nwords[j]) {
-            nfinished += 1;
+  while (n_sources) {
+    unsigned long long next = 0xffffffffffffffff;
+    unsigned int freq = 0;
+    j = 0;
+    while (j < n_sources) {
+      if (insts[j]->word == word) {
+        freq += insts[j]->count;
+        if (!gt4_word_sarray_get_next_word (impls[j], insts[j])) {
+          n_sources -= 1;
+          if (n_sources > 0) {
+            impls[j] = impls[n_sources];
+            insts[j] = insts[n_sources];
+            continue;
+          } else {
+            break;
           }
         }
       }
+      if (insts[j]->word < next) next = insts[j]->word;
+      j += 1;
     }
+    
+    /* Now we have word and freq */
+    if (freq >= cutoff) {
+      if (ofile) {
+        memcpy (&b[bp], &word, 8);
+        memcpy (&b[bp + 8], &freq, 4);
+        bp += 12;
+        if (bp >= TMP_BUF_SIZE) {
+          write (ofile, b, bp);
+          bp = 0;
+        }
+      }
+      header->nwords += 1;
+      header->totalfreq += freq;
+      if (debug && !(header->nwords % 100000000)) {
+        fprintf (stderr, "Words written: %uM\n", (unsigned int) (header->nwords / 1000000));
+      }
+    }
+    word = next;
   }
-  if (bp) {
-    fwrite (b, 1, bp, ofs);
+  if (ofile) {
+    if (bp) write (ofile, b, bp);
+    pwrite (ofile, header, sizeof (GT4ListHeader), 0);
   }
-  fseek (ofs, 0, SEEK_SET);
-  fwrite (&h, sizeof (GT4ListHeader), 1, ofs);
-  fclose (ofs);
   t_e = get_time ();
-  if (debug > 0) fprintf (stderr, "Combining %d maps: %.2f\n", nmaps, t_e - t_s);
-  
-  free (b);
+
+  if (debug > 0) {
+    fprintf (stderr, "Combined %u maps: input %llu (%.3f Mwords/s) output %llu (%.3f Mwords/s)\n", nmaps, total, total / (1000000 * (t_e - t_s)), header->nwords, header->nwords / (1000000 * (t_e - t_s)));
+  }
   
   return 0;
 }

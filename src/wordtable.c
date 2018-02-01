@@ -32,7 +32,7 @@
 #include "utils.h"
 #include "version.h"
 
-unsigned int debug_tables;
+unsigned int debug_tables = 0;
 unsigned long long total_memory = 0;
 
 wordtable *

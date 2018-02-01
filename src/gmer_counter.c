@@ -71,10 +71,10 @@ struct _SNPQueue {
 
 /* Main thread loop */
 static void process (GT4Queue *queue, unsigned int idx, void *arg);
-static int start_sequence (FastaReader *reader, void *data);
-static int end_sequence (FastaReader *reader, void *data);
-static int read_nucleotide (FastaReader *reader, unsigned int nucleotide, void *data);
-static int read_word (FastaReader *reader, unsigned long long word, void *data);
+static int start_sequence (GT4FastaReader *reader, void *data);
+static int end_sequence (GT4FastaReader *reader, void *data);
+static int read_nucleotide (GT4FastaReader *reader, unsigned int nucleotide, void *data);
+static int read_word (GT4FastaReader *reader, unsigned long long word, void *data);
 static int compare_counts (const void *lhs, const void *rhs);
 static unsigned int get_pair_median (KMerDB *db);
 
@@ -111,7 +111,6 @@ static unsigned int stats = 0;
 static void
 add_task (SNPQueue *snpq, const char *filename)
 {
-  TaskFile *tf;
   unsigned int len = strlen (filename);
   if ((len > 3) && !strcmp (filename + len - 3, ".gz")) {
     fprintf (stderr, "Opening compressed stream %s\n", filename);
@@ -121,7 +120,9 @@ add_task (SNPQueue *snpq, const char *filename)
     tf->idx = snpq->nfiles++;
     snpq->files = tf;
   } else if (!strcmp (filename, "-")) {
-    tf = task_file_new_from_stream (stdin, filename, 0);
+    GT4SequenceStream *stream;
+    stream = gt4_sequence_stream_new_from_stream (stdin, 0);
+    TaskFile *tf = task_file_new_from_source (AZ_OBJECT (stream), "stdin", 0);
     tf->next = snpq->files;
     tf->idx = snpq->nfiles++;
     snpq->files = tf;
@@ -350,7 +351,10 @@ main (int argc, const char *argv[])
       TaskFile *tf;
       if (index) {
         if (!strcmp (seqnames[i], "-")) {
-          tf = task_file_new_from_stream (stdin, seqnames[i], 0);
+          GT4SequenceStream *stream;
+          stream = gt4_sequence_stream_new_from_stream (stdin, 0);
+          tf = task_file_new_from_source (AZ_OBJECT (stream), seqnames[i], 0);
+          az_object_unref (AZ_OBJECT (stream));
         } else {
           tf = task_file_new (seqnames[i], !lowmem);
         }
@@ -734,7 +738,7 @@ process (GT4Queue *queue, unsigned int idx, void *arg)
 
 
 static int
-start_sequence (FastaReader *reader, void *data)
+start_sequence (GT4FastaReader *reader, void *data)
 {
   TaskTable *tt = (TaskTable *) data;
   if (debug > 2) fprintf (stderr, "%s\n", reader->name);
@@ -746,7 +750,7 @@ start_sequence (FastaReader *reader, void *data)
 }
 
 static int
-end_sequence (FastaReader *reader, void *data)
+end_sequence (GT4FastaReader *reader, void *data)
 {
   TaskTable *tt = (TaskTable *) data;
   if (debug > 2) fprintf (stderr, "%s\n", reader->name);
@@ -757,7 +761,7 @@ end_sequence (FastaReader *reader, void *data)
 }
 
 static int
-read_word (FastaReader *reader, unsigned long long word, void *data)
+read_word (GT4FastaReader *reader, unsigned long long word, void *data)
 {
   TaskTable *tt = (TaskTable *) data;
   tt->words[tt->nwords] = word;
@@ -772,7 +776,7 @@ read_word (FastaReader *reader, unsigned long long word, void *data)
 }
 
 static int
-read_nucleotide (FastaReader *reader, unsigned int nucl, void *data)
+read_nucleotide (GT4FastaReader *reader, unsigned int nucl, void *data)
 {
   TaskTable *tt = (TaskTable *) data;
   tt->n_nucl += 1;

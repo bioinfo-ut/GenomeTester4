@@ -40,8 +40,9 @@ typedef struct _GT4ListMakerQueueClass GT4ListMakerQueueClass;
 
 #define TASK_READ 0
 #define TASK_SORT 1
-#define TASK_MERGE 2
-#define NUM_TASK_TYPES 3
+#define TASK_COLLATE 2
+#define TASK_MERGE 3
+#define NUM_TASK_TYPES 4
 
 /*
  * Queue stub
@@ -68,6 +69,8 @@ union _QValue {
 /* These form linked list */
 
 typedef struct _TaskFile TaskFile;
+typedef struct _TaskRead TaskRead;
+typedef struct _TaskCollate TaskCollate;
 
 struct _GT4ListMakerQueue {
         GT4Queue queue;
@@ -92,6 +95,15 @@ struct _GT4ListMakerQueue {
         unsigned int navailable;
         wordtable *available[MAX_TABLES];
 
+        unsigned int n_files_waiting;
+        unsigned int n_files_reading;
+
+        unsigned int n_running;
+        unsigned int n_free_s_tables;
+        wordtable **free_s_tables;
+        unsigned int n_used_s_tables;
+        wordtable **used_s_tables;
+
         /* Debug */
         QValue tokens[NUM_ID_TOKENS];
 };
@@ -102,8 +114,28 @@ struct _GT4ListMakerQueueClass {
 
 unsigned int gt4_listmaker_queue_get_type (void);
 
-void maker_queue_setup (GT4ListMakerQueue *mq, unsigned int nthreads);
+void maker_queue_setup (GT4ListMakerQueue *mq, unsigned int n_threads, unsigned int w_len, unsigned int n_tmp_tables, unsigned int tmp_table_size);
 void maker_queue_release (GT4ListMakerQueue *mq);
+
+/* Tasks */
+
+struct _TaskRead {
+  GT4Task task;
+  AZObject *source;
+  GT4FastaReader reader;
+};
+
+TaskRead *task_read_new (GT4ListMakerQueue *mq, AZObject *source);
+void task_read_delete (TaskRead *tr);
+
+struct _TaskCollate {
+  GT4Task task;
+  unsigned int n_tables;
+  wordtable *tables[1];
+};
+
+TaskCollate *task_collate_new (GT4ListMakerQueue *mq, unsigned int max_tables);
+void task_collate_delete (TaskCollate *tc);
 
 /* File parsing tasks */
 
@@ -113,31 +145,30 @@ struct _TaskFile {
         GT4SequenceStream *stream;
         /* Sequence source */
         AZObject *source;
+        unsigned int close_source : 1;
         /* File index */
         unsigned int idx;
-        unsigned int close_on_delete;
         unsigned int scout;
         unsigned int has_reader;
-        FastaReader reader;
+        GT4FastaReader reader;
 };
 
 TaskFile *task_file_new (const char *filename, unsigned int scout);
-TaskFile *task_file_new_from_stream (FILE *ifs, const char *filename, unsigned int close_on_delete);
-TaskFile *task_file_new_from_source (AZObject *source, const char *filename, unsigned int close_on_delete);
+TaskFile *task_file_new_from_source (AZObject *source, const char *filename, unsigned int close);
 void task_file_delete (TaskFile *tf);
-/* Frontend to mmap and FastaReader */
+/* Frontend to mmap and GT4FastaReader */
 unsigned int task_file_read_nwords (TaskFile *tf, unsigned long long maxwords, unsigned int wordsize,
 	/* Called as soon as the full sequence name is known */
-	int (*start_sequence) (FastaReader *, void *),
+	int (*start_sequence) (GT4FastaReader *, void *),
 	/* Called when the full sequence has been parsed */
-	int (*end_sequence) (FastaReader *, void *),
-	int (*read_character) (FastaReader *, unsigned int character, void *),
-	int (*read_nucleotide) (FastaReader *, unsigned int nucleotide, void *),
-	int (*read_word) (FastaReader *, unsigned long long word, void *),
+	int (*end_sequence) (GT4FastaReader *, void *),
+	int (*read_character) (GT4FastaReader *, unsigned int character, void *),
+	int (*read_nucleotide) (GT4FastaReader *, unsigned int nucleotide, void *),
+	int (*read_word) (GT4FastaReader *, unsigned long long word, void *),
 	void *data);
 
 /* Add new file task to queue (not thread-safe) */
-void maker_queue_add_file (GT4ListMakerQueue *mq, const char *filename);
+void maker_queue_add_file (GT4ListMakerQueue *mq, const char *filename, unsigned int stream);
 /* Get smallest table */
 wordtable *queue_get_smallest_table (GT4ListMakerQueue *queue);
 /* Get largest table */

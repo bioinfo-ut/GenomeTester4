@@ -107,6 +107,7 @@ word_map_get_next_word (GT4WordSArrayImplementation *impl, GT4WordSArrayInstance
   GT4WordMap *wmap = GT4_WORD_MAP_FROM_SARRAY_INSTANCE(inst);
   inst->word = WORDMAP_WORD(wmap,inst->idx);
   inst->count = WORDMAP_FREQ(wmap,inst->idx);
+  __builtin_prefetch (&WORDMAP_WORD(wmap,inst->idx + 4), 0, 0);
   return 1;
 }
 

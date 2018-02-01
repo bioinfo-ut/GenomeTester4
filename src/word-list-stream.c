@@ -23,6 +23,7 @@
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
+#include <fcntl.h>
 #include <malloc.h>
 #include <string.h>
 #include <sys/types.h>
@@ -72,19 +73,40 @@ word_list_stream_shutdown (AZObject *object)
     free (stream->filename);
     stream->filename = NULL;
   }
-  if (stream->ifs) {
-    fclose (stream->ifs);
-    stream->ifs = NULL;
+  if (stream->ifile > 0) {
+    close (stream->ifile);
+    stream->ifile = 0;
   }
+}
+
+/* Reads at least 12 bytes to buffer */
+
+static unsigned int
+stream_read (GT4WordListStream *stream)
+{
+  if (stream->bp >= GT4_WORD_LIST_STREAM_BUF_SIZE) {
+    stream->bp = 0;
+    stream->bsize = 0;
+  }
+  while ((stream->bp + 12) > stream->bsize) {
+    int nread = read (stream->ifile, &stream->b[stream->bp], GT4_WORD_LIST_STREAM_BUF_SIZE - stream->bsize);
+    if (nread <= 0) return 0;
+    stream->bsize += nread;
+  }
+  return 1;
 }
 
 unsigned int
 word_list_stream_get_first_word (GT4WordSArrayImplementation *impl, GT4WordSArrayInstance *inst)
 {
   GT4WordListStream *stream = GT4_WORD_LIST_STREAM_FROM_SARRAY_INSTANCE(inst);
-  fseeko (stream->ifs, sizeof (GT4ListHeader), SEEK_SET);
-  fread (&stream->sarray_instance.word, 8, 1, stream->ifs);
-  fread (&stream->sarray_instance.count, 4, 1, stream->ifs);
+  lseek (stream->ifile, sizeof (GT4ListHeader), SEEK_SET);
+  stream->bp = 0;
+  stream->bsize = 0;
+  if (!stream_read (stream)) return 0;
+  memcpy (&stream->sarray_instance.word, &stream->b[stream->bp], 8);
+  memcpy (&stream->sarray_instance.count, &stream->b[stream->bp + 8], 4);
+  stream->bp += 12;
   return 1;
 }
 
@@ -92,8 +114,12 @@ unsigned int
 word_list_stream_get_next_word (GT4WordSArrayImplementation *impl, GT4WordSArrayInstance *inst)
 {
   GT4WordListStream *stream = GT4_WORD_LIST_STREAM_FROM_SARRAY_INSTANCE(inst);
-  fread (&stream->sarray_instance.word, 8, 1, stream->ifs);
-  fread (&stream->sarray_instance.count, 4, 1, stream->ifs);
+  if ((stream->bp + 12) > stream->bsize) {
+    if (!stream_read (stream)) return 0;
+  }
+  memcpy (&stream->sarray_instance.word, &stream->b[stream->bp], 8);
+  memcpy (&stream->sarray_instance.count, &stream->b[stream->bp + 8], 4);
+  stream->bp += 12;
   return 1;
 }
 
@@ -101,12 +127,12 @@ GT4WordListStream *
 gt4_word_list_stream_new (const char *filename, unsigned int major_version)
 {
   GT4WordListStream *stream;
-  FILE *ifs;
-  
+  int ifile;
+
   arikkei_return_val_if_fail (filename != NULL, NULL);
 
-  ifs = fopen (filename, "r");
-  if (!ifs) {
+  ifile = open (filename, O_RDONLY);
+  if (!ifile < 0) {
     fprintf (stderr, "gt4_word_list_stream_new: could not open file %s\n", filename);
     return NULL;
   }
@@ -118,9 +144,9 @@ gt4_word_list_stream_new (const char *filename, unsigned int major_version)
   }
 
   stream->filename = strdup (filename);
-  stream->ifs = ifs;
+  stream->ifile = ifile;
 
-  if (fread (&stream->header, 1, sizeof (GT4ListHeader), ifs) != sizeof (GT4ListHeader)) {
+  if (read (ifile, &stream->header, sizeof (GT4ListHeader)) != sizeof (GT4ListHeader)) {
     fprintf (stderr, "gt4_word_list_stream_new: could not read list header\n");
     gt4_word_list_stream_delete (stream);
     return NULL;
@@ -138,11 +164,16 @@ gt4_word_list_stream_new (const char *filename, unsigned int major_version)
 
   /* Set up sorted array interface */
   stream->sarray_instance.num_words = stream->header.nwords;
-  if (stream->sarray_instance.num_words > 0) {
-    fread (&stream->sarray_instance.word, 8, 1, stream->ifs);
-    fread (&stream->sarray_instance.count, 4, 1, stream->ifs);
-  }
   stream->sarray_instance.word_length = stream->header.wordlength;
+  if (stream->sarray_instance.num_words > 0) {
+    if (!stream_read (stream)) {
+      gt4_word_list_stream_delete (stream);
+      return NULL;
+    }
+    memcpy (&stream->sarray_instance.word, &stream->b[stream->bp], 8);
+    memcpy (&stream->sarray_instance.count, &stream->b[stream->bp + 8], 4);
+    stream->bp += 12;
+  }
 
   return stream;
 }
