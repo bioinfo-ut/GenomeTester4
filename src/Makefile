@@ -61,7 +61,6 @@ GMER_COUNTER_SOURCES = \
 	wordmap.c wordmap.h \
 	sequence.c sequence.h \
 	sequence-file.c sequence-file.h \
-	sequence-stream.c sequence-stream.h \
 	wordtable.c wordtable.h \
 	fasta.c fasta.h \
 	thread-pool.c thread-pool.h \
