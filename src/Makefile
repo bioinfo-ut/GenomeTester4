@@ -8,9 +8,9 @@ CXX  = gcc
 LISTMAKER_SOURCES = \
 	glistmaker.c \
 	common.c common.h \
+	fasta.c fasta.h \
 	wordtable.c wordtable.h \
 	wordmap.c wordmap.h \
-	fasta.c fasta.h \
 	buffer.c buffer.h \
 	sequence.c sequence.h \
 	sequence-file.c sequence-file.h \
