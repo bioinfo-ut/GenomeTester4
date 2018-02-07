@@ -100,7 +100,7 @@ unsigned int
 word_list_stream_get_first_word (GT4WordSArrayImplementation *impl, GT4WordSArrayInstance *inst)
 {
   GT4WordListStream *stream = GT4_WORD_LIST_STREAM_FROM_SARRAY_INSTANCE(inst);
-  lseek (stream->ifile, sizeof (GT4ListHeader), SEEK_SET);
+  lseek (stream->ifile, stream->header.list_start, SEEK_SET);
   stream->bp = 0;
   stream->bsize = 0;
   if (!stream_read (stream)) return 0;
@@ -166,6 +166,7 @@ gt4_word_list_stream_new (const char *filename, unsigned int major_version)
   stream->sarray_instance.num_words = stream->header.nwords;
   stream->sarray_instance.word_length = stream->header.wordlength;
   if (stream->sarray_instance.num_words > 0) {
+    lseek (stream->ifile, stream->header.list_start, SEEK_SET);
     if (!stream_read (stream)) {
       gt4_word_list_stream_delete (stream);
       return NULL;

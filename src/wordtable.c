@@ -378,7 +378,7 @@ wordtable_write_to_file (wordtable *table, const char *outputname, unsigned int 
 	h.wordlength = table->wordlength;
 	h.nwords = count;
 	h.totalfreq = totalfreq;
-	h.padding = sizeof (GT4ListHeader);
+	h.list_start = sizeof (GT4ListHeader);
 	fseek (f, 0, SEEK_SET);
 	fwrite (&h, sizeof (GT4ListHeader), 1, f);
 	fclose (f);

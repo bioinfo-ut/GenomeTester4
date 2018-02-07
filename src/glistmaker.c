@@ -21,11 +21,13 @@
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
+#include <fcntl.h>
 #include <string.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
+#include <sys/types.h>
 #include <pthread.h>
 #include <unistd.h>
 
@@ -37,7 +39,9 @@
 #include "sequence.h"
 #include "sequence-stream.h"
 #include "sequence-source.h"
+#include "set-operations.h"
 #include "version.h"
+#include "word-list-stream.h"
 
 #define MAX_FILES 200
 
@@ -59,16 +63,15 @@
 #define TIME_FF 7
 
 #define TMP_TABLE_SIZE (1024 * 1024)
-#define NUM_TMP_TABLES (24 * 256)
-#define TMP_MERGE_SIZE 128
+#define NUM_TMP_TABLES (32 * 128)
+#define TMP_MERGE_SIZE 64
+#define FILE_MERGE_SIZE 32
 
 /* Main thread loop */
 static void process (GT4Queue *queue, unsigned int idx, void *arg);
-static void process2 (GT4Queue *queue, unsigned int idx, void *arg);
 
 /* Merge tables directly to disk */
 static unsigned long long merge_write_multi_nofreq (wordtable *t[], unsigned int ntables, int ofile);
-static unsigned int merge_write_multi (wordtable **t, unsigned int ntables, const char *filename, unsigned int cutoff);
 
 /* */
 int process_word (GT4FastaReader *reader, unsigned long long word, void *data);
@@ -183,6 +186,9 @@ main (int argc, const char *argv[])
       debug += 1;
     } else {
       /* Input file */
+      if ((argv[argidx][0] == '-') && argv[argidx][1]) {
+        print_help (1);
+      }
       if (n_files >= 1024) continue;
       files[n_files++] = argv[argidx];
     }
@@ -192,14 +198,12 @@ main (int argc, const char *argv[])
   
   if (!nthreads) {
     nthreads = DEFAULT_NUM_THREADS;
-    if (nthreads > ((3 * n_files + 1) >> 1)) nthreads = (3 * n_files + 1) >> 1;
   }
   if (!tablesize) {
     tablesize = DEFAULT_TABLE_SIZE;
   }
   if (!ntables) {
     ntables = DEFAULT_MAX_TABLES;
-    if (ntables > ((3 * n_files + 1) >> 1) + 1) ntables = ((3 * n_files + 1) >> 1) + 1;
   }
   if (ntables > MAX_TABLES) ntables = MAX_TABLES;
 
@@ -231,7 +235,7 @@ main (int argc, const char *argv[])
     }
   }
   
-  if (nthreads > 1) {
+  if (nthreads > 0) {
     /* CASE: SEVERAL THREADS */
     GT4ListMakerQueue mq;
     int rc;
@@ -252,13 +256,13 @@ main (int argc, const char *argv[])
       fprintf (stderr, "Table size is %lld\n", mq.tablesize);
     }
 
-    rc = gt4_queue_create_threads (&mq.queue, process2, &mq);
+    rc = gt4_queue_create_threads (&mq.queue, process, &mq);
     if (rc) {
          fprintf (stderr, "ERROR; return code from pthread_create() is %d\n", rc);
          exit (-1);
     }
 
-    process2 (&mq.queue, 0, &mq);
+    process (&mq.queue, 0, &mq);
 
     while (!finished) {
       gt4_queue_lock (&mq.queue);
@@ -267,14 +271,26 @@ main (int argc, const char *argv[])
       gt4_queue_unlock (&mq.queue);
       /* process (&mq.queue, 0, &mq); */
       sleep (1);
-
-    }
-    if (mq.nsorted > 0) {
-      /* write the final list into a file */
-      if (debug > 0) fprintf (stderr, "Writing list %s\n", outputname);
-      wordtable_write_to_file (mq.sorted[0], outputname, cutoff);
     }
 
+    if (mq.n_final_files > 0) {
+      AZObject *objs[4096];
+      char c[1024];
+      unsigned int i;
+      GT4ListHeader header;
+      int ofile;
+      for (i = 0; i < mq.n_final_files; i++) {
+        objs[i] = (AZObject *) gt4_word_list_stream_new (mq.final_files[i], VERSION_MAJOR);
+      }
+      snprintf (c, 1024, "%s_%u.list", outputname, wordlength);
+      ofile = creat (c, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
+      gt4_write_union (objs, mq.n_final_files, 1, ofile, &header);
+      close (ofile);
+      for (i = 0; i < mq.n_final_files; i++) {
+        gt4_word_list_stream_delete (GT4_WORD_LIST_STREAM (objs[i]));
+        unlink (mq.final_files[i]);
+      }
+    }
     if (debug) {
       fprintf (stderr, "Read %llu words at %.2f (%u words/s)\n", (unsigned long long) mq.tokens[NUM_READ].dval, mq.tokens[TIME_READ].dval, (unsigned int) (mq.tokens[NUM_READ].dval /  mq.tokens[TIME_READ].dval));
       fprintf (stderr, "Sort %llu words at %.2f (%u words/s)\n", (unsigned long long) mq.tokens[NUM_SORT].dval, mq.tokens[TIME_SORT].dval, (unsigned int) (mq.tokens[NUM_SORT].dval /  mq.tokens[TIME_SORT].dval));
@@ -285,6 +301,7 @@ main (int argc, const char *argv[])
 
     maker_queue_release (&mq);
   } else {
+#if 0
     /* CASE: ONE THREAD */
     wordtable *table, *temptable;
     int v;
@@ -343,6 +360,7 @@ main (int argc, const char *argv[])
     if (wordtable_write_to_file (table, outputname, cutoff)) {
       fprintf (stderr, "Cannot write list to file\n");
     }
+#endif
   }
 
   /*wordtable_delete (temptable);
@@ -354,30 +372,87 @@ main (int argc, const char *argv[])
 /* Starts and ends with queue locked */
 
 static void
-collate_tables (GT4ListMakerQueue *mq, TaskCollate *tc)
+collate_files (GT4ListMakerQueue *mq, TaskCollateFiles *tc)
+{
+  AZObject *objs[256];
+  unsigned int i;
+  char *tmpname;
+  int ofile;
+  GT4ListHeader header;
+
+  gt4_queue_unlock (&mq->queue);
+  tmpname = (char *) malloc (strlen (tmpdir) + 256);
+  sprintf (tmpname, "%s/GLM4_F_XXXXXX.list", tmpdir);
+  for (i = 0; i < tc->n_files; i++) {
+    objs[i] = (AZObject *) gt4_word_list_stream_new (tc->files[i], VERSION_MAJOR);
+  }
+  ofile = mkstemps (tmpname, 5);
+  if (debug) fprintf (stderr, "Collating %u files to %s\n", tc->n_files, tmpname);
+  gt4_write_union (objs, tc->n_files, 1, ofile, &header);
+  close (ofile);
+  for (i = 0; i < tc->n_files; i++) {
+    gt4_word_list_stream_delete (GT4_WORD_LIST_STREAM (objs[i]));
+    unlink (tc->files[i]);
+  }
+  gt4_queue_lock (&mq->queue);
+
+  mq->final_files[mq->n_final_files++] = tmpname;
+
+  if (mq->n_final_files >= 16) {
+    /* Create new collation task */
+    TaskCollateFiles *tc = task_collate_files_new (mq, 16);
+    for (i = 0; i < 16; i++) {
+      tc->files[tc->n_files++] = mq->final_files[--mq->n_final_files];
+    }
+    gt4_queue_add_task (&mq->queue, &tc->task, 0);
+  }
+
+  task_collate_files_delete (tc);
+}
+
+static void
+collate_tables (GT4ListMakerQueue *mq, TaskCollateTables *tc)
 {
   double t0, t1;
   unsigned int i;
   unsigned long long nwritten;
   char *tmpname;
   int ofile;
+
+  mq->n_tables_collating += 1;
+
   gt4_queue_unlock (&mq->queue);
   tmpname = (char *) malloc (strlen (tmpdir) + 256);
-  sprintf (tmpname, "%s/GLM4_XXXXXX.list", tmpdir);
+  sprintf (tmpname, "%s/GLM4_T_XXXXXX.list", tmpdir);
+  t0 = get_time ();
   ofile = mkstemps (tmpname, 5);
   if (debug) fprintf (stderr, "Collating %u tables to %s\n", tc->n_tables, tmpname);
-  t0 = get_time ();
   nwritten = merge_write_multi_nofreq (tc->tables, tc->n_tables, ofile);
+  close (ofile);
+  t1 = get_time ();
   gt4_queue_lock (&mq->queue);
+
+  mq->n_tables_collating -= 1;
+
   for (i = 0; i < tc->n_tables; i++) {
     wordtable_empty (tc->tables[i]);
     mq->free_s_tables[mq->n_free_s_tables++] = tc->tables[i];
   }
-  close (ofile);
-  t1 = get_time ();
-  task_collate_delete (tc);
+  mq->tmp_files[mq->n_tmp_files++] = tmpname;
+  if ((mq->n_tmp_files >= FILE_MERGE_SIZE) || (!mq->n_files_reading && !mq->n_files_waiting && !mq->n_tables_collating)) {
+    unsigned int n_files, i;
+    /* Create collation task */
+    n_files = mq->n_tmp_files;
+    if (n_files > FILE_MERGE_SIZE) n_files = FILE_MERGE_SIZE;
+    TaskCollateFiles *tc = task_collate_files_new (mq, n_files);
+    for (i = 0; i < n_files; i++) {
+      tc->files[tc->n_files++] = mq->tmp_files[--mq->n_tmp_files];
+    }
+    gt4_queue_add_task (&mq->queue, &tc->task, 0);
+  }
   mq->tokens[NUM_WRITE_TMP].dval += nwritten;
   mq->tokens[TIME_WRITE_TMP].dval += (t1 - t0);
+  task_collate_tables_delete (tc);
 }
 
 /* Returning 1 means that we have to wait for other threads */
@@ -394,6 +469,7 @@ read_table (GT4ListMakerQueue *mq, TaskRead *tr)
   tbl = mq->free_s_tables[--mq->n_free_s_tables];
   mq->n_files_waiting -= 1;
   mq->n_files_reading += 1;
+
   gt4_queue_unlock (&mq->queue);
   tbl->wordlength = mq->wordlen;
   t0 = get_time ();
@@ -402,11 +478,8 @@ read_table (GT4ListMakerQueue *mq, TaskRead *tr)
   if (tbl->nwords) wordtable_sort (tbl, 0);
   t2 = get_time ();
   gt4_queue_lock (&mq->queue);
+
   mq->n_files_reading -= 1;
-  mq->tokens[NUM_READ].dval += tbl->nwords;
-  mq->tokens[TIME_READ].dval += (t1 - t0);
-  mq->tokens[NUM_SORT].dval += tbl->nwords;
-  mq->tokens[TIME_SORT].dval += (t2 - t1);
   if (tr->reader.in_eof) {
     task_read_delete (tr);
   } else {
@@ -423,17 +496,21 @@ read_table (GT4ListMakerQueue *mq, TaskRead *tr)
     /* Create collation task */
     n_tables = mq->n_used_s_tables;
     if (n_tables > TMP_MERGE_SIZE) n_tables = TMP_MERGE_SIZE;
-    TaskCollate *tc = task_collate_new (mq, n_tables);
+    TaskCollateTables *tc = task_collate_tables_new (mq, n_tables);
     for (i = 0; i < n_tables; i++) {
       tc->tables[tc->n_tables++] = mq->used_s_tables[--mq->n_used_s_tables];
     }
     gt4_queue_add_task (&mq->queue, &tc->task, 0);
   }
+  mq->tokens[NUM_READ].dval += tbl->nwords;
+  mq->tokens[TIME_READ].dval += (t1 - t0);
+  mq->tokens[NUM_SORT].dval += tbl->nwords;
+  mq->tokens[TIME_SORT].dval += (t2 - t1);
   return 0;
 }
 
 static void
-process2 (GT4Queue *queue, unsigned int idx, void *arg)
+process (GT4Queue *queue, unsigned int idx, void *arg)
 {
   GT4ListMakerQueue *mq = (GT4ListMakerQueue *) arg;
   unsigned int finished = 0;
@@ -464,10 +541,15 @@ process2 (GT4Queue *queue, unsigned int idx, void *arg)
         mq->n_running += 1;
         wait = read_table (mq, tr);
         mq->n_running -= 1;
-      } else if (task->type == TASK_COLLATE) {
-        TaskCollate *tc = (TaskCollate *) task;
+      } else if (task->type == TASK_COLLATE_TABLES) {
+        TaskCollateTables *tc = (TaskCollateTables *) task;
         mq->n_running += 1;
         collate_tables (mq, tc);
+        mq->n_running -= 1;
+      } else if (task->type == TASK_COLLATE_FILES) {
+        TaskCollateFiles *tc = (TaskCollateFiles *) task;
+        mq->n_running += 1;
+        collate_files (mq, tc);
         mq->n_running -= 1;
       }
     }
@@ -476,220 +558,6 @@ process2 (GT4Queue *queue, unsigned int idx, void *arg)
     } else {
       gt4_queue_broadcast (queue);
     }
-    gt4_queue_unlock (queue);
-  }
-}
-
-static void
-process (GT4Queue *queue, unsigned int idx, void *arg)
-{
-  GT4ListMakerQueue *mq = (GT4ListMakerQueue *) arg;
-  unsigned int finished = 0;
-  double s_t, e_t, d_t;
-
-  if (debug > 1) {
-    gt4_queue_lock (queue);
-    fprintf (stderr, "Thread %d started (total %d)\n", idx, queue->nthreads_running);
-    gt4_queue_unlock (queue);
-  }
-
-  /* Do work */
-  while (!finished) {
-    unsigned int has_files, has_unsorted, has_unmerged, sorted_tables;
-    /* Get exclusive lock on queue */
-    pthread_mutex_lock (&mq->queue.mutex);
-    if (debug > 1) fprintf (stderr, "Thread %d: FileTasks %u Unsorted %u Sorted %u\n", idx, mq->ntasks[TASK_READ], mq->nunsorted, mq->nsorted);
-    
-    has_files = mq->files || mq->ntasks[TASK_READ];
-    has_unsorted = mq->nunsorted || mq->ntasks[TASK_SORT];
-    has_unmerged = mq->ntasks[TASK_MERGE];
-    sorted_tables = mq->nsorted + mq->ntasks[TASK_MERGE];
-
-    /* If all files have been read and sorted and there is small enough number of sorted files */
-    if (!has_files && !has_unsorted && sorted_tables && (sorted_tables <= MAX_MERGED_TABLES)) {
-      if (!has_unmerged) {
-        /* Merge to disk */
-        wordtable *t[MAX_MERGED_TABLES];
-        unsigned int ntables;
-        char c[1024];
-        ntables = 0;
-        while (mq->nsorted) {
-          t[ntables++] = queue_get_sorted (mq);
-        }
-        wordtable_build_filename (t[0], c, 1024, outputname);
-        mq->ntasks[TASK_MERGE] += 1;
-        if (debug) {
-          unsigned int i;
-          fprintf (stderr, "Merging %u tables: %s", ntables, t[0]->id);
-          for (i = 1; i < ntables; i++) {
-	    fprintf (stderr, ",%s", t[i]->id);
-	  }
-	  fprintf (stderr, " to %s\n", c);
-	}
-	/* Now we can release mutex */
-	pthread_mutex_unlock (&mq->queue.mutex);
-	/* merge_write (table, other, c, queue->cutoff); */
-	if (merge_write_multi (t, ntables, c, mq->cutoff)) {
-	fprintf (stderr, "Cannot write list to file\n");
-      }
-  pthread_mutex_lock (&mq->queue.mutex);
-  mq->ntasks[TASK_MERGE] -= 1;
-  pthread_cond_broadcast (&mq->queue.cond);
-  pthread_mutex_unlock (&mq->queue.mutex);
-  finished = 1;
-      } else {
-  /* Waiting merging to finish */
-        if (debug > 1) fprintf (stderr, "Thread %d: Waiting merging to finish\n", idx);
-        pthread_cond_wait (&mq->queue.cond, &mq->queue.mutex);
-        pthread_mutex_unlock (&mq->queue.mutex);
-      }
-      continue;
-    }
-    if (mq->nsorted > 1) {
-      /* Task 1 - merge sorted tables */
-      wordtable *table, *other;
-      int result;
-
-      other = queue_get_smallest_sorted (mq);
-      table = queue_get_mostavailable_sorted (mq);
-      if (table->nwordslots < other->nwordslots) {
-        wordtable *t = table;
-        table = other;
-        other = t;
-      }
-      mq->ntasks[TASK_MERGE] += 1;
-      /* Now we can release mutex */
-      pthread_mutex_unlock (&mq->queue.mutex);
-      if (debug > 0) fprintf (stderr, "Thread %d: Merging tables %s (%llu/%llu) + %s (%llu/%llu) -> %s\n", idx, table->id, table->nwords, table->nwordslots, other->id, other->nwords, other->nwordslots, table->id);
-      s_t = get_time ();
-      result = wordtable_merge (table, other);
-      e_t = get_time ();
-      d_t = e_t - s_t;
-      /* fixme: Error processing */
-      if (result) {
-        print_error_message (result);
-      }
-      /* Lock mutex */
-      pthread_mutex_lock (&mq->queue.mutex);
-      /* Add merged table to sorted list */
-      mq->sorted[mq->nsorted++] = table;
-      wordtable_empty (other);
-      other->wordlength = mq->wordlen;
-      mq->available[mq->navailable++] = other;
-      mq->tokens[TIME_MERGE].dval += d_t;
-      /* Release mutex */
-      mq->ntasks[TASK_MERGE] -= 1;
-      pthread_cond_broadcast (&mq->queue.cond);
-      pthread_mutex_unlock (&mq->queue.mutex);
-      if (debug > 0) fprintf (stderr, "Thread %d: Finished merging %s (%llu/%llu)\n", idx, table->id, table->nwords, table->nwordslots);
-    } else if (mq->nunsorted > 0) {
-      /* Task 2 - sort table */
-      wordtable *table;
-      int result;
-      
-      table = mq->unsorted[--mq->nunsorted];
-      /* Now we can release mutex */
-      mq->ntasks[TASK_SORT] += 1;
-      gt4_queue_unlock (&mq->queue);
-      if (debug > 0) fprintf (stderr, "Thread %d: Sorting table %s (%llu/%llu)\n", idx, table->id, table->nwords, table->nwordslots);
-      s_t = get_time ();
-      wordtable_sort (table, 0);
-      e_t = get_time ();
-      d_t = e_t - s_t;
-      s_t = get_time ();
-      result = wordtable_find_frequencies (table);
-      e_t = get_time ();
-      /* fixme: Error processing */
-      if (result) {
-        print_error_message (result);
-      }
-      /* Lock mutex */
-      gt4_queue_lock (&mq->queue);
-      /* Add sorted table to sorted list */
-      mq->sorted[mq->nsorted++] = table;
-      mq->tokens[TIME_SORT].dval += d_t;
-      d_t = e_t - s_t;
-      mq->tokens[TIME_FF].dval += d_t;
-      /* Release mutex */
-      mq->ntasks[TASK_SORT] -= 1;
-      gt4_queue_broadcast (&mq->queue);
-      gt4_queue_unlock (&mq->queue);
-      if (debug > 0) fprintf (stderr, "Thread %d: Finished sorting %s (%llu/%llu)\n", idx, table->id, table->nwords, table->nwordslots);
-    } else if (mq->files && (mq->ntasks[TASK_READ] < MAX_FILES) && (mq->navailable || (mq->ntablescreated < ntables))) {
-      /* Task 3 - read input file */
-      TaskFile *task;
-      wordtable *table;
-      int result;
-      unsigned long long readsize;
-
-      task = mq->files;
-      mq->files = task->next;
-      mq->ntasks[TASK_READ] += 1;
-      if (mq->navailable > 0) {
-        /* Has to create new word table */
-        table = queue_get_largest_table (mq);
-      } else {
-        table = wordtable_new (mq->wordlen, 10000000);
-        table->wordlength = mq->wordlen;
-        mq->ntablescreated += 1;
-        if (debug > 0) fprintf (stderr, "Thread %d: Created table %s\n", idx, table->id);
-      }
-      /* Now we can release mutex */
-      pthread_mutex_unlock (&mq->queue.mutex);
-      
-      /* Process file reader task */
-      if (debug > 1) fprintf (stderr, "Thread %d: Processign file %s (%llu) -> %s (%llu)\n", idx, task->seqfile->path, (unsigned long long) task->reader.cpos, table->id, table->nwordslots);
-      readsize = (mq->tablesize < table->nwordslots) ? table->nwordslots : mq->tablesize;
-      if (debug > 0) fprintf (stderr, "Thread %d: Reading %lld bytes from %s, position %llu/%llu\n", idx, readsize, task->seqfile->path, (unsigned long long) task->reader.cpos, (unsigned long long) task->seqfile->block.csize);
-      s_t = get_time ();
-      result = task_file_read_nwords (task, readsize, mq->wordlen, NULL, NULL, NULL, NULL, process_word, table);
-      e_t = get_time ();
-      d_t = e_t - s_t;
-      if (result) {
-        /* fixme: Error processing */
-        print_error_message (result);
-      }
-      /* Lock mutex */
-      pthread_mutex_lock (&mq->queue.mutex);
-      /* Add generated table to unsorted list */
-      mq->unsorted[mq->nunsorted++] = table;
-      /* fixme: We ignore error here - maybe should quit */
-      if (result || task->reader.in_eof) {
-        /* Finished this task */
-        if (debug > 0) fprintf (stderr, "Thread %d: FastaReader for %s finished\n", idx, task->seqfile->path);
-        task_file_delete (task);
-      } else {
-        /* Reshedule task */
-        task->next = mq->files;
-        mq->files = task;
-      }
-      mq->ntasks[TASK_READ] -= 1;
-      mq->tokens[TIME_READ].dval += d_t;
-      /* Release mutex */
-      pthread_cond_broadcast (&mq->queue.cond);
-      pthread_mutex_unlock (&mq->queue.mutex);
-      if (debug > 0) fprintf (stderr, "Thread %d: Finished reading %s (%llu/%llu)\n", idx, table->id, table->nwords, table->nwordslots);
-    } else if (!has_files && !mq->nunsorted && (mq->nsorted < 2)) {
-      /* Nothing to do */
-      /* Release mutex */
-      pthread_cond_broadcast (&mq->queue.cond);
-      pthread_mutex_unlock (&mq->queue.mutex);
-      finished = 1;
-    } else {
-      if (debug > 1) fprintf (stderr, "Thread %d: Waiting\n", idx);
-      /* Release mutex */
-      /* pthread_mutex_unlock (&mq->queue.mutex); */
-      /* fixme: Semaphore */
-      /* sleep (1); */
-      pthread_cond_wait (&mq->queue.cond, &mq->queue.mutex);
-      pthread_mutex_unlock (&mq->queue.mutex);
-    }
-  }
-
-  /* Exit if everything is done */
-  if (debug) {
-    gt4_queue_lock (queue);
-    if (debug > 1) fprintf (stderr, "Thread %u exiting (remaining %d)\n", idx, queue->nthreads_running);
     gt4_queue_unlock (queue);
   }
 }
@@ -713,7 +581,6 @@ merge_write_multi_nofreq (wordtable *tables[], unsigned int ntables_in, int ofil
   unsigned long long i[MAX_MERGED_TABLES];
   unsigned int ntables, j;
   unsigned long long word;
-
   unsigned char b[TMP_BUF_SIZE];
   unsigned int bp = 0;
 
@@ -725,7 +592,7 @@ merge_write_multi_nofreq (wordtable *tables[], unsigned int ntables_in, int ofil
   h.wordlength = tables[0]->wordlength;
   h.nwords = 0;
   h.totalfreq = 0;
-  h.padding = sizeof (GT4ListHeader);
+  h.list_start = sizeof (GT4ListHeader);
 
   write (ofile, &h, sizeof (GT4ListHeader));
 
@@ -757,6 +624,7 @@ merge_write_multi_nofreq (wordtable *tables[], unsigned int ntables_in, int ofil
           ntables -= 1;
           if (ntables > 0) {
             t[j] = t[ntables];
+            i[j] = i[ntables];
           } else {
             break;
           }
@@ -773,8 +641,6 @@ merge_write_multi_nofreq (wordtable *tables[], unsigned int ntables_in, int ofil
       write (ofile, b, bp);
       bp = 0;
     }
-    //write (ofile, &word, 8);
-    //write (ofile, &freq, 4);
     h.nwords += 1;
     h.totalfreq += freq;
     word = next;
@@ -783,117 +649,11 @@ merge_write_multi_nofreq (wordtable *tables[], unsigned int ntables_in, int ofil
     write (ofile, b, bp);
   }
   pwrite (ofile, &h, sizeof (GT4ListHeader), 0);
-  if (debug > 1) {
-    for (j = 0; j < ntables; j++) fprintf (stderr, " %llu", i[j]);
-    fprintf (stderr, "\n");
+  if (debug) {
+    fprintf (stderr, "Words %llu, unique %llu\n", h.totalfreq, h.nwords);
   }
 
   return h.nwords;
-}
-
-static unsigned int
-merge_write_multi (wordtable *t[], unsigned int ntables, const char *filename, unsigned int cutoff)
-{
-  unsigned long long nwords[MAX_MERGED_TABLES];
-  unsigned long long i[MAX_MERGED_TABLES];
-  unsigned int nfinished;
-
-  GT4ListHeader h;
-
-  FILE *ofs;
-  char *b;
-  unsigned int bp, j;
-
-  unsigned long long word;
-  unsigned int freq;
-  double t_s, t_e;
-
-  h.code = GT4_LIST_CODE;
-  h.version_major = VERSION_MAJOR;
-  h.version_minor = VERSION_MINOR;
-  h.wordlength = t[0]->wordlength;
-  h.nwords = 0;
-  h.totalfreq = 0;
-  h.padding = sizeof (GT4ListHeader);
-
-  b = (char *) malloc (BSIZE + 12);
-  
-  ofs = fopen (filename, "w");
-  if (!ofs) {
-    fprintf (stderr, "Cannot open output file %s\n", filename);
-    return 1;
-  }
-
-  t_s = get_time ();
-  fwrite (&h, sizeof (GT4ListHeader), 1, ofs);
-
-  bp = 0;
-  nfinished = 0;
-  for (j = 0; j < ntables; j++) {
-    i[j] = 0;
-    nwords[j] = t[j]->nwords;
-    if (!nwords[j]) nfinished += 1;
-  }
-    
-  memset (i, 0, sizeof (i));
-  
-  while (nfinished < ntables) {
-    word = 0xffffffffffffffff;
-    freq = 0;
-    /* Find smalles word and total freq */
-    for (j = 0; j < ntables; j++) {
-      if (i[j] < nwords[j]) {
-  /* This table is not finished */
-  if (t[j]->words[i[j]] < word) {
-    /* This table has smaller word */
-    word = t[j]->words[i[j]];
-    freq = t[j]->frequencies[i[j]];
-  } else if (t[j]->words[i[j]] == word) {
-    /* This table has equal word */
-    freq += t[j]->frequencies[i[j]];
-  }
-  __builtin_prefetch (&t[j]->words[i[j]] + 16);
-  __builtin_prefetch (&t[j]->frequencies[i[j]] + 16);
-      }
-    }
-    /* Now we have word and freq */
-    if (freq >= cutoff) {
-      memcpy (b + bp, &word, 8);
-      bp += 8;
-      memcpy (b + bp, &freq, 4);
-      bp += 4;
-      if (bp >= BSIZE) {
-  fwrite (b, 1, bp, ofs);
-  bp = 0;
-      }
-      h.nwords += 1;
-      h.totalfreq += freq;
-    }
-    /* Update pointers */
-    for (j = 0; j < ntables; j++) {
-      if (i[j] < nwords[j]) {
-  /* This table is not finished */
-  if (t[j]->words[i[j]] == word) {
-    i[j] += 1;
-    if (i[j] >= nwords[j]) {
-      nfinished += 1;
-    }
-  }
-      }
-    }
-  }
-  if (bp) {
-    fwrite (b, 1, bp, ofs);
-  }
-  fseek (ofs, 0, SEEK_SET);
-  fwrite (&h, sizeof (GT4ListHeader), 1, ofs);
-  fclose (ofs);
-  t_e = get_time ();
-  if (debug > 0) fprintf (stderr, "Writing %d tables with merging %.2f\n", ntables, t_e - t_s);
-  
-  free (b);
-
-  return 0;
 }
 
 void 
@@ -910,6 +670,7 @@ print_help (int exitvalue)
   fprintf (stderr, "    --num_threads           - number of threads the program is run on (default MIN(8, num_input_files))\n");
   fprintf (stderr, "    --max_tables            - maximum number of temporary tables (default MAX(num_threads, 2))\n");
   fprintf (stderr, "    --table_size            - maximum size of the temporary table (default 500000000)\n");
+  fprintf (stderr, "    --tmpdir                - directory for temporary files (may need an order of magnitude more space than the size of the final list)\n");
   fprintf (stderr, "    --stream                - read files as streams instead of memory-mapping (slower but uses less virtual memory)\n");
   fprintf (stderr, "    -D                      - increase debug level\n");
   exit (exitvalue);

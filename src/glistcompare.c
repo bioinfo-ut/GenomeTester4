@@ -616,7 +616,7 @@ union_multi (AZObject *m[], unsigned int nmaps, unsigned int cutoff, int ofile, 
   header->wordlength = insts[0]->word_length;
   header->nwords = 0;
   header->totalfreq = 0;
-  header->padding = sizeof (GT4ListHeader);
+  header->list_start = sizeof (GT4ListHeader);
 
   t_s = get_time ();
 

@@ -12,6 +12,7 @@
 #include <queue.h>
 #include <sequence.h>
 #include <utils.h>
+#include <version.h>
 
 int debug = 1;
 
@@ -84,8 +85,9 @@ struct _SNV {
   unsigned int chr;
   unsigned long long pos;
   char *id;
-  unsigned int ref_allele;
-  unsigned int alt_allele;
+  unsigned short ref_allele;
+  unsigned short alt_allele;
+  unsigned short genotype;
 };
 
 static SNV *read_snvs (const char *filename, unsigned int *n_snvs);
@@ -139,6 +141,23 @@ static unsigned int min_coverage = 8;
 SNV *snvs = NULL;
 unsigned int n_snvs = 0;
 
+static void
+print_usage (int exit_value)
+{
+  fprintf (stderr, "gassembler version %u.%u (%s)\n", VERSION_MAJOR, VERSION_MINOR, VERSION_QUALIFIER);
+  fprintf (stderr, "Usage: gassembler [OPTIONS] [KMERS...]\n");
+  fprintf (stderr, "Options:\n");
+  fprintf (stderr, "    -v, --version           - print version information and exit\n");
+  fprintf (stderr, "    -h, --help              - print this usage screen and exit\n");
+  fprintf (stderr, "    -dbb, -db FILENAME      - name of read index file\n");
+  fprintf (stderr, "    -gdb FILENAME           - name of genome index file\n");
+  fprintf (stderr, "    --reference CHR START END SEQ - reference position and sequence\n");
+  fprintf (stderr, "    --snvs FILENAME         - gmer_caller called SNVs\n");
+  fprintf (stderr, "    --file FILENAME         - read reference and kmers from file (one line at time)\n");
+  fprintf (stderr, "    -D                      - increase debug level\n");
+  exit (exit_value);
+}
+
 int
 main (int argc, const char *argv[])
 {
@@ -155,7 +174,11 @@ main (int argc, const char *argv[])
   SeqFile *files, *g_files;
     
   for (i = 1; i < argc; i++) {
-    if (!strcmp (argv[i], "-dbb") || !strcmp (argv[i], "-db")) {
+    if (!strcmp (argv[i], "-v") || !strcmp (argv[i], "--version")) {
+      fprintf (stdout, "gassembler version %d.%d (%s)\n", VERSION_MAJOR, VERSION_MINOR, VERSION_QUALIFIER);
+    } else if (!strcmp (argv[i], "-h") || !strcmp (argv[i], "--help")) {
+      print_usage (0);
+    } else if (!strcmp (argv[i], "-dbb") || !strcmp (argv[i], "-db")) {
       i += 1;
       if (i >= argc) exit (1);
       db_name = argv[i];
@@ -163,7 +186,7 @@ main (int argc, const char *argv[])
       i += 1;
       if (i >= argc) exit (1);
       gdb_name = argv[i];
-    } else if (!strcmp (argv[i], "-reference")) {
+    } else if (!strcmp (argv[i], "--reference")) {
       if ((i + 4) >= argc) exit (1);
       ref_chr = chr_from_text (argv[i + 1]);
       if (!ref_chr) exit (1);
@@ -200,8 +223,7 @@ main (int argc, const char *argv[])
 
   /* Check arguments */
   if (!db_name || !gdb_name) {
-    fprintf (stderr, "No DB/GDB specified\n");
-    exit (1);
+    print_usage (1);
   }
 
   /* Read databases */
@@ -1630,35 +1652,45 @@ read_snvs (const char *filename, unsigned int *n_snvs)
   snvs = (SNV *) malloc (n_lines * sizeof (SNV));
   cpos = 0;
   while (cpos < csize) {
-    const unsigned char *tokenz[16];
-    unsigned int lengths[16];
-    unsigned int ntokenz;
-    ntokenz = split_line (cdata + cpos, csize - cpos, tokenz, lengths, 16);
-    if (ntokenz < 3) {
+    if (cdata[cpos] != '#') {
+      const unsigned char *tokenz[5];
+      unsigned int lengths[5];
+      unsigned int ntokenz;
+      ntokenz = split_line (cdata + cpos, csize - cpos, tokenz, lengths, 5);
+      if (ntokenz < 2) {
         fprintf (stderr, "read_snvs: too few tokens at line %u\n", *n_snvs);
-    } else {
-      char chr[32];
-      if (lengths[0] > 31) lengths[0] = 31;
-      memcpy (chr, tokenz[0], lengths[0]);
-      chr[lengths[0]] = 0;
-      snvs[*n_snvs].chr = chr_from_text (chr);
-      if (!snvs[*n_snvs].chr) {
-        static unsigned int warned = 0;
-        if (!warned) {
-          fprintf (stderr, "read_snvs: invalid chromosome name %s\n", chr);
-          warned = 1;
-        }
       } else {
-        snvs[*n_snvs].pos = strtol ((const char *) tokenz[1], NULL, 10) - 1;
-        /*snvs[*n_snvs].id = strndup ((const char *) tokenz[2], lengths[2]);*/
-        snvs[*n_snvs].id = "*";
-        snvs[*n_snvs].ref_allele = c2n (tokenz[2][0]);
-        snvs[*n_snvs].alt_allele = c2n (tokenz[2][1]);
-        *n_snvs += 1;
+        const unsigned char *stok[4];
+        unsigned int slen[4];
+        unsigned int nstok;
+        char chr[32];
+        nstok = split_line_chr (tokenz[0], lengths[0], stok, slen, 5, ':');
+        if (slen[0] > 31) slen[0] = 31;
+        memcpy (chr, stok[0], slen[0]);
+        chr[slen[0]] = 0;
+        snvs[*n_snvs].chr = chr_from_text (chr);
+        if (!snvs[*n_snvs].chr) {
+          static unsigned int warned = 0;
+          if (!warned) {
+            fprintf (stderr, "read_snvs: invalid chromosome name %s\n", chr);
+            warned = 1;
+          }
+        } else {
+          snvs[*n_snvs].pos = strtol ((const char *) stok[1], NULL, 10) - 1;
+          /*snvs[*n_snvs].id = strndup ((const char *) tokenz[2], lengths[2]);*/
+          snvs[*n_snvs].id = "*";
+          snvs[*n_snvs].ref_allele = c2n (stok[3][0]);
+          snvs[*n_snvs].alt_allele = c2n (stok[3][2]);
+          snvs[*n_snvs].genotype = (tokenz[1][0] != 'A') || (tokenz[1][1] != 'A');
+          /* if (debug) {
+            fprintf (stderr, "SNV %llu %u%u\n", snvs[*n_snvs].pos, snvs[*n_snvs].ref_allele, snvs[*n_snvs].alt_allele);
+          } */
+          *n_snvs += 1;
+        }
       }
-      while ((cpos < csize) && (cdata[cpos] != '\n')) cpos += 1;
-      while ((cpos < csize) && (cdata[cpos] <= ' ')) cpos += 1;
     }
+    while ((cpos < csize) && (cdata[cpos] != '\n')) cpos += 1;
+    while ((cpos < csize) && (cdata[cpos] <= ' ')) cpos += 1;
   }
   return snvs;
 }
@@ -1701,7 +1733,7 @@ load_db_or_die (KMerDB *db, const char *db_name, const char *id)
     fprintf (stderr, "cannot mmap (no such file?)\n");
     exit (1);
   }
-  scout_mmap (cdata, csize);
+  /* scout_mmap (cdata, csize); */
   if (!read_database_from_binary (db, cdata, csize)) {
     fprintf (stderr, "cannot read (wrong file format?)\n");
     exit (1);

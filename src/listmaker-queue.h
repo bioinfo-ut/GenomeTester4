@@ -40,9 +40,10 @@ typedef struct _GT4ListMakerQueueClass GT4ListMakerQueueClass;
 
 #define TASK_READ 0
 #define TASK_SORT 1
-#define TASK_COLLATE 2
-#define TASK_MERGE 3
-#define NUM_TASK_TYPES 4
+#define TASK_COLLATE_TABLES 2
+#define TASK_COLLATE_FILES 3
+#define TASK_MERGE 4
+#define NUM_TASK_TYPES 5
 
 /*
  * Queue stub
@@ -70,7 +71,8 @@ union _QValue {
 
 typedef struct _TaskFile TaskFile;
 typedef struct _TaskRead TaskRead;
-typedef struct _TaskCollate TaskCollate;
+typedef struct _TaskCollateTables TaskCollateTables;
+typedef struct _TaskCollateFiles TaskCollateFiles;
 
 struct _GT4ListMakerQueue {
         GT4Queue queue;
@@ -79,30 +81,23 @@ struct _GT4ListMakerQueue {
         unsigned int wordlen;
         unsigned long long tablesize;
         unsigned int cutoff;
-        /* Number of worker tasks */
-        unsigned int ntasks[NUM_TASK_TYPES];
-        /* Input files unread or partially read  */
+        /* Waiting files */
         TaskFile *files;
-        /* Total number of tables created */
-        unsigned int ntablescreated;
-        /* Unsorted tables */
-        unsigned int nunsorted;
-        wordtable *unsorted[MAX_TABLES];
-        /* Sorted tables */
-        unsigned int nsorted;
-        wordtable *sorted[MAX_TABLES];
-        /* Available tables */
-        unsigned int navailable;
-        wordtable *available[MAX_TABLES];
 
         unsigned int n_files_waiting;
         unsigned int n_files_reading;
+        unsigned int n_tables_collating;
 
         unsigned int n_running;
         unsigned int n_free_s_tables;
         wordtable **free_s_tables;
         unsigned int n_used_s_tables;
         wordtable **used_s_tables;
+
+        unsigned int n_tmp_files;
+        char *tmp_files[4096];
+        unsigned int n_final_files;
+        char *final_files[256];
 
         /* Debug */
         QValue tokens[NUM_ID_TOKENS];
@@ -117,6 +112,9 @@ unsigned int gt4_listmaker_queue_get_type (void);
 void maker_queue_setup (GT4ListMakerQueue *mq, unsigned int n_threads, unsigned int w_len, unsigned int n_tmp_tables, unsigned int tmp_table_size);
 void maker_queue_release (GT4ListMakerQueue *mq);
 
+/* Add new file task to queue (not thread-safe) */
+void maker_queue_add_file (GT4ListMakerQueue *mq, const char *filename, unsigned int stream);
+
 /* Tasks */
 
 struct _TaskRead {
@@ -128,14 +126,23 @@ struct _TaskRead {
 TaskRead *task_read_new (GT4ListMakerQueue *mq, AZObject *source);
 void task_read_delete (TaskRead *tr);
 
-struct _TaskCollate {
+struct _TaskCollateTables {
   GT4Task task;
   unsigned int n_tables;
   wordtable *tables[1];
 };
 
-TaskCollate *task_collate_new (GT4ListMakerQueue *mq, unsigned int max_tables);
-void task_collate_delete (TaskCollate *tc);
+TaskCollateTables *task_collate_tables_new (GT4ListMakerQueue *mq, unsigned int max_tables);
+void task_collate_tables_delete (TaskCollateTables *tc);
+
+struct _TaskCollateFiles {
+  GT4Task task;
+  unsigned int n_files;
+  char *files[1];
+};
+
+TaskCollateFiles *task_collate_files_new (GT4ListMakerQueue *mq, unsigned int max_files);
+void task_collate_files_delete (TaskCollateFiles *tc);
 
 /* File parsing tasks */
 
@@ -166,17 +173,6 @@ unsigned int task_file_read_nwords (TaskFile *tf, unsigned long long maxwords, u
 	int (*read_nucleotide) (GT4FastaReader *, unsigned int nucleotide, void *),
 	int (*read_word) (GT4FastaReader *, unsigned long long word, void *),
 	void *data);
-
-/* Add new file task to queue (not thread-safe) */
-void maker_queue_add_file (GT4ListMakerQueue *mq, const char *filename, unsigned int stream);
-/* Get smallest table */
-wordtable *queue_get_smallest_table (GT4ListMakerQueue *queue);
-/* Get largest table */
-wordtable *queue_get_largest_table (GT4ListMakerQueue *queue);
-
-wordtable *queue_get_sorted (GT4ListMakerQueue *queue);
-wordtable *queue_get_smallest_sorted (GT4ListMakerQueue *queue);
-wordtable *queue_get_mostavailable_sorted (GT4ListMakerQueue *queue);
 
 /* MMap scouting */
 

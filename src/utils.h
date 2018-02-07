@@ -43,6 +43,7 @@ unsigned long long rand_long_long (unsigned long long min, unsigned long long ma
 /* Line ends with \n (or at csize), tokens end with \t */
 /* Return number of tokens */
 unsigned int split_line (const unsigned char *cdata, unsigned long long csize, const unsigned char *tokenz[], unsigned int lengths[], unsigned int max_tokens);
+unsigned int split_line_chr (const unsigned char *cdata, unsigned long long csize, const unsigned char *tokenz[], unsigned int lengths[], unsigned int max_tokens, unsigned int chr);
 
 /* Print number as binary with given number of digits (0 - start from leftmost 1) */
 /* Returns the length of string (not counting terminating 0) */

@@ -19,9 +19,12 @@ LISTMAKER_SOURCES = \
 	sequence-source.c sequence-source.h \
 	sequence-stream.c sequence-stream.h \
 	sequence-zstream.c sequence-zstream.h \
+	set-operations.c set-operations.h \
 	common.c common.h \
 	utils.c utils.h \
-	word-array-sorted.c word-array-sorted.h
+	word-array-sorted.c word-array-sorted.h \
+	word-list.c word-list.h \
+	word-list-stream.c word-list-stream.h
 
 LISTMAKER2_SOURCES = \
 	glistmaker2.c \
@@ -56,6 +59,7 @@ LISTQUERY_SOURCES = \
 	common.c common.h \
 	queue.c queue.h \
 	utils.c utils.h \
+	word-list.c word-list.h \
 	word-array-sorted.c word-array-sorted.h
 
 LISTCOMPARE_SOURCES = \
@@ -75,6 +79,7 @@ LISTCOMPARE_SOURCES = \
 	queue.c queue.h \
 	utils.c \
 	word-array-sorted.c word-array-sorted.h \
+	word-list.c word-list.h \
 	word-list-stream.c word-list-stream.h
 
 GMER_COUNTER_SOURCES = \
@@ -82,7 +87,6 @@ GMER_COUNTER_SOURCES = \
 	index.c index.h \
 	listmaker-queue.c listmaker-queue.h \
 	trie.c trie.h \
-	word-map.c word-map.h \
 	sequence.c sequence.h \
 	sequence-block.c sequence-block.h \
 	sequence-file.c sequence-file.h \
@@ -94,7 +98,7 @@ GMER_COUNTER_SOURCES = \
 	thread-pool.c thread-pool.h \
 	queue.c queue.h \
 	utils.c utils.h \
-	word-array-sorted.c word-array-sorted.h \
+	word-list.c word-list.h \
 	database.c database.h
 
 GMER_CALLER_SOURCES = \
@@ -113,11 +117,11 @@ GASSEMBLER_SOURCES = \
 	matrix.c matrix.h \
 	queue.c queue.h \
 	sequence.c sequence.h \
+	sequence-block.c sequence-block.h \
 	sequence-file.c sequence-file.h \
+	sequence-source.c sequence-source.h \
 	trie.c trie.h \
 	utils.c utils.h \
-	word-map.c word-map.h \
-	wordtable.c wordtable.h \
 	gassembler.c
 
 DISTRO_SOURCES = \
@@ -184,8 +188,8 @@ gmer_counter: $(GMER_COUNTER_SOURCES) $(AZ_SOURCES) $(ARIKKEI_SOURCES)
 gmer_caller: $(GMER_CALLER_SOURCES)
 	$(CXX) $(GMER_CALLER_SOURCES) -o gmer_caller $(LIBS) $(CXXFLAGS) -Wall
 
-gassembler: $(GASSEMBLER_SOURCES)
-	$(CXX) $(GASSEMBLER_SOURCES) -o gassembler $(LIBS) $(CXXFLAGS) -Wall
+gassembler: $(GASSEMBLER_SOURCES) $(AZ_SOURCES) $(ARIKKEI_SOURCES)
+	$(CXX) $(GASSEMBLER_SOURCES) $(AZ_SOURCES) $(ARIKKEI_SOURCES) -o gassembler $(LIBS) $(CXXFLAGS) $(AZ_FLAGS)
 
 distro: $(DISTRO_SOURCES)
 	$(CXX) $(DISTRO_SOURCES) -o distro $(LIBS) $(CXXFLAGS) -Wall

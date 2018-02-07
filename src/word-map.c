@@ -38,8 +38,6 @@
 
 unsigned int debug_wordmap = 0;
 
-unsigned int GT4_LIST_CODE = 'G' << 24 | 'T' << 16 | '4' << 8 | 'C';
-
 static void word_map_class_init (GT4WordMapClass *klass);
 /* AZObject implementation */
 static void word_map_shutdown (AZObject *object);
@@ -149,7 +147,7 @@ gt4_word_map_new (const char *listfilename, unsigned int major_version, unsigned
     gt4_word_map_delete (wmap);
     return NULL;
   }
-  wmap->wordlist = cdata + sizeof (GT4ListHeader);
+  wmap->wordlist = cdata + wmap->header->list_start;
   if (scout) {
     scout_mmap ((const unsigned char *) cdata, csize);
   }

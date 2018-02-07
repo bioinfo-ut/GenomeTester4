@@ -21,6 +21,7 @@
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
+#include <stdio.h>
 #include <string.h>
 #include <sys/stat.h>
 #include <sys/mman.h>
@@ -39,16 +40,19 @@ gt4_mmap (const char *filename, unsigned long long *size)
 
 	status = stat (filename, &st);
 	if (status < 0) {
+	  fprintf (stderr, "Stat result %d\n", status);
 		return NULL;
 	}
 
 	handle = open (filename, O_RDONLY);
 	if (handle < 0) {
+	  fprintf (stderr, "Handle %d\n", handle);
 		return NULL;
 	}
 
 	data = mmap (NULL, st.st_size, PROT_READ, MAP_PRIVATE, handle, 0);
 	if (data == (const unsigned char *) -1) {
+	  fprintf (stderr, "MMap result %p\n", data);
 		return NULL;
 	} else {
 		*size = st.st_size;
@@ -177,6 +181,23 @@ rand_long_long (unsigned long long min, unsigned long long max)
 {
   unsigned long long delta = max - min + 1;
   return min + (unsigned long long) (delta * (rand () / (RAND_MAX + 1.0)));
+}
+
+unsigned int
+split_line_chr (const unsigned char *cdata, unsigned long long csize, const unsigned char *tokenz[], unsigned int lengths[], unsigned int max_tokens, unsigned int chr)
+{
+  unsigned int i = 0;
+  unsigned long long s = 0;
+  while ((i < max_tokens) && (cdata[s] != '\n')) {
+    unsigned long long e = s;
+    tokenz[i] = cdata + s;
+    while ((e < csize) && (cdata[e] != chr) && (cdata[e] != '\n')) e += 1;
+    lengths[i] = e - s;
+    i += 1;
+    s = e;
+    if (cdata[s] != '\n') s += 1;
+  }
+  return i;
 }
 
 unsigned int
