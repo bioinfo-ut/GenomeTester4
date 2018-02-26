@@ -279,7 +279,7 @@ int main (int argc, const char *argv[])
     GT4WordMap *map1, *map2;
     int cinf;
     map1 = gt4_word_map_new (fnames[0], VERSION_MAJOR, USE_SCOUTS);
-    map2 = gt4_word_map_new (fnames[1], VERSION_MINOR, USE_SCOUTS);
+    map2 = gt4_word_map_new (fnames[1], VERSION_MAJOR, USE_SCOUTS);
     if (!map1 || !map2) {
       fprintf (stderr, "Error: Creating the wordmap failed!\n");
       exit (1);
