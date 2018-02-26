@@ -83,8 +83,8 @@ maker_queue_setup (GT4ListMakerQueue *mq, unsigned int n_threads, unsigned int w
   az_instance_init (mq, GT4_TYPE_LISTMAKER_QUEUE);
   gt4_queue_setup (&mq->queue, n_threads);
   mq->wordlen = wlen;
-  mq->free_s_tables = (wordtable **) malloc (n_tmp_tables * sizeof (wordtable *));
-  mq->used_s_tables = (wordtable **) malloc (n_tmp_tables * sizeof (wordtable *));
+  mq->free_s_tables = (GT4WordTable **) malloc (n_tmp_tables * sizeof (GT4WordTable *));
+  mq->used_s_tables = (GT4WordTable **) malloc (n_tmp_tables * sizeof (GT4WordTable *));
   for (i = 0; i < n_tmp_tables; i++) {
     mq->free_s_tables[mq->n_free_s_tables++] = wordtable_new (wlen, tmp_table_size);
   }
@@ -219,7 +219,7 @@ TaskCollateTables *
 task_collate_tables_new (GT4ListMakerQueue *mq, unsigned int max_tables)
 {
   TaskCollateTables *tc;
-  tc = (TaskCollateTables *) malloc (sizeof (TaskCollateTables) + (max_tables - 1) * sizeof (wordtable *));
+  tc = (TaskCollateTables *) malloc (sizeof (TaskCollateTables) + (max_tables - 1) * sizeof (GT4WordTable *));
   memset (tc, 0, sizeof (TaskCollateTables));
   tc->task.queue = &mq->queue;
   tc->task.type = TASK_COLLATE_TABLES;

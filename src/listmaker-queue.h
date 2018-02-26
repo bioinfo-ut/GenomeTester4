@@ -32,7 +32,7 @@ typedef struct _GT4ListMakerQueueClass GT4ListMakerQueueClass;
 #include "fasta.h"
 #include "sequence-file.h"
 #include "sequence-stream.h"
-#include "wordtable.h"
+#include "word-table.h"
 
 #include "queue.h"
 
@@ -90,9 +90,9 @@ struct _GT4ListMakerQueue {
 
         unsigned int n_running;
         unsigned int n_free_s_tables;
-        wordtable **free_s_tables;
+        GT4WordTable **free_s_tables;
         unsigned int n_used_s_tables;
-        wordtable **used_s_tables;
+        GT4WordTable **used_s_tables;
 
         unsigned int n_tmp_files;
         char *tmp_files[4096];
@@ -129,7 +129,7 @@ void task_read_delete (TaskRead *tr);
 struct _TaskCollateTables {
   GT4Task task;
   unsigned int n_tables;
-  wordtable *tables[1];
+  GT4WordTable *tables[1];
 };
 
 TaskCollateTables *task_collate_tables_new (GT4ListMakerQueue *mq, unsigned int max_tables);

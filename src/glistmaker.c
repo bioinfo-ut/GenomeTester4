@@ -35,13 +35,13 @@
 #include "listmaker-queue.h"
 #include "utils.h"
 #include "fasta.h"
-#include "wordtable.h"
 #include "sequence.h"
 #include "sequence-stream.h"
 #include "sequence-source.h"
 #include "set-operations.h"
 #include "version.h"
 #include "word-list-stream.h"
+#include "word-table.h"
 
 #define MAX_FILES 200
 
@@ -71,7 +71,7 @@
 static void process (GT4Queue *queue, unsigned int idx, void *arg);
 
 /* Merge tables directly to disk */
-static unsigned long long merge_write_multi_nofreq (wordtable *t[], unsigned int ntables, int ofile);
+static unsigned long long merge_write_multi_nofreq (GT4WordTable *t[], unsigned int ntables, int ofile);
 
 /* */
 int process_word (GT4FastaReader *reader, unsigned long long word, void *data);
@@ -303,7 +303,7 @@ main (int argc, const char *argv[])
   } else {
 #if 0
     /* CASE: ONE THREAD */
-    wordtable *table, *temptable;
+    GT4WordTable *table, *temptable;
     int v;
     
     /* creating initial tables */
@@ -344,7 +344,7 @@ main (int argc, const char *argv[])
   v = wordtable_merge (table, temptable);
   if (v) return print_error_message (v);
       } else {
-  wordtable *t = table;
+  GT4WordTable *t = table;
   table = temptable;
   temptable = t;
       }
@@ -461,11 +461,7 @@ static unsigned int
 read_table (GT4ListMakerQueue *mq, TaskRead *tr)
 {
   double t0, t1, t2;
-  wordtable *tbl;
-  if (!mq->n_free_s_tables) {
-    gt4_queue_add_task (&mq->queue, &tr->task, 0);
-    return 1;
-  }
+  GT4WordTable *tbl;
   tbl = mq->free_s_tables[--mq->n_free_s_tables];
   mq->n_files_waiting -= 1;
   mq->n_files_reading += 1;
@@ -523,7 +519,6 @@ process (GT4Queue *queue, unsigned int idx, void *arg)
 
   /* Do work */
   while (!finished) {
-    GT4Task *task;
     unsigned int wait = 0;
     gt4_queue_lock (queue);
     if (!queue->tasks && !mq->n_running) {
@@ -533,25 +528,31 @@ process (GT4Queue *queue, unsigned int idx, void *arg)
       /* Wait */
       wait = 1;
     } else {
-      task = queue->tasks;
-      queue->tasks = task->next;
-      if (debug > 1) fprintf (stderr, "Thread %u task %u\n", idx, task->type);
-      if (task->type == TASK_READ) {
-        TaskRead *tr = (TaskRead *) task;
-        mq->n_running += 1;
-        wait = read_table (mq, tr);
-        mq->n_running -= 1;
-      } else if (task->type == TASK_COLLATE_TABLES) {
-        TaskCollateTables *tc = (TaskCollateTables *) task;
-        mq->n_running += 1;
-        collate_tables (mq, tc);
-        mq->n_running -= 1;
-      } else if (task->type == TASK_COLLATE_FILES) {
-        TaskCollateFiles *tc = (TaskCollateFiles *) task;
-        mq->n_running += 1;
-        collate_files (mq, tc);
-        mq->n_running -= 1;
+      GT4Task *task;
+      for (task = queue->tasks; task; task = task->next) {
+        if (task->type == TASK_READ) {
+          if (mq->n_free_s_tables) {
+            gt4_queue_remove_task (queue, task, 0);
+            mq->n_running += 1;
+            wait = read_table (mq, (TaskRead *) task);
+            mq->n_running -= 1;
+            break;
+          }
+        } else if (task->type == TASK_COLLATE_TABLES) {
+          gt4_queue_remove_task (queue, task, 0);
+          mq->n_running += 1;
+          collate_tables (mq, (TaskCollateTables *) task);
+          mq->n_running -= 1;
+          break;
+        } else if (task->type == TASK_COLLATE_FILES) {
+          gt4_queue_remove_task (queue, task, 0);
+          mq->n_running += 1;
+          collate_files (mq, (TaskCollateFiles *) task);
+          mq->n_running -= 1;
+          break;
+        }
       }
+      if (!task) wait = 1;
     }
     if (wait) {
       gt4_queue_wait (queue);
@@ -565,19 +566,17 @@ process (GT4Queue *queue, unsigned int idx, void *arg)
 int 
 process_word (GT4FastaReader *reader, unsigned long long word, void *data)
 {
-  wordtable *table = (wordtable *) data;
-#if 1
+  GT4WordTable *table = (GT4WordTable *) data;
   wordtable_add_word_nofreq (table, word, reader->wordlength);
-#endif
   return 0;
 }
 
 #define TMP_BUF_SIZE (256 * 12)
 
 static unsigned long long
-merge_write_multi_nofreq (wordtable *tables[], unsigned int ntables_in, int ofile)
+merge_write_multi_nofreq (GT4WordTable *tables[], unsigned int ntables_in, int ofile)
 {
-  wordtable *t[MAX_MERGED_TABLES];
+  GT4WordTable *t[MAX_MERGED_TABLES];
   unsigned long long i[MAX_MERGED_TABLES];
   unsigned int ntables, j;
   unsigned long long word;

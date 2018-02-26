@@ -9,8 +9,6 @@ LISTMAKER_SOURCES = \
 	glistmaker.c \
 	listmaker-queue.c listmaker-queue.h \
 	queue.c queue.h \
-	wordtable.c wordtable.h \
-	word-map.c word-map.h \
 	fasta.c fasta.h \
 	buffer.c buffer.h \
 	sequence.c sequence.h \
@@ -24,30 +22,13 @@ LISTMAKER_SOURCES = \
 	utils.c utils.h \
 	word-array-sorted.c word-array-sorted.h \
 	word-list.c word-list.h \
-	word-list-stream.c word-list-stream.h
-
-LISTMAKER2_SOURCES = \
-	glistmaker2.c \
-	wordtable.c wordtable.h \
-	word-map.c word-map. h \
-	fasta.c fasta.h \
-	buffer.c buffer.h \
-	sequence.c sequence.h \
-	sequence-block.c sequence-block.h \
-	sequence-file.c sequence-file.h \
-	sequence-source.c sequence-source.h \
-	sequence-stream.c sequence-stream.h \
-	sequence-zstream.c sequence-zstream.h \
-	queue.c queue.h \
-	common.c common.h \
-	trie.c trie.h \
-	utils.c utils.h
+	word-list-stream.c word-list-stream.h \
+	word-map.c word-map.h \
+	word-table.c word-table.h
 
 LISTQUERY_SOURCES = \
 	glistquery.c \
 	listmaker-queue.c listmaker-queue.h \
-	wordtable.c wordtable.h \
-	word-map.c word-map.h \
 	fasta.c fasta.h \
 	buffer.c buffer.h \
 	sequence.c sequence.h \
@@ -60,13 +41,13 @@ LISTQUERY_SOURCES = \
 	queue.c queue.h \
 	utils.c utils.h \
 	word-list.c word-list.h \
-	word-array-sorted.c word-array-sorted.h
+	word-array-sorted.c word-array-sorted.h \
+	word-map.c word-map.h \
+	word-table.c word-table.h
 
 LISTCOMPARE_SOURCES = \
 	glistcompare.c \
 	listmaker-queue.c listmaker-queue.h \
-	wordtable.c \
-	word-map.c \
 	fasta.c \
 	buffer.c \
 	sequence.c \
@@ -80,10 +61,13 @@ LISTCOMPARE_SOURCES = \
 	utils.c \
 	word-array-sorted.c word-array-sorted.h \
 	word-list.c word-list.h \
-	word-list-stream.c word-list-stream.h
+	word-list-stream.c word-list-stream.h \
+	word-map.c word-map.h \
+	word-table.c word-table.h
 
 GMER_COUNTER_SOURCES = \
 	gmer_counter.c \
+	database.c database.h \
 	index.c index.h \
 	listmaker-queue.c listmaker-queue.h \
 	trie.c trie.h \
@@ -93,13 +77,12 @@ GMER_COUNTER_SOURCES = \
 	sequence-source.c sequence-source.h \
 	sequence-stream.c sequence-stream.h \
 	sequence-zstream.c sequence-zstream.h \
-	wordtable.c wordtable.h \
 	fasta.c fasta.h \
 	thread-pool.c thread-pool.h \
 	queue.c queue.h \
 	utils.c utils.h \
 	word-list.c word-list.h \
-	database.c database.h
+	word-table.c word-table.h
 
 GMER_CALLER_SOURCES = \
 	binomial.c binomial.h \
@@ -123,17 +106,6 @@ GASSEMBLER_SOURCES = \
 	trie.c trie.h \
 	utils.c utils.h \
 	gassembler.c
-
-DISTRO_SOURCES = \
-	binomial.c binomial.h \
-	fasta.c fasta.h \
-	queue.c queue.h \
-	sequence.c sequence.h \
-	simplex.c simplex.h \
-	utils.c utils.h \
-	word-map.c word-map.h \
-	wordtable.c wordtable.h \
-	distro.c
 
 ALEQ_SOURCES = \
 	binomial.c binomial.h \
@@ -173,9 +145,6 @@ all: all-before $(BINS) all-after
 glistmaker: $(LISTMAKER_SOURCES) $(AZ_SOURCES) $(ARIKKEI_SOURCES)
 	$(CXX) $(LISTMAKER_SOURCES) $(AZ_SOURCES) $(ARIKKEI_SOURCES) -o glistmaker $(LIBS) $(CXXFLAGS) $(AZ_FLAGS)
 
-glistmaker2: $(LISTMAKER2_SOURCES) $(AZ_SOURCES) $(ARIKKEI_SOURCES)
-	$(CXX) $(LISTMAKER2_SOURCES) $(AZ_SOURCES) $(ARIKKEI_SOURCES) -o glistmaker2 $(LIBS) $(DEBUGFLAGS) -Wall $(AZ_FLAGS)
-
 glistquery: $(LISTQUERY_SOURCES) $(AZ_SOURCES) $(ARIKKEI_SOURCES)
 	$(CXX) $(LISTQUERY_SOURCES) $(AZ_SOURCES) $(ARIKKEI_SOURCES) -o glistquery $(LIBS) $(CXXFLAGS) $(AZ_FLAGS)
 
@@ -190,9 +159,6 @@ gmer_caller: $(GMER_CALLER_SOURCES)
 
 gassembler: $(GASSEMBLER_SOURCES) $(AZ_SOURCES) $(ARIKKEI_SOURCES)
 	$(CXX) $(GASSEMBLER_SOURCES) $(AZ_SOURCES) $(ARIKKEI_SOURCES) -o gassembler $(LIBS) $(CXXFLAGS) $(AZ_FLAGS)
-
-distro: $(DISTRO_SOURCES)
-	$(CXX) $(DISTRO_SOURCES) -o distro $(LIBS) $(CXXFLAGS) -Wall
 
 aleq: $(ALEQ_SOURCES)
 	$(CXX) $(ALEQ_SOURCES) -o aleq $(LIBS) $(CXXFLAGS) -Wall

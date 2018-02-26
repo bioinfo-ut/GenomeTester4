@@ -30,10 +30,10 @@
 #include "utils.h"
 #include "sequence.h"
 #include "sequence-stream.h"
-#include "wordtable.h"
-#include "word-map.h"
 #include "fasta.h"
 #include "version.h"
+#include "word-map.h"
+#include "word-table.h"
 
 typedef struct _querystructure {
 	GT4WordMap *map;

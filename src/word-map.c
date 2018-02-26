@@ -28,11 +28,11 @@
 #include <string.h>
 #include <sys/mman.h>
 
-#include "wordtable.h"
 #include "sequence.h"
 #include "common.h"
 #include "utils.h"
 #include "listmaker-queue.h"
+#include "word-table.h"
 
 #include "word-map.h"
 
@@ -172,7 +172,7 @@ gt4_word_map_delete (GT4WordMap *wmap)
 unsigned int 
 word_map_search_query (GT4WordMap *map, unsigned long long query, parameters *p, int printall, unsigned int equalmmonly, unsigned int dosubtraction, GT4WordMap *querymap)
 {
-  static wordtable mm_table = {0};
+  static GT4WordTable mm_table = {0};
   unsigned long long i, nwords = 0L;
   unsigned int count = 0L, currentcount = 0L, querycount = 0L;
 
