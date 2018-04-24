@@ -65,6 +65,25 @@ LISTCOMPARE_SOURCES = \
 	word-map.c word-map.h \
 	word-table.c word-table.h
 
+GDISTRIBUTION_SOURCES = \
+	gdistribution.c \
+	fasta.c \
+	sequence.c \
+	sequence-block.c sequence-block.h \
+	sequence-file.c sequence-file.h \
+	sequence-source.c sequence-source.h \
+	sequence-stream.c sequence-stream.h \
+	sequence-zstream.c sequence-zstream.h \
+	common.c \
+	utils.c \
+	queue.c queue.h \
+	listmaker-queue.c listmaker-queue.h \
+	word-array-sorted.c word-array-sorted.h \
+	word-list.c word-list.h \
+	word-list-stream.c word-list-stream.h \
+	word-map.c word-map.h \
+	word-table.c word-table.h
+
 GMER_COUNTER_SOURCES = \
 	gmer_counter.c \
 	database.c database.h \
@@ -150,6 +169,9 @@ glistquery: $(LISTQUERY_SOURCES) $(AZ_SOURCES) $(ARIKKEI_SOURCES)
 
 glistcompare: $(LISTCOMPARE_SOURCES) $(AZ_SOURCES) $(ARIKKEI_SOURCES)
 	$(CXX) $(LISTCOMPARE_SOURCES) $(AZ_SOURCES) $(ARIKKEI_SOURCES) -o glistcompare $(LIBS) $(CXXFLAGS) $(AZ_FLAGS)
+
+gdistribution: $(GDISTRIBUTION_SOURCES) $(AZ_SOURCES) $(ARIKKEI_SOURCES)
+	$(CXX) $(GDISTRIBUTION_SOURCES) $(AZ_SOURCES) $(ARIKKEI_SOURCES) -o gdistribution $(LIBS) $(CXXFLAGS) $(AZ_FLAGS)
 
 gmer_counter: $(GMER_COUNTER_SOURCES) $(AZ_SOURCES) $(ARIKKEI_SOURCES)
 	$(CXX) $(GMER_COUNTER_SOURCES) $(AZ_SOURCES) $(ARIKKEI_SOURCES) -o gmer_counter $(LIBS) $(CXXFLAGS) $(AZ_FLAGS)

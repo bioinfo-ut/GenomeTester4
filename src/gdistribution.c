@@ -29,7 +29,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-#include "wordmap.h"
+#include "word-map.h"
+#include "version.h"
 
 #define ELSIZE (sizeof (unsigned long long) + sizeof (unsigned int))
 #define MAP_WORD(m,i) *((unsigned long long *) ((m)->wordlist + (i) * ELSIZE))
@@ -40,7 +41,7 @@ typedef struct {
   unsigned int count;
 } Freq;
 
-static void get_distribution (wordmap *maps[2]);
+static void get_distribution (GT4WordMap *maps[2]);
 
 static void
 print_usage (FILE *ofs) {
@@ -51,7 +52,7 @@ int
 main (int argc, const char *argv[])
 {
   const char *names[2];
-  wordmap *maps[2];
+  GT4WordMap *maps[2];
   Freq *freqs;
   
   if (argc < 3) {
@@ -64,8 +65,8 @@ main (int argc, const char *argv[])
 
   if (debug) fprintf (stderr, "%s %s\n", names[0], names[1]);
   
-  maps[0] = wordmap_new (names[0], 1);
-  maps[1] = wordmap_new (names[1], 1);
+  maps[0] = gt4_word_map_new (names[0], VERSION_MAJOR, 1);
+  maps[1] = gt4_word_map_new (names[1], VERSION_MAJOR, 1);
   
   get_distribution (maps);
   
@@ -79,7 +80,7 @@ static int compare (const void *lhs, const void *rhs) {
 }
 
 static void
-get_distribution (wordmap *maps[2])
+get_distribution (GT4WordMap *maps[2])
 {
   unsigned long long size, i0, i1, fidx;
   unsigned int j, count;
