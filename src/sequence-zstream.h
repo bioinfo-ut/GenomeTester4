@@ -54,6 +54,7 @@ struct _GT4SequenceZStream {
   /* ZLib data */
   z_stream z_strm;
   unsigned char *z_in;
+  unsigned int has_input;
   unsigned char *z_out;
   unsigned int z_out_len;
   unsigned int z_out_pos;

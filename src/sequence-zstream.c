@@ -33,12 +33,11 @@
 
 static const unsigned int zstream_debug = 0;
 
-#define GT4_SEQUENCE_STREAM_Z_CHUNK_SIZE 16384
+#define GT4_SEQUENCE_STREAM_Z_CHUNK_SIZE 16 * 16384
 #define windowBits 15
 #define ENABLE_ZLIB_GZIP 32
 
-#define _GZIP_BITS (windowBits | ENABLE_ZLIB_GZIP)
-#define GZIP_BITS (32 + MAX_WBITS)
+#define GZIP_BITS (windowBits + ENABLE_ZLIB_GZIP)
 
 static void sequence_zstream_class_init (GT4SequenceZStreamClass *klass);
 static void sequence_zstream_init (GT4SequenceZStreamClass *klass, GT4SequenceZStream *stream);
@@ -113,7 +112,7 @@ sequence_zstream_open (GT4SequenceSourceImplementation *impl, GT4SequenceSourceI
   if (!stream->ifs) stream->ifs = fopen (stream->filename, "r");
   if (!stream->ifs) return 0;
 
-  stream->z_strm.next_in = stream->z_in;
+  stream->z_strm.next_in = NULL;
   stream->z_strm.avail_in = 0;
   z_status = inflateInit2 (&stream->z_strm, GZIP_BITS);
   if (z_status < 0) return 0;
@@ -129,43 +128,73 @@ sequence_zstream_read (GT4SequenceSourceImplementation *impl, GT4SequenceSourceI
 
   while (stream->z_out_pos >= stream->z_out_len) {
     /* Outbuffer is exhausted */
-    if (!stream->ifs_eof && (stream->z_strm.avail_in == 0)) {
+    if (!stream->ifs_eof && !stream->has_input) {
       /* Read more input */
       result = fread (stream->z_in, 1, GT4_SEQUENCE_STREAM_Z_CHUNK_SIZE, stream->ifs);
+      if (feof (stream->ifs)) {
+        if (zstream_debug) fprintf (stderr, "sequence_zstream_read: end of stream\n");
+        stream->ifs_eof = 1;
+      }
       if (!result) {
-        if (!feof (stream->ifs)) {
+        if (!stream->ifs_eof) {
           if (zstream_debug > 1) fprintf (stderr, "sequence_zstream_read: error reading stream\n");
           return -1;
         }
-        stream->ifs_eof = 1;
-        if (zstream_debug) fprintf (stderr, "sequence_zstream_read: end of stream\n");
         return 0;
+      } else {
+        if (zstream_debug > 2) fprintf (stderr, "sequence_zstream_read: read %u bytes from ifs\n", result);
+        stream->total_ifs += result;
+        stream->z_strm.next_in = stream->z_in;
+        stream->z_strm.avail_in = result;
+        stream->has_input = 1;
       }
-      stream->total_ifs += result;
-      stream->z_strm.avail_in = result;
-      stream->z_strm.next_in = stream->z_in;
     }
     /* Try to inflate more */
+    if (zstream_debug > 2) fprintf (stderr, "sequence_zstream_read: avail_in %u\n", stream->z_strm.avail_in);
+    if (zstream_debug > 2) fprintf (stderr, "sequence_zstream_read: out_pos %u out_len %u\n", stream->z_out_pos, stream->z_out_len);
     stream->z_strm.avail_out = GT4_SEQUENCE_STREAM_Z_CHUNK_SIZE;
     stream->z_strm.next_out = stream->z_out;
     result = inflate (&stream->z_strm, Z_NO_FLUSH);
     if (result < 0) {
-      if (zstream_debug) fprintf (stderr, "sequence_zstream_read: inflate error %d\n", result);
-      return -1;
+      if (result != Z_BUF_ERROR) {
+        /* Error in decoding */
+        if (zstream_debug) fprintf (stderr, "sequence_zstream_read: inflate error %d\n", result);
+        return -1;
+      } else {
+        /* Probably need more data in buffer */
+        if (zstream_debug > 1) fprintf (stderr, "sequence_zstream_read: buffer error (avail_out %u)\n", stream->z_strm.avail_out);
+      }
     }
-    if (stream->z_strm.avail_out < GT4_SEQUENCE_STREAM_Z_CHUNK_SIZE) {
-      if (zstream_debug > 2) fprintf (stderr, "sequence_zstream_read: uncompressed %u bytes\n", GT4_SEQUENCE_STREAM_Z_CHUNK_SIZE - stream->z_strm.avail_out);
-      stream->z_out_len = GT4_SEQUENCE_STREAM_Z_CHUNK_SIZE - stream->z_strm.avail_out;
-      stream->z_out_pos = 0;
-      break;
-    }
-    if (zstream_debug > 2) fprintf (stderr, "sequence_zstream_read: 0 bytes\n");
     if (result == Z_STREAM_END) {
-      if (zstream_debug) fprintf (stderr, "sequence_zstream_read: zstream end\n");
-      return 0;
+      /* Given compressed stream ended */
+      if (stream->has_input) {
+        if (result == Z_STREAM_END) {
+          /* Try to start new stream */
+          if (zstream_debug > 1) fprintf (stderr, "sequence_zstream_read: not eof, trying to start new stream\n");
+          result = inflateEnd (&stream->z_strm);
+          if (zstream_debug > 1) fprintf (stderr, "sequence_zstream_read: inflateEnd result %d\n", result);
+          if (result < 0) return -1;
+          result = inflateInit2 (&stream->z_strm, GZIP_BITS);
+          if (zstream_debug > 1) fprintf (stderr, "sequence_zstream_read: inflateInit result %d\n", result);
+          if (result < 0) return -1;
+          result = inflate (&stream->z_strm, Z_NO_FLUSH);
+          if (zstream_debug > 1) fprintf (stderr, "sequence_zstream_read: inflate result %d\n", result);
+          if ((result < 0) && (result != Z_BUF_ERROR)) return -1;
+        }
+      }
+    }
+    if (zstream_debug > 1) fprintf (stderr, "sequence_zstream_read: uncompressed %u bytes\n", GT4_SEQUENCE_STREAM_Z_CHUNK_SIZE - stream->z_strm.avail_out);
+    stream->z_out_len = GT4_SEQUENCE_STREAM_Z_CHUNK_SIZE - stream->z_strm.avail_out;
+    stream->z_out_pos = 0;
+    if (stream->z_strm.avail_out < GT4_SEQUENCE_STREAM_Z_CHUNK_SIZE) {
+      /* Wrote some data */
+      break;
+    } else {
+      if (zstream_debug > 1) fprintf (stderr, "sequence_zstream_read: need more input\n");
+      stream->has_input = 0;
+      if (stream->ifs_eof) return 0;
     }
   }
-
   return stream->z_out[stream->z_out_pos++];
 }
 

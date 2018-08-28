@@ -92,7 +92,10 @@ fasta_reader_read_nwords (GT4FastaReader *reader, unsigned long long maxwords,
     /* int cval = reader->read (reader->read_data); */
     int cval = gt4_sequence_source_read (reader->impl, reader->inst);
     /* Read error */
-    if (cval < 0) return cval;
+    if (cval < 0) {
+      reader->in_eof = 1;
+      return cval;
+    }
     /* EOF */
     if (cval == 0) {
       reader->in_eof = 1;
