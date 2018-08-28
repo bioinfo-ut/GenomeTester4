@@ -29,14 +29,14 @@
 #include <sys/stat.h>
 #include <unistd.h>
                
-#include "wordtable.h"
-#include "word-list-stream.h"
-#include "word-map.h"
 #include "common.h"
 #include "utils.h"
 #include "sequence.h"
 #include "listmaker-queue.h"
 #include "version.h"
+#include "word-list-stream.h"
+#include "word-map.h"
+#include "word-table.h"
 
 #define USE_SCOUTS use_scouts
 
@@ -65,7 +65,7 @@ static int compare_wordmaps (AZObject *list1, AZObject *list2, int find_union, i
 static unsigned int union_multi (AZObject *m[], unsigned int nmaps, unsigned int cutoff, int ofile, GT4ListHeader *header);
 static unsigned int subset (GT4WordMap *map, unsigned int subset_method, unsigned long long subset_size, const char *filename);
 static int compare_wordmaps_mm (GT4WordMap *map1, GT4WordMap *map2, int find_diff, int find_ddiff, int subtract, int countonly, const char *out, unsigned int cutoff, unsigned int nmm, int rule);
-static unsigned long long fetch_relevant_words (wordtable *table, GT4WordMap *map, GT4WordMap *querymap, unsigned int cutoff, unsigned int nmm, FILE *f, int subtract, int countonly, unsigned long long *totalfreq);
+static unsigned long long fetch_relevant_words (GT4WordTable *table, GT4WordMap *map, GT4WordMap *querymap, unsigned int cutoff, unsigned int nmm, FILE *f, int subtract, int countonly, unsigned long long *totalfreq);
 static void print_help (int exitvalue);
 
 #define MAX_FILES 1024
@@ -279,7 +279,7 @@ int main (int argc, const char *argv[])
     GT4WordMap *map1, *map2;
     int cinf;
     map1 = gt4_word_map_new (fnames[0], VERSION_MAJOR, USE_SCOUTS);
-    map2 = gt4_word_map_new (fnames[1], VERSION_MINOR, USE_SCOUTS);
+    map2 = gt4_word_map_new (fnames[1], VERSION_MAJOR, USE_SCOUTS);
     if (!map1 || !map2) {
       fprintf (stderr, "Error: Creating the wordmap failed!\n");
       exit (1);
@@ -544,6 +544,7 @@ compare_wordmaps (AZObject *list1, AZObject *list2, int find_union, int find_int
   h_out.version_major = VERSION_MAJOR;
   h_out.version_minor = VERSION_MINOR;
   h_out.wordlength = inst1->word_length;
+  h_out.list_start = sizeof (GT4ListHeader);
 
   /* add headers and close files */
   if (find_union && !countonly) {
@@ -616,7 +617,7 @@ union_multi (AZObject *m[], unsigned int nmaps, unsigned int cutoff, int ofile, 
   header->wordlength = insts[0]->word_length;
   header->nwords = 0;
   header->totalfreq = 0;
-  header->padding = sizeof (GT4ListHeader);
+  header->list_start = sizeof (GT4ListHeader);
 
   t_s = get_time ();
 
@@ -684,7 +685,7 @@ union_multi (AZObject *m[], unsigned int nmaps, unsigned int cutoff, int ofile, 
 static unsigned int
 subset (GT4WordMap *map, unsigned int subset_method, unsigned long long subset_size, const char *filename)
 {
-  wordtable *wt;
+  GT4WordTable *wt;
   unsigned long long i;
 
   wt = wordtable_new (map->header->wordlength, subset_size);
@@ -736,9 +737,9 @@ compare_wordmaps_mm (GT4WordMap *map1, GT4WordMap *map2, int find_diff, int find
   char fname[256]; /* the length is limited in main(..) method */
 
   /* wordtables for -diff and -ddiff in case we want to use mismatches */
-  wordtable tables[2];
-  wordtable *difftable = &tables[0];
-  wordtable *ddifftable = &tables[1];
+  GT4WordTable tables[2];
+  GT4WordTable *difftable = &tables[0];
+  GT4WordTable *ddifftable = &tables[1];
 
   cinf = compare_word_map_headers (map1->header, map2->header);
   if (cinf == -1) {
@@ -754,8 +755,8 @@ compare_wordmaps_mm (GT4WordMap *map1, GT4WordMap *map2, int find_diff, int find
   if (v) return v;
 
   /* filling wordtables */
-  memset (difftable, 0, sizeof (wordtable));
-  memset (ddifftable, 0, sizeof (wordtable));
+  memset (difftable, 0, sizeof (GT4WordTable));
+  memset (ddifftable, 0, sizeof (GT4WordTable));
   if (nmm && find_diff) {
     difftable->wordlength = map1->header->wordlength;
   }
@@ -880,7 +881,7 @@ compare_wordmaps_mm (GT4WordMap *map1, GT4WordMap *map2, int find_diff, int find
 }
 
 static unsigned long long
-fetch_relevant_words (wordtable *table, GT4WordMap *map, GT4WordMap *querymap, unsigned int cutoff, unsigned int nmm, FILE *f, int subtract, int countonly, unsigned long long *totalfreq)
+fetch_relevant_words (GT4WordTable *table, GT4WordMap *map, GT4WordMap *querymap, unsigned int cutoff, unsigned int nmm, FILE *f, int subtract, int countonly, unsigned long long *totalfreq)
 {
   parameters p = {0};
   unsigned long long ri, wi, word, sumfreq = 0L, count = 0L;
@@ -898,7 +899,7 @@ fetch_relevant_words (wordtable *table, GT4WordMap *map, GT4WordMap *querymap, u
               fprintf (stderr, "cnmm %u ri %llu wi %llu\n", cnmm, ri, wi);
             }
       word = table->words[ri];
-      freq = table->frequencies[ri];      
+      freq = table->freqs[ri];      
       sumfreq = word_map_search_query (map, word, &p, 0, 1, subtract, querymap);
       
       
@@ -909,7 +910,7 @@ fetch_relevant_words (wordtable *table, GT4WordMap *map, GT4WordMap *querymap, u
         
       } else if (sumfreq < cutoff) {
         table->words[wi] = word;
-        table->frequencies[wi] = freq;
+        table->freqs[wi] = freq;
         wi += 1;
       }
 

@@ -45,12 +45,10 @@ compare_kmer_counts (const NKMer *lhs, const NKMer *rhs)
 }
 
 NSeq *
-n_seq_new (const char *str, unsigned int wlen)
+n_seq_new_length (const char *str, unsigned int len, unsigned int wlen)
 {
   NSeq *seq;
-  unsigned long long len;
   unsigned int i, j;
-  len = strlen (str);
   seq = (NSeq *) malloc (sizeof (NSeq));
   memset (seq, 0, sizeof (NSeq));
   seq->wlen = wlen;
@@ -86,6 +84,12 @@ n_seq_new (const char *str, unsigned int wlen)
     }
   }
   return seq;
+}
+
+NSeq *
+n_seq_new (const char *str, unsigned int wlen)
+{
+  return n_seq_new_length (str, (unsigned int) strlen (str), wlen);
 }
 
 void

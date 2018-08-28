@@ -28,17 +28,15 @@
 #include <string.h>
 #include <sys/mman.h>
 
-#include "wordtable.h"
 #include "sequence.h"
 #include "common.h"
 #include "utils.h"
 #include "listmaker-queue.h"
+#include "word-table.h"
 
 #include "word-map.h"
 
 unsigned int debug_wordmap = 0;
-
-unsigned int GT4_LIST_CODE = 'G' << 24 | 'T' << 16 | '4' << 8 | 'C';
 
 static void word_map_class_init (GT4WordMapClass *klass);
 /* AZObject implementation */
@@ -115,7 +113,7 @@ GT4WordMap *
 gt4_word_map_new (const char *listfilename, unsigned int major_version, unsigned int scout)
 {
   const unsigned char *cdata;
-  unsigned long long csize;
+  unsigned long long csize, start;
   GT4WordMap *wmap;
 
   cdata = gt4_mmap (listfilename, &csize);
@@ -144,12 +142,17 @@ gt4_word_map_new (const char *listfilename, unsigned int major_version, unsigned
     gt4_word_map_delete (wmap);
     return NULL;
   }
-  if (csize != sizeof (GT4ListHeader) + wmap->header->nwords * 12) {
-    fprintf (stderr, "gt4_word_map_new: invalid file size (%llu, should be %llu)\n", csize, sizeof (GT4ListHeader) + wmap->header->nwords * 12);
+  if ((wmap->header->version_major == 4) && (wmap->header->version_minor == 0)) {
+    start = sizeof (GT4ListHeader);
+  } else {
+    start = wmap->header->list_start;
+  }
+  wmap->wordlist = cdata + start;
+  if (csize < start + wmap->header->nwords * 12) {
+    fprintf (stderr, "gt4_word_map_new: file size too small (%llu, should be at least %llu)\n", csize, start + wmap->header->nwords * 12);
     gt4_word_map_delete (wmap);
     return NULL;
   }
-  wmap->wordlist = cdata + sizeof (GT4ListHeader);
   if (scout) {
     scout_mmap ((const unsigned char *) cdata, csize);
   }
@@ -174,7 +177,7 @@ gt4_word_map_delete (GT4WordMap *wmap)
 unsigned int 
 word_map_search_query (GT4WordMap *map, unsigned long long query, parameters *p, int printall, unsigned int equalmmonly, unsigned int dosubtraction, GT4WordMap *querymap)
 {
-  static wordtable mm_table = {0};
+  static GT4WordTable mm_table = {0};
   unsigned long long i, nwords = 0L;
   unsigned int count = 0L, currentcount = 0L, querycount = 0L;
 

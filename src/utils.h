@@ -29,6 +29,18 @@
 /* Memory-map a given file */
 const unsigned char *gt4_mmap (const char *filename, unsigned long long *csize);
 
+/* MMap scouting */
+
+typedef struct _MapData MapData;
+struct _MapData {
+  const unsigned char *cdata;
+  unsigned long long csize;
+};
+
+/* Create new thread that reads mmap into resident memory */
+void scout_mmap (const unsigned char *cdata, unsigned long long csize);
+void delete_scouts ();
+
 /* Memory-unmap a previously mapped file */
 void gt4_munmap (const unsigned char *cdata, unsigned long long csize);
 
@@ -43,6 +55,7 @@ unsigned long long rand_long_long (unsigned long long min, unsigned long long ma
 /* Line ends with \n (or at csize), tokens end with \t */
 /* Return number of tokens */
 unsigned int split_line (const unsigned char *cdata, unsigned long long csize, const unsigned char *tokenz[], unsigned int lengths[], unsigned int max_tokens);
+unsigned int split_line_chr (const unsigned char *cdata, unsigned long long csize, const unsigned char *tokenz[], unsigned int lengths[], unsigned int max_tokens, unsigned int chr);
 
 /* Print number as binary with given number of digits (0 - start from leftmost 1) */
 /* Returns the length of string (not counting terminating 0) */

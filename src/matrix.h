@@ -98,6 +98,7 @@ struct _NMatrix {
 };
 
 NSeq *n_seq_new (const char *str, unsigned int wlen);
+NSeq *n_seq_new_length (const char *str, unsigned int length, unsigned int wlen);
 void n_seq_delete (NSeq *seq);
 unsigned int n_seq_get_kmer (NSeq *seq, unsigned int pos, unsigned long long *kmer);
 unsigned int n_seq_get_kmer_unique_pos (NSeq *seq, unsigned long long word);

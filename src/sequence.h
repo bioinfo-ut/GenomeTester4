@@ -28,7 +28,7 @@
 extern const char *alphabet;
 #endif
 
-#include "wordtable.h"
+#include "word-table.h"
 
 unsigned long long get_nucl_value (char nucl);
 
@@ -38,7 +38,7 @@ unsigned long long get_reverse_complement (unsigned long long word, unsigned int
 
 unsigned long long get_canonical_word (unsigned long long word, unsigned int wordlength);
 
-unsigned long long generate_mismatches (wordtable *mmtable, unsigned long long word, unsigned int wordlength,
+unsigned long long generate_mismatches (GT4WordTable *mmtable, unsigned long long word, unsigned int wordlength,
 		unsigned int givenfreq, unsigned int nmm, unsigned int startsite, int usesmallercomplement, int countonly,
 		int equalmmonly);
 

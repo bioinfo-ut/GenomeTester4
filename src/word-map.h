@@ -43,27 +43,15 @@ typedef struct _GT4WordMapClass GT4WordMapClass;
 extern GT4WordMapClass *gt4_word_map_class;
 /* Defaults to 0, can be increased to print debug information */
 extern unsigned int debug_wordmap;
-/* List tag "GT4C" encoded to big-endian 32-bit integer */
-extern unsigned int GT4_LIST_CODE;
 #endif
 
 #include <az/object.h>
 
+#include "word-list.h"
+
 #include "word-array-sorted.h"
 
 #define WORDMAP_ELEMENT_SIZE (sizeof (unsigned long long) + sizeof (unsigned int))
-
-typedef struct _GT4ListHeader GT4ListHeader;
-
-struct _GT4ListHeader {
-  unsigned int code;
-  unsigned int version_major;
-  unsigned int version_minor;
-  unsigned int wordlength;
-  unsigned long long nwords;
-  unsigned long long totalfreq;
-  unsigned long long padding;
-};
 
 typedef struct _parameters {
 	unsigned int wordlength;

@@ -166,3 +166,25 @@ gt4_queue_add_task (GT4Queue *queue, GT4Task *task, unsigned int lock)
   if (lock) gt4_queue_unlock (queue);
 }
 
+void
+gt4_queue_remove_task (GT4Queue *queue, GT4Task *task, unsigned int lock)
+{
+  GT4Task *cur, *prev;
+  if (lock) gt4_queue_lock (queue);
+  prev = NULL;
+  cur = queue->tasks;
+  while (cur) {
+    if (cur == task) {
+      if (prev) {
+        prev->next = task->next;
+      } else {
+        queue->tasks = task->next;
+      }
+      break;
+    }
+    prev = cur;
+    cur = cur->next;
+  }
+  if (lock) gt4_queue_unlock (queue);
+}
+

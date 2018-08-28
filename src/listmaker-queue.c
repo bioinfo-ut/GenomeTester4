@@ -68,8 +68,12 @@ listmaker_queue_init (GT4ListMakerQueueClass *klass, GT4ListMakerQueue *mq)
 static void
 listmaker_queue_finalize (GT4ListMakerQueueClass *klass, GT4ListMakerQueue *mq)
 {
+  unsigned int i;
   free (mq->free_s_tables);
   free (mq->used_s_tables);
+  for (i = 0; i < mq->n_tmp_files; i++) {
+    free (mq->tmp_files[i]);
+  }
 }
 
 void
@@ -79,8 +83,8 @@ maker_queue_setup (GT4ListMakerQueue *mq, unsigned int n_threads, unsigned int w
   az_instance_init (mq, GT4_TYPE_LISTMAKER_QUEUE);
   gt4_queue_setup (&mq->queue, n_threads);
   mq->wordlen = wlen;
-  mq->free_s_tables = (wordtable **) malloc (n_tmp_tables * sizeof (wordtable *));
-  mq->used_s_tables = (wordtable **) malloc (n_tmp_tables * sizeof (wordtable *));
+  mq->free_s_tables = (GT4WordTable **) malloc (n_tmp_tables * sizeof (GT4WordTable *));
+  mq->used_s_tables = (GT4WordTable **) malloc (n_tmp_tables * sizeof (GT4WordTable *));
   for (i = 0; i < n_tmp_tables; i++) {
     mq->free_s_tables[mq->n_free_s_tables++] = wordtable_new (wlen, tmp_table_size);
   }
@@ -152,123 +156,6 @@ maker_queue_add_file (GT4ListMakerQueue *mq, const char *filename, unsigned int 
   }
 }
 
-wordtable *
-queue_get_smallest_table (GT4ListMakerQueue *queue)
-{
-	unsigned int i, min;
-	unsigned long long minslots;
-	wordtable *t;
-	min = 0;
-	minslots = queue->available[0]->nwordslots;
-	for (i = 1; i < queue->navailable; i++) {
-		if (queue->available[i]->nwordslots < minslots) {
-			min = i;
-			minslots = queue->available[i]->nwordslots;
-		}
-	}
-	t = queue->available[min];
-	queue->available[min] = queue->available[queue->navailable - 1];
-	queue->navailable -= 1;
-	return t;
-}
-
-wordtable *
-queue_get_largest_table (GT4ListMakerQueue *queue)
-{
-	unsigned int i, max;
-	unsigned long long maxslots;
-	wordtable *t;
-	max = 0;
-	maxslots = queue->available[0]->nwordslots;
-	for (i = 1; i < queue->navailable; i++) {
-		if (queue->available[i]->nwordslots > maxslots) {
-			max = i;
-			maxslots = queue->available[i]->nwordslots;
-		}
-	}
-	t = queue->available[max];
-	queue->available[max] = queue->available[queue->navailable - 1];
-	queue->navailable -= 1;
-	return t;
-}
-
-wordtable *
-queue_get_sorted (GT4ListMakerQueue *queue)
-{
-	queue->nsorted -= 1;
-	return queue->sorted[queue->nsorted];
-}
-
-wordtable *
-queue_get_smallest_sorted (GT4ListMakerQueue *queue)
-{
-	unsigned int i, min;
-	unsigned long long minwords;
-	wordtable *t;
-	min = 0;
-	minwords = queue->sorted[0]->nwords;
-	for (i = 1; i < queue->nsorted; i++) {
-		if (queue->sorted[i]->nwords < minwords) {
-			min = i;
-			minwords = queue->sorted[i]->nwords;
-		}
-	}
-	t = queue->sorted[min];
-	queue->sorted[min] = queue->sorted[queue->nsorted - 1];
-	queue->nsorted -= 1;
-	return t;
-}
-
-wordtable *
-queue_get_mostavailable_sorted (GT4ListMakerQueue *queue)
-{
-	unsigned int i, max;
-	unsigned long long maxavail;
-	wordtable *t;
-	max = 0;
-	maxavail = queue->sorted[0]->nwordslots - queue->sorted[0]->nwords;
-	for (i = 1; i < queue->nsorted; i++) {
-		if ((queue->sorted[i]->nwordslots - queue->sorted[0]->nwords) > maxavail) {
-			max = i;
-			maxavail = queue->sorted[i]->nwordslots - queue->sorted[i]->nwords;
-		}
-	}
-	t = queue->sorted[max];
-	queue->sorted[max] = queue->sorted[queue->nsorted - 1];
-	queue->nsorted -= 1;
-	return t;
-}
-
-static unsigned int finish = 0;
-
-static void *
-scout_map (void *arg)
-{
-  MapData *map = (MapData *) arg;
-  unsigned long long i, val = 0;
-  for (i = 0; i < map->csize; i += 1000) {
-    val += map->cdata[i];
-    if (finish) break;
-  }
-  free (map);
-  return (void *) val;
-}
-
-void
-scout_mmap (const unsigned char *cdata, unsigned long long csize)
-{
-  pthread_t thread;
-  MapData *map = (MapData *) malloc (sizeof (MapData));
-  map->cdata = cdata;
-  map->csize = csize;
-  pthread_create (&thread, NULL, scout_map, map);
-}
-
-void
-delete_scouts () {
-  finish = 1;
-}
-
 /* Tasks */
 
 TaskRead *
@@ -298,20 +185,43 @@ task_read_delete (TaskRead *tr)
   free (tr);
 }
 
-TaskCollate *
-task_collate_new (GT4ListMakerQueue *mq, unsigned int max_tables)
+TaskCollateTables *
+task_collate_tables_new (GT4ListMakerQueue *mq, unsigned int max_tables)
 {
-  TaskCollate *tc;
-  tc = (TaskCollate *) malloc (sizeof (TaskCollate) + (max_tables - 1) * sizeof (wordtable *));
-  memset (tc, 0, sizeof (TaskCollate));
+  TaskCollateTables *tc;
+  tc = (TaskCollateTables *) malloc (sizeof (TaskCollateTables) + (max_tables - 1) * sizeof (GT4WordTable *));
+  memset (tc, 0, sizeof (TaskCollateTables));
   tc->task.queue = &mq->queue;
-  tc->task.type = TASK_COLLATE;
+  tc->task.type = TASK_COLLATE_TABLES;
+  tc->task.priority = 9;
   return tc;
 }
 
 void
-task_collate_delete (TaskCollate *tc)
+task_collate_tables_delete (TaskCollateTables *tc)
 {
+  free (tc);
+}
+
+TaskCollateFiles *
+task_collate_files_new (GT4ListMakerQueue *mq, unsigned int max_files)
+{
+  TaskCollateFiles *tc;
+  tc = (TaskCollateFiles *) malloc (sizeof (TaskCollateFiles) + (max_files - 1) * sizeof (char *));
+  memset (tc, 0, sizeof (TaskCollateFiles));
+  tc->task.queue = &mq->queue;
+  tc->task.type = TASK_COLLATE_FILES;
+  tc->task.priority = 8;
+  return tc;
+}
+
+void
+task_collate_files_delete (TaskCollateFiles *tc)
+{
+  unsigned int i;
+  for (i = 0; i < tc->n_files; i++) {
+    free (tc->files[i]);
+  }
   free (tc);
 }
 

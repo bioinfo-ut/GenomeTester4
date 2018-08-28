@@ -86,6 +86,7 @@ int fasta_reader_init (GT4FastaReader *reader, unsigned int wordlength, unsigned
 int fasta_reader_release (GT4FastaReader *reader);
 
 /* Read maximum of nwords words from FastA or fastQ file starting from position cpos */
+/* If any callback returns not 0, reading stops and result is returned */
 int fasta_reader_read_nwords (GT4FastaReader *reader, unsigned long long maxwords,
   /* Called as soon as the full sequence name is known */
   int (*start_sequence) (GT4FastaReader *, void *),

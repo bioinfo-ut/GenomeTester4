@@ -71,5 +71,6 @@ void gt4_queue_wait (GT4Queue *queue);
 void gt4_queue_broadcast (GT4Queue *queue);
 /* Put task into queue, ordererd by priority */
 void gt4_queue_add_task (GT4Queue *queue, GT4Task *task, unsigned int lock);
+void gt4_queue_remove_task (GT4Queue *queue, GT4Task *task, unsigned int lock);
 
 #endif

@@ -119,6 +119,7 @@ fasta_reader_read_nwords (GT4FastaReader *reader, unsigned long long maxwords,
         return -1;
       }
       reader->state = FASTA_READER_STATE_NAME;
+      reader->seq_npos = 0;
       reader->name_pos = reader->cpos;
       reader->name_length = 0;
       reader->cpos += 1;
