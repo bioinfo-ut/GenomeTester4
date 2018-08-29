@@ -177,8 +177,15 @@ fasta_reader_read_nwords (GT4FastaReader *reader, unsigned long long maxwords,
 	if (cval != '+') return -1;
 	reader->cpos += 1;
 	cval = gt4_sequence_source_read (reader->impl, reader->inst);
-	if (cval != '\n') return -1;
 	reader->cpos += 1;
+	while (cval != '\n') {
+	  if (cval <= 0) {
+	    reader->in_eof = 1;
+	    return -1;
+          }
+	  cval = gt4_sequence_source_read (reader->impl, reader->inst);
+	  reader->cpos += 1;
+	}
 	reader->state = FASTA_READER_STATE_QUALITY;
       } else {
 	/* Process */
