@@ -318,7 +318,7 @@ unsigned int n_fps = 0;
 static void
 print_usage (int exit_value)
 {
-  fprintf (stderr, "gassembler version %u.%u (%s)\n", VERSION_MAJOR, VERSION_MINOR, VERSION_QUALIFIER);
+  fprintf (stderr, "gassembler version %u.%u.%u (%s)\n", VERSION_MAJOR, VERSION_MINOR, VERSION_MICRO, VERSION_QUALIFIER);
   fprintf (stderr, "Usage: gassembler [OPTIONS] [KMERS...]\n");
   fprintf (stderr, "Options:\n");
   fprintf (stderr, "    -v, --version               - print version information and exit\n");
@@ -364,7 +364,7 @@ main (int argc, const char *argv[])
     
   for (i = 1; i < argc; i++) {
     if (!strcmp (argv[i], "-v") || !strcmp (argv[i], "--version")) {
-      fprintf (stdout, "gassembler version %d.%d (%s)\n", VERSION_MAJOR, VERSION_MINOR, VERSION_QUALIFIER);
+      fprintf (stdout, "gassembler version %u.%u.%u (%s)\n", VERSION_MAJOR, VERSION_MINOR, VERSION_MICRO, VERSION_QUALIFIER);
     } else if (!strcmp (argv[i], "-h") || !strcmp (argv[i], "--help")) {
       print_usage (0);
     } else if (!strcmp (argv[i], "-dbb") || !strcmp (argv[i], "-db")) {

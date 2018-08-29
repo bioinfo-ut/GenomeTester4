@@ -102,7 +102,7 @@ int main (int argc, const char *argv[])
       continue;
     }
     if (!strcmp(argv[arg_idx], "-v") || !strcmp(argv[arg_idx], "--version")) {
-      fprintf (stdout, "glistcompare version %d.%d (%s)\n", VERSION_MAJOR, VERSION_MINOR, VERSION_QUALIFIER);
+      fprintf (stdout, "glistcompare version %u.%u.%u (%s)\n", VERSION_MAJOR, VERSION_MINOR, VERSION_MICRO, VERSION_QUALIFIER);
       return 0;
     } else if (!strcmp (argv[arg_idx], "-h") || !strcmp (argv[arg_idx], "--help") || !strcmp (argv[arg_idx], "-?")) {
       print_help (0);
@@ -934,7 +934,7 @@ compare_word_map_headers (GT4ListHeader *h1, GT4ListHeader *h2)
 static void
 print_help (int exit_value)
 {
-  fprintf (stdout, "glistcompare version %u.%u (%s)\n", VERSION_MAJOR, VERSION_MINOR, VERSION_QUALIFIER);
+  fprintf (stdout, "glistcompare version %u.%u.%u (%s)\n", VERSION_MAJOR, VERSION_MINOR, VERSION_MICRO, VERSION_QUALIFIER);
   fprintf (stdout, "Usage: glistcompare INPUTLIST1 [INPUTLIST2...] METHOD [OPTIONS]\n");
   fprintf (stdout, "Options:\n");
   fprintf (stdout, "    -v, --version            - print version information and exit\n");

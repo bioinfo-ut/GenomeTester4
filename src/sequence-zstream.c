@@ -165,22 +165,20 @@ sequence_zstream_read (GT4SequenceSourceImplementation *impl, GT4SequenceSourceI
         if (zstream_debug > 1) fprintf (stderr, "sequence_zstream_read: buffer error (avail_out %u)\n", stream->z_strm.avail_out);
       }
     }
-    if (result == Z_STREAM_END) {
+    while (result == Z_STREAM_END) {
       /* Given compressed stream ended */
       if (stream->has_input) {
-        if (result == Z_STREAM_END) {
-          /* Try to start new stream */
-          if (zstream_debug > 1) fprintf (stderr, "sequence_zstream_read: not eof, trying to start new stream\n");
-          result = inflateEnd (&stream->z_strm);
-          if (zstream_debug > 1) fprintf (stderr, "sequence_zstream_read: inflateEnd result %d\n", result);
-          if (result < 0) return -1;
-          result = inflateInit2 (&stream->z_strm, GZIP_BITS);
-          if (zstream_debug > 1) fprintf (stderr, "sequence_zstream_read: inflateInit result %d\n", result);
-          if (result < 0) return -1;
-          result = inflate (&stream->z_strm, Z_NO_FLUSH);
-          if (zstream_debug > 1) fprintf (stderr, "sequence_zstream_read: inflate result %d\n", result);
-          if ((result < 0) && (result != Z_BUF_ERROR)) return -1;
-        }
+        /* Try to start new stream */
+        if (zstream_debug > 1) fprintf (stderr, "sequence_zstream_read: not eof, trying to start new stream\n");
+        result = inflateEnd (&stream->z_strm);
+        if (zstream_debug > 1) fprintf (stderr, "sequence_zstream_read: inflateEnd result %d\n", result);
+        if (result < 0) return -1;
+        result = inflateInit2 (&stream->z_strm, GZIP_BITS);
+        if (zstream_debug > 1) fprintf (stderr, "sequence_zstream_read: inflateInit result %d\n", result);
+        if (result < 0) return -1;
+        result = inflate (&stream->z_strm, Z_NO_FLUSH);
+        if (zstream_debug > 1) fprintf (stderr, "sequence_zstream_read: inflate result %d\n", result);
+        if ((result < 0) && (result != Z_BUF_ERROR)) return -1;
       }
     }
     if (zstream_debug > 1) fprintf (stderr, "sequence_zstream_read: uncompressed %u bytes\n", GT4_SEQUENCE_STREAM_Z_CHUNK_SIZE - stream->z_strm.avail_out);

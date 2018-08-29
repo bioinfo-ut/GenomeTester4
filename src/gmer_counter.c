@@ -80,7 +80,7 @@ static unsigned int get_pair_median (KMerDB *db);
 
 static void
 print_usage (FILE *ofs) {
-  fprintf (ofs, "gmer_counter version %u.%u (%s)\n", VERSION_MAJOR, VERSION_MINOR, VERSION_QUALIFIER);
+  fprintf (ofs, "gmer_counter version %u.%u.%u (%s)\n", VERSION_MAJOR, VERSION_MINOR, VERSION_MICRO, VERSION_QUALIFIER);
   fprintf (ofs, "Usage:\n");
   fprintf (ofs, "  gmer_counter ARGUMENTS SEQUENCES...\n");
   fprintf (ofs, "Arguments:\n");
@@ -168,7 +168,7 @@ main (int argc, const char *argv[])
   
   for (i = 1; i < argc; i++) {
     if (!strcmp (argv[i], "-v") || !strcmp (argv[i], "--version")) {
-      fprintf (stdout, "gmer_counter version %d.%d (%s)\n", VERSION_MAJOR, VERSION_MINOR, VERSION_QUALIFIER);
+      fprintf (stdout, "gmer_counter version %u.%u.%u (%s)\n", VERSION_MAJOR, VERSION_MINOR, VERSION_MICRO, VERSION_QUALIFIER);
       exit (0);
     } else if (!strcmp (argv[i], "-db")) {
       /* Database */
@@ -389,7 +389,7 @@ main (int argc, const char *argv[])
       fprintf (stderr, "Finished reading files\n");
     }
 
-    fprintf (stdout, "#gmer_counter version %u.%u (%s)\n", VERSION_MAJOR, VERSION_MINOR, VERSION_QUALIFIER);
+    fprintf (stdout, "#gmer_counter version %u.%u.%u (%s)\n", VERSION_MAJOR, VERSION_MINOR, VERSION_MICRO, VERSION_QUALIFIER);
     if (db_name) fprintf (stdout, "#TextDatabase\t%s\n", db_name);
     if (dbb) fprintf (stdout, "#BinaryDatabase\t%s\n", dbb);
         

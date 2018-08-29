@@ -103,7 +103,7 @@ main (int argc, const char *argv[])
   for (argidx = 1; argidx < argc; argidx++) {
 
     if (!strcmp (argv[argidx], "-v") || !strcmp (argv[argidx], "--version")) {
-      fprintf (stdout, "glistmaker version %d.%d (%s)\n", VERSION_MAJOR, VERSION_MINOR, VERSION_QUALIFIER);
+      fprintf (stdout, "glistmaker version %u.%u.%u (%s)\n", VERSION_MAJOR, VERSION_MINOR, VERSION_MICRO, VERSION_QUALIFIER);
       return 0;
 
     } else if (!strcmp (argv[argidx], "-h") || !strcmp (argv[argidx], "--help") || !strcmp (argv[argidx], "-?")) {
@@ -658,7 +658,7 @@ merge_write_multi_nofreq (GT4WordTable *tables[], unsigned int ntables_in, int o
 void 
 print_help (int exitvalue)
 {
-  fprintf (stderr, "glistmaker version %u.%u (%s)\n", VERSION_MAJOR, VERSION_MINOR, VERSION_QUALIFIER);
+  fprintf (stderr, "glistmaker version %u.%u.%u (%s)\n", VERSION_MAJOR, VERSION_MINOR, VERSION_MICRO, VERSION_QUALIFIER);
   fprintf (stderr, "Usage: glistmaker <INPUTFILES> [OPTIONS]\n");
   fprintf (stderr, "Options:\n");
   fprintf (stderr, "    -v, --version           - print version information and exit\n");

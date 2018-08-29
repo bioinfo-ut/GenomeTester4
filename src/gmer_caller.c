@@ -470,7 +470,7 @@ print_genotypes (const unsigned char *lines[], SNPCall *calls, unsigned int ncal
 static void
 print_usage (FILE *ofs)
 {
-  fprintf (ofs, "gmer_caller version %u.%u (%s)\n", VERSION_MAJOR, VERSION_MINOR, VERSION_QUALIFIER);
+  fprintf (ofs, "gmer_caller version %u.%u.%u (%s)\n", VERSION_MAJOR, VERSION_MINOR, VERSION_MICRO, VERSION_QUALIFIER);
   fprintf (ofs, "Usage:\n");
   fprintf (ofs, "  gmer_caller ARGUMENTS COUNTS_FILE\n");
   fprintf (ofs, "Arguments:\n");
@@ -540,7 +540,7 @@ main (int argc, const char *argv[])
   aidx = 1;
   while (aidx < argc) {
     if (!strcmp (argv[aidx], "-v") || !strcmp (argv[aidx], "--version")) {
-      fprintf (stdout, "gmer_caller version %u.%u (%s)\n", VERSION_MAJOR, VERSION_MINOR, VERSION_QUALIFIER);
+      fprintf (stdout, "gmer_caller version %u.%u.%u (%s)\n", VERSION_MAJOR, VERSION_MINOR, VERSION_MICRO, VERSION_QUALIFIER);
       exit (0);
     } else if (!strcmp (argv[aidx], "-D")) {
       debug += 1;
@@ -754,7 +754,7 @@ main (int argc, const char *argv[])
 
 
   if (info) {
-    fprintf (stdout, "#gmer_counter version %u.%u (%s)\n", VERSION_MAJOR, VERSION_MINOR, VERSION_QUALIFIER);
+    fprintf (stdout, "#gmer_counter version %u.%u.%u (%s)\n", VERSION_MAJOR, VERSION_MINOR, VERSION_MICRO, VERSION_QUALIFIER);
     if (model == MODEL_FULL) fprintf (stdout, "#Sex\t%s\n", (p_XX > p_X) ? "F" : "M");
     fprintf (stdout, "#EstimatedCoverage\t%g\n", params[LAMBDA]);
     fprintf (stdout, "#AverageMAF\t%g\n", pB);

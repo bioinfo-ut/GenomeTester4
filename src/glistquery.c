@@ -80,7 +80,7 @@ int main (int argc, const char *argv[])
 	for (argidx = 1; argidx < argc; argidx++) {
 
 		if (!strcmp (argv[argidx], "-v") || !strcmp (argv[argidx], "--version")) {
-			fprintf (stdout, "glistquery version %d.%d (%s)\n", VERSION_MAJOR, VERSION_MINOR, VERSION_QUALIFIER);
+			fprintf (stdout, "glistquery version %u.%u.%u (%s)\n", VERSION_MAJOR, VERSION_MINOR, VERSION_MICRO, VERSION_QUALIFIER);
 			return 0;
 
 		} else if (!strcmp (argv[argidx], "-h") || !strcmp (argv[argidx], "--help") || !strcmp (argv[argidx], "-?")) {
@@ -491,7 +491,7 @@ print_gc (GT4WordMap *map)
 
 void print_help (int exit_value)
 {
-  	fprintf (stderr, "glistquery version %u.%u (%s)\n", VERSION_MAJOR, VERSION_MINOR, VERSION_QUALIFIER);
+  	fprintf (stderr, "glistquery version %u.%u.%u (%s)\n", VERSION_MAJOR, VERSION_MINOR, VERSION_MICRO, VERSION_QUALIFIER);
 	fprintf (stderr, "Usage: glistquery <INPUTLIST> [OPTIONS]\n");
 	fprintf (stderr, "Options:\n");
 	fprintf (stderr, "    -v, --version             - print version information and exit\n");
