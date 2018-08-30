@@ -99,14 +99,9 @@ maker_queue_release (GT4ListMakerQueue *mq)
 static void
 maker_queue_add_source (GT4ListMakerQueue *mq, AZObject *src, const char *name)
 {
-  TaskFile *tf = task_file_new_from_source (AZ_OBJECT (src), name, 0);
-  az_object_unref (AZ_OBJECT (src));
-  tf->next = mq->files;
-  mq->files = tf;
-  mq->n_files_waiting += 1;
-
-  TaskRead *tr = task_read_new (mq, src);
+  TaskRead *tr = task_read_new (&mq->queue, src, mq->wordlen);
   gt4_queue_add_task (&mq->queue, &tr->task, 0);
+  mq->n_files_waiting += 1;
 }
 
 void
@@ -158,30 +153,42 @@ maker_queue_add_file (GT4ListMakerQueue *mq, const char *filename, unsigned int 
 
 /* Tasks */
 
-TaskRead *
-task_read_new (GT4ListMakerQueue *mq, AZObject *source)
+void
+gt4_task_read_setup (TaskRead *tr, GT4Queue *queue, AZObject *source, unsigned int wordlen)
 {
-  TaskRead *tr;
   GT4SequenceSourceImplementation *impl;
   GT4SequenceSourceInstance *inst;
-  tr = (TaskRead *) malloc (sizeof (TaskRead));
   memset (tr, 0, sizeof (TaskRead));
-  tr->task.queue = &mq->queue;
+  tr->task.queue = queue;
   tr->task.type = TASK_READ;
   tr->task.priority = 10;
   tr->source = source;
   az_object_ref (AZ_OBJECT(tr->source));
   impl = (GT4SequenceSourceImplementation *) az_object_get_interface (AZ_OBJECT(tr->source), GT4_TYPE_SEQUENCE_SOURCE, (void **) &inst);
   gt4_sequence_source_open (impl, inst);
-  fasta_reader_init (&tr->reader, mq->wordlen, 1, impl, inst);
+  fasta_reader_init (&tr->reader, wordlen, 1, impl, inst);
+}
+
+void
+gt4_task_read_release (TaskRead *tr)
+{
+  fasta_reader_release (&tr->reader);
+  az_object_unref (AZ_OBJECT (tr->source));
+}
+
+TaskRead *
+task_read_new (GT4Queue *queue, AZObject *source, unsigned int wordlen)
+{
+  TaskRead *tr;
+  tr = (TaskRead *) malloc (sizeof (TaskRead));
+  gt4_task_read_setup (tr, queue, source, wordlen);
   return tr;
 }
 
 void
 task_read_delete (TaskRead *tr)
 {
-  fasta_reader_release (&tr->reader);
-  az_object_unref (AZ_OBJECT (tr->source));
+  gt4_task_read_release (tr);
   free (tr);
 }
 
@@ -225,80 +232,3 @@ task_collate_files_delete (TaskCollateFiles *tc)
   free (tc);
 }
 
-/* File parsing tasks */
-
-TaskFile *
-task_file_new (const char *filename, unsigned int scout)
-{
-  TaskFile *tf = (TaskFile *) malloc (sizeof (TaskFile));
-  memset (tf, 0, sizeof (TaskFile));
-  tf->seqfile = gt4_sequence_file_new (filename, 1);
-  tf->source = (AZObject *) tf->seqfile;
-  az_object_ref (AZ_OBJECT(tf->source));
-  tf->scout = scout;
-  return tf;
-}
-
-TaskFile *
-task_file_new_from_source (AZObject *source, const char *name, unsigned int close)
-{
-  TaskFile *tf = (TaskFile *) malloc (sizeof (TaskFile));
-  memset (tf, 0, sizeof (TaskFile));
-  tf->seqfile = gt4_sequence_file_new (name, 1);
-  tf->stream = NULL;
-  tf->source = source;
-  az_object_ref (AZ_OBJECT(tf->source));
-  tf->close_source = close;
-  return tf;
-}
-
-void
-task_file_delete (TaskFile *tf)
-{
-  if (tf->has_reader) {
-    fasta_reader_release (&tf->reader);
-  }
-  gt4_sequence_file_unref (tf->seqfile);
-  if (tf->stream) {
-    az_object_shutdown (AZ_OBJECT (tf->stream));
-  }
-  if (tf->close_source) {
-    GT4SequenceSourceImplementation *impl;
-    GT4SequenceSourceInstance *inst;
-    impl = (GT4SequenceSourceImplementation *) az_object_get_interface (AZ_OBJECT(tf->source), GT4_TYPE_SEQUENCE_SOURCE, (void **) &inst);
-    gt4_sequence_source_close (impl, inst);
-  }
-  az_object_unref (AZ_OBJECT (tf->source));
-  free (tf);
-}
-
-/* Frontend to mmap and GT4FastaReader */
-
-unsigned int
-task_file_read_nwords (TaskFile *tf, unsigned long long maxwords, unsigned int wordsize,
-  /* Called as soon as the full sequence name is known */
-  int (*start_sequence) (GT4FastaReader *, void *),
-  /* Called when the full sequence has been parsed */
-  int (*end_sequence) (GT4FastaReader *, void *),
-  int (*read_character) (GT4FastaReader *, unsigned int character, void *),
-  int (*read_nucleotide) (GT4FastaReader *, unsigned int nucleotide, void *),
-  int (*read_word) (GT4FastaReader *, unsigned long long word, void *),
-  void *data)
-{
-  if (!tf->has_reader) {
-    GT4SequenceSourceImplementation *impl;
-    GT4SequenceSourceInstance *inst;
-    impl = (GT4SequenceSourceImplementation *) az_object_get_interface (AZ_OBJECT(tf->source), GT4_TYPE_SEQUENCE_SOURCE, (void **) &inst);
-    if (!inst->open) {
-      if (!gt4_sequence_source_open (impl, inst)) {
-        fprintf (stderr, "Cannot open sequence source of %s\n", tf->seqfile->path);
-        return 1;
-      }
-      /* fixme: move scouting inside SequenceFile */
-      if (tf->scout && (tf->source == (AZObject *) tf->seqfile)) scout_mmap (tf->seqfile->block.cdata, tf->seqfile->block.csize);
-    }
-    fasta_reader_init (&tf->reader, wordsize, 1, impl, inst);
-    tf->has_reader = 1;
-  }
-  return fasta_reader_read_nwords (&tf->reader, maxwords, start_sequence, end_sequence, read_character, read_nucleotide, read_word, data);
-}

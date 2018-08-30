@@ -28,6 +28,22 @@
 
 unsigned int debug = 0;
 
+/* File parsing tasks */
+
+typedef struct _TaskFile TaskFile;
+typedef struct _SNPQueue SNPQueue;
+
+struct _TaskFile {
+  TaskRead task_read;
+  GT4SequenceFile *seqfile;
+  /* File index */
+  unsigned int idx;
+};
+
+TaskFile *task_file_new (SNPQueue *snpq, const char *filename);
+TaskFile *task_file_new_from_source (SNPQueue *snpq, AZObject *source, const char *filename);
+void task_file_delete (TaskFile *tf);
+
 typedef struct _TaskTable TaskTable;
 struct _TaskTable {
   TaskTable *next;
@@ -47,12 +63,13 @@ struct _TaskTable {
 TaskTable *task_table_new (unsigned int index);
 void task_table_free (TaskTable *tt);
 
-typedef struct _SNPQueue SNPQueue;
 struct _SNPQueue {
   GT4Queue queue;
+  unsigned int wordlen;
   /* Files to process */
   unsigned int nfiles;
-  TaskFile *files;
+  unsigned int n_read_tasks;
+  /* TaskFile *files; */
   /* Free tables */
   TaskTable *free_tables;
   /* Filled tables */
@@ -115,17 +132,17 @@ add_task (SNPQueue *snpq, const char *filename)
   if ((len > 3) && !strcmp (filename + len - 3, ".gz")) {
     fprintf (stderr, "Opening compressed stream %s\n", filename);
     GT4SequenceZStream *zstream = gt4_sequence_zstream_new (filename);
-    TaskFile *tf = task_file_new_from_source (AZ_OBJECT (zstream), filename, 0);
-    tf->next = snpq->files;
+    TaskFile *tf = task_file_new_from_source (snpq, AZ_OBJECT (zstream), filename);
     tf->idx = snpq->nfiles++;
-    snpq->files = tf;
+    gt4_queue_add_task (&snpq->queue, &tf->task_read.task, 0);
+    snpq->n_read_tasks += 1;
   } else if (!strcmp (filename, "-")) {
     GT4SequenceStream *stream;
     stream = gt4_sequence_stream_new_from_stream (stdin, 0);
-    TaskFile *tf = task_file_new_from_source (AZ_OBJECT (stream), "stdin", 0);
-    tf->next = snpq->files;
+    TaskFile *tf = task_file_new_from_source (snpq, AZ_OBJECT (stream), "stdin");
     tf->idx = snpq->nfiles++;
-    snpq->files = tf;
+    gt4_queue_add_task (&snpq->queue, &tf->task_read.task, 0);
+    snpq->n_read_tasks += 1;
   } else {
     unsigned int nseqs, i;
     GT4SequenceBlock *seqs[32];
@@ -135,11 +152,11 @@ add_task (SNPQueue *snpq, const char *filename)
     if (nseqs > 32) nseqs = 32;
     nseqs = gt4_sequence_block_split (&seqf->block, seqs, nseqs);
     for (i = 0; i < nseqs; i++) {
-      TaskFile *tf = task_file_new_from_source (AZ_OBJECT (seqs[i]), "block", 0);
+      TaskFile *tf = task_file_new_from_source (snpq, AZ_OBJECT (seqs[i]), "block");
       if (debug) fprintf (stderr, "%s:%u from %llu to %llu\n", filename, i, (unsigned long long) seqs[i]->cdata - (unsigned long long) seqf->block.cdata, (unsigned long long) seqs[i]->cdata - (unsigned long long) seqf->block.cdata + seqs[i]->csize);
-      tf->next = snpq->files;
       tf->idx = snpq->nfiles++;
-      snpq->files = tf;
+      gt4_queue_add_task (&snpq->queue, &tf->task_read.task, 0);
+      snpq->n_read_tasks += 1;
     }
     az_object_unref (AZ_OBJECT (seqf));
   }
@@ -345,6 +362,7 @@ main (int argc, const char *argv[])
     memset (&snpq, 0, sizeof (SNPQueue));
     az_instance_init (&snpq.queue, GT4_TYPE_QUEUE);
     gt4_queue_setup (&snpq.queue, nthreads);
+    snpq.wordlen = db.wordsize;
     /* Read files */
     snpq.db = &db;
     for (i = 0; i < nseqs; i++) {
@@ -353,16 +371,16 @@ main (int argc, const char *argv[])
         if (!strcmp (seqnames[i], "-")) {
           GT4SequenceStream *stream;
           stream = gt4_sequence_stream_new_from_stream (stdin, 0);
-          tf = task_file_new_from_source (AZ_OBJECT (stream), seqnames[i], 0);
+          tf = task_file_new_from_source (&snpq, AZ_OBJECT (stream), seqnames[i]);
           az_object_unref (AZ_OBJECT (stream));
         } else {
-          tf = task_file_new (seqnames[i], !lowmem);
+          tf = task_file_new (&snpq, seqnames[i]);
         }
         seq_files[i] = tf->seqfile;
         gt4_sequence_file_ref (seq_files[i]);
-        tf->next = snpq.files;
         tf->idx = i;
-        snpq.files = tf;
+        gt4_queue_add_task (&snpq.queue, &tf->task_read.task, 0);
+        snpq.n_read_tasks += 1;
         snpq.nfiles += 1;
       } else {
         add_task (&snpq, seqnames[i]);
@@ -615,16 +633,17 @@ process (GT4Queue *queue, unsigned int idx, void *arg)
   while (!finished) {
     /* Get exclusive lock on queue */
     gt4_queue_lock (queue);
-    if ((snpq->files) && (snpq->free_tables)) {
+    if ((snpq->n_read_tasks) && (snpq->free_tables)) {
       TaskFile *tf;
       TaskTable *tt;
       unsigned int result;
       /* Create new file reading task */
-      tf = snpq->files;
-      snpq->files = tf->next;
+      tf = (TaskFile *) snpq->queue.tasks;
+      gt4_queue_remove_task (&snpq->queue, &tf->task_read.task, 0);
+      snpq->n_read_tasks -= 1;
       tt = snpq->free_tables;
       snpq->free_tables = tt->next;
-      pthread_mutex_unlock (&snpq->queue.mutex);
+      gt4_queue_unlock (queue);
       /* Read words from file */
       if (tt->seqfile) gt4_sequence_file_unref (tt->seqfile);
       tt->seqfile = tf->seqfile;
@@ -633,20 +652,20 @@ process (GT4Queue *queue, unsigned int idx, void *arg)
       tt->file_idx = tf->idx;
       tt->n_nucl = 0;
       tt->n_gc = 0;
-      if (debug > 0) fprintf (stderr, "Thread %d: reading file %s from %llu\n", idx, tt->seqfile->path, tf->reader.cpos);
-      result = task_file_read_nwords (tf, BLOCK_SIZE, snpq->db->wordsize, start_sequence, end_sequence, NULL, (stats) ? read_nucleotide : NULL, read_word, tt);
+      if (debug > 0) fprintf (stderr, "Thread %d: reading file %s from %llu\n", idx, tt->seqfile->path, tf->task_read.reader.cpos);
+      result = fasta_reader_read_nwords (&tf->task_read.reader, BLOCK_SIZE, start_sequence, end_sequence, NULL, (stats) ? read_nucleotide : NULL, read_word, tt);
       if (result) {
         fprintf (stderr, "Error reading from file %s\n", tt->seqfile->path);
         if (!recover) exit (1);
       }
-      if (debug > 1) fprintf (stderr, "Thread %d: finished reading %s at %llu\n", idx, tt->seqfile->path, tf->reader.cpos);
-      pthread_mutex_lock (&snpq->queue.mutex);
-      if (result || tf->reader.in_eof) {
+      if (debug > 1) fprintf (stderr, "Thread %d: finished reading %s at %llu\n", idx, tt->seqfile->path, tf->task_read.reader.cpos);
+      gt4_queue_lock (queue);
+      if (result || tf->task_read.reader.in_eof) {
         task_file_delete (tf);
         snpq->nfiles -= 1;
       } else {
-        tf->next = snpq->files;
-        snpq->files = tf;
+        gt4_queue_add_task (queue, &tf->task_read.task, 0);
+        snpq->n_read_tasks += 1;
       }
       tt->next = snpq->full_tables;
       snpq->full_tables = tt;
@@ -877,3 +896,38 @@ task_table_free (TaskTable *tt)
   }
   free (tt);
 }
+
+/* File parsing tasks */
+
+TaskFile *
+task_file_new (SNPQueue *snpq, const char *filename)
+{
+  TaskFile *tf;
+  GT4SequenceFile *seqf;
+  seqf = gt4_sequence_file_new (filename, 1);
+  tf = (TaskFile *) malloc (sizeof (TaskFile));
+  memset (tf, 0, sizeof (TaskFile));
+  gt4_task_read_setup (&tf->task_read, &snpq->queue, (AZObject *) tf->seqfile, snpq->wordlen);
+  tf->seqfile = seqf;
+  return tf;
+}
+
+TaskFile *
+task_file_new_from_source (SNPQueue *snpq, AZObject *source, const char *name)
+{
+  TaskFile *tf;
+  tf = (TaskFile *) malloc (sizeof (TaskFile));
+  memset (tf, 0, sizeof (TaskFile));
+  gt4_task_read_setup (&tf->task_read, &snpq->queue, source, snpq->wordlen);
+  tf->seqfile = gt4_sequence_file_new (name, 1);
+  return tf;
+}
+
+void
+task_file_delete (TaskFile *tf)
+{
+  gt4_sequence_file_unref (tf->seqfile);
+  gt4_task_read_release (&tf->task_read);
+  free (tf);
+}
+

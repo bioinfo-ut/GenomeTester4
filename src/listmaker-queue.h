@@ -69,7 +69,6 @@ union _QValue {
 /* Task for parsing FastA file */
 /* These form linked list */
 
-typedef struct _TaskFile TaskFile;
 typedef struct _TaskRead TaskRead;
 typedef struct _TaskCollateTables TaskCollateTables;
 typedef struct _TaskCollateFiles TaskCollateFiles;
@@ -81,8 +80,6 @@ struct _GT4ListMakerQueue {
         unsigned int wordlen;
         unsigned long long tablesize;
         unsigned int cutoff;
-        /* Waiting files */
-        TaskFile *files;
 
         unsigned int n_files_waiting;
         unsigned int n_files_reading;
@@ -123,7 +120,10 @@ struct _TaskRead {
   GT4FastaReader reader;
 };
 
-TaskRead *task_read_new (GT4ListMakerQueue *mq, AZObject *source);
+void gt4_task_read_setup (TaskRead *tr, GT4Queue *queue, AZObject *source, unsigned int wordlen);
+void gt4_task_read_release (TaskRead *tr);
+
+TaskRead *task_read_new (GT4Queue *queue, AZObject *source, unsigned int wordlen);
 void task_read_delete (TaskRead *tr);
 
 struct _TaskCollateTables {
@@ -144,34 +144,4 @@ struct _TaskCollateFiles {
 TaskCollateFiles *task_collate_files_new (GT4ListMakerQueue *mq, unsigned int max_files);
 void task_collate_files_delete (TaskCollateFiles *tc);
 
-/* File parsing tasks */
-
-struct _TaskFile {
-        TaskFile *next;
-        GT4SequenceFile *seqfile;
-        GT4SequenceStream *stream;
-        /* Sequence source */
-        AZObject *source;
-        unsigned int close_source : 1;
-        /* File index */
-        unsigned int idx;
-        unsigned int scout;
-        unsigned int has_reader;
-        GT4FastaReader reader;
-};
-
-TaskFile *task_file_new (const char *filename, unsigned int scout);
-TaskFile *task_file_new_from_source (AZObject *source, const char *filename, unsigned int close);
-void task_file_delete (TaskFile *tf);
-/* Frontend to mmap and GT4FastaReader */
-unsigned int task_file_read_nwords (TaskFile *tf, unsigned long long maxwords, unsigned int wordsize,
-	/* Called as soon as the full sequence name is known */
-	int (*start_sequence) (GT4FastaReader *, void *),
-	/* Called when the full sequence has been parsed */
-	int (*end_sequence) (GT4FastaReader *, void *),
-	int (*read_character) (GT4FastaReader *, unsigned int character, void *),
-	int (*read_nucleotide) (GT4FastaReader *, unsigned int nucleotide, void *),
-	int (*read_word) (GT4FastaReader *, unsigned long long word, void *),
-	void *data);
-
-#endif /* SEQUENCE_H_ */
+#endif
