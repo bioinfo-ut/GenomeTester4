@@ -71,9 +71,8 @@ listmaker_queue_finalize (GT4ListMakerQueueClass *klass, GT4ListMakerQueue *mq)
   unsigned int i;
   free (mq->free_s_tables);
   free (mq->used_s_tables);
-  for (i = 0; i < mq->n_tmp_files; i++) {
-    free (mq->tmp_files[i]);
-  }
+  for (i = 0; i < mq->n_tmp_files; i++) free (mq->tmp_files[i]);
+  for (i = 0; i < mq->n_final_files; i++) free (mq->final_files[i]);
 }
 
 void
@@ -86,20 +85,24 @@ maker_queue_setup (GT4ListMakerQueue *mq, unsigned int n_threads, unsigned int w
   mq->free_s_tables = (GT4WordTable **) malloc (n_tmp_tables * sizeof (GT4WordTable *));
   mq->used_s_tables = (GT4WordTable **) malloc (n_tmp_tables * sizeof (GT4WordTable *));
   for (i = 0; i < n_tmp_tables; i++) {
-    mq->free_s_tables[mq->n_free_s_tables++] = wordtable_new (wlen, tmp_table_size);
+    mq->free_s_tables[mq->n_free_s_tables++] = gt4_word_table_new (wlen, tmp_table_size);
   }
 }
 
 void
 maker_queue_release (GT4ListMakerQueue *mq)
 {
+  unsigned int i;
+  for (i = 0; i < mq->n_free_s_tables; i++) gt4_word_table_delete (mq->free_s_tables[i]);
+  for (i = 0; i < mq->n_used_s_tables; i++) gt4_word_table_delete (mq->used_s_tables[i]);
   az_instance_finalize (mq, GT4_TYPE_LISTMAKER_QUEUE);
 }
 
 static void
-maker_queue_add_source (GT4ListMakerQueue *mq, AZObject *src, const char *name)
+maker_queue_add_source (GT4ListMakerQueue *mq, AZObject *source, const char *name)
 {
-  TaskRead *tr = task_read_new (&mq->queue, src, mq->wordlen);
+  az_object_ref (AZ_OBJECT(source));
+  TaskRead *tr = task_read_new (&mq->queue, source, mq->n_blocks++, mq->wordlen);
   gt4_queue_add_task (&mq->queue, &tr->task, 0);
   mq->n_files_waiting += 1;
 }
@@ -154,7 +157,7 @@ maker_queue_add_file (GT4ListMakerQueue *mq, const char *filename, unsigned int 
 /* Tasks */
 
 void
-gt4_task_read_setup (TaskRead *tr, GT4Queue *queue, AZObject *source, unsigned int wordlen)
+gt4_task_read_setup (TaskRead *tr, GT4Queue *queue, AZObject *source, unsigned int idx, unsigned int wordlen)
 {
   GT4SequenceSourceImplementation *impl;
   GT4SequenceSourceInstance *inst;
@@ -163,8 +166,9 @@ gt4_task_read_setup (TaskRead *tr, GT4Queue *queue, AZObject *source, unsigned i
   tr->task.type = TASK_READ;
   tr->task.priority = 10;
   tr->source = source;
-  az_object_ref (AZ_OBJECT(tr->source));
-  impl = (GT4SequenceSourceImplementation *) az_object_get_interface (AZ_OBJECT(tr->source), GT4_TYPE_SEQUENCE_SOURCE, (void **) &inst);
+  az_object_ref (AZ_OBJECT(source));
+  tr->idx = idx;
+  impl = (GT4SequenceSourceImplementation *) az_object_get_interface (AZ_OBJECT(source), GT4_TYPE_SEQUENCE_SOURCE, (void **) &inst);
   gt4_sequence_source_open (impl, inst);
   fasta_reader_init (&tr->reader, wordlen, 1, impl, inst);
 }
@@ -177,11 +181,11 @@ gt4_task_read_release (TaskRead *tr)
 }
 
 TaskRead *
-task_read_new (GT4Queue *queue, AZObject *source, unsigned int wordlen)
+task_read_new (GT4Queue *queue, AZObject *source, unsigned int idx, unsigned int wordlen)
 {
   TaskRead *tr;
   tr = (TaskRead *) malloc (sizeof (TaskRead));
-  gt4_task_read_setup (tr, queue, source, wordlen);
+  gt4_task_read_setup (tr, queue, source, idx, wordlen);
   return tr;
 }
 

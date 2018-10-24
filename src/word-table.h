@@ -25,37 +25,40 @@
  */
 
 typedef struct _GT4WordTable GT4WordTable;
+typedef struct _GT4WordTableLocation GT4WordTableLocation;
 
+#include <stdint.h>
 #include <stdio.h>
 
 #ifndef __GT4_WORD_TABLE_C__
 extern unsigned int debug_tables;
 #endif
 
-struct _GT4WordTable {
-	unsigned int wordlength;
-	unsigned long long nwordslots;
-	unsigned long long nfreqslots;
-	unsigned long long nwords;
-	unsigned long long *words;
-	unsigned int *freqs;
-	/* Text ID for debugging */
-        char _id[16];
+struct _GT4WordTableLocation {
+  unsigned int file_idx;
+  unsigned int seq_idx;
+  unsigned int seq_pos;
 };
 
-GT4WordTable *wordtable_new (unsigned int wordlength, unsigned long long size);
+struct _GT4WordTable {
+  unsigned long long n_word_slots;
+  unsigned long long n_data_slots;
+  unsigned long long n_words;
+  unsigned long long *words;
+  unsigned char *data;
+  unsigned int data_size;
+  unsigned int wordlength;
+};
 
-void wordtable_delete (GT4WordTable *table);
+GT4WordTable *gt4_word_table_new (unsigned int wordlen, unsigned long long size);
+void gt4_word_table_delete (GT4WordTable *table);
 
-void wordtable_empty (GT4WordTable *table);
+void gt4_word_table_clear (GT4WordTable *table);
+int gt4_word_table_ensure_size (GT4WordTable *table, unsigned long long size);
+int gt4_word_table_ensure_data_size (GT4WordTable *table, unsigned long long size);
 
-int wordtable_enlarge (GT4WordTable *table);
-int wordtable_enlarge_nofreq (GT4WordTable *table);
-
-int wordtable_ensure_size (GT4WordTable *table, unsigned long long size, unsigned long long freqsize);
-
-int wordtable_add_word (GT4WordTable *table, unsigned long long word, unsigned int freq, unsigned int wordlength);
-int wordtable_add_word_nofreq (GT4WordTable *table, unsigned long long word, unsigned int wordlength);
+int gt4_word_table_add_word (GT4WordTable *table, unsigned long long word, unsigned int freq);
+int gt4_word_table_add_word_nofreq (GT4WordTable *table, unsigned long long word);
 
 int wordtable_merge (GT4WordTable *table, GT4WordTable *other);
 
@@ -68,9 +71,5 @@ void wordtable_merge_frequencies (GT4WordTable *table);
 unsigned long long wordtable_count_unique(GT4WordTable *table);
 
 unsigned int wordtable_write_to_file (GT4WordTable *table, const char *outputname, unsigned int cutoff);
-
-void write_word_to_file (unsigned long long word, unsigned freq, FILE *f);
-
-unsigned int wordtable_build_filename (GT4WordTable *table, char *c, unsigned int length, const char *prefix);
 
 #endif

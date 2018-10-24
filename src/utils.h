@@ -44,9 +44,8 @@ void delete_scouts ();
 /* Memory-unmap a previously mapped file */
 void gt4_munmap (const unsigned char *cdata, unsigned long long csize);
 
-void insertionSort (unsigned long long *begin, unsigned long long *end, unsigned int *begfreq);
-
-void hybridInPlaceRadixSort256 (unsigned long long *begin, unsigned long long *end, unsigned int *begfreq, unsigned int shift);
+void insertionSort (unsigned long long *begin, unsigned long long *end, unsigned char *data, unsigned int data_size);
+void hybridInPlaceRadixSort256 (unsigned long long *begin, unsigned long long *end, unsigned char *data, unsigned int data_size, unsigned int shift);
 
 double get_time (void);
 unsigned long long rand_long_long (unsigned long long min, unsigned long long max);

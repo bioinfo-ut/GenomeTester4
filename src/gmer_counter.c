@@ -907,7 +907,7 @@ task_file_new (SNPQueue *snpq, const char *filename)
   seqf = gt4_sequence_file_new (filename, 1);
   tf = (TaskFile *) malloc (sizeof (TaskFile));
   memset (tf, 0, sizeof (TaskFile));
-  gt4_task_read_setup (&tf->task_read, &snpq->queue, (AZObject *) tf->seqfile, snpq->wordlen);
+  gt4_task_read_setup (&tf->task_read, &snpq->queue, (AZObject *) tf->seqfile, 0, snpq->wordlen);
   tf->seqfile = seqf;
   return tf;
 }
@@ -918,7 +918,7 @@ task_file_new_from_source (SNPQueue *snpq, AZObject *source, const char *name)
   TaskFile *tf;
   tf = (TaskFile *) malloc (sizeof (TaskFile));
   memset (tf, 0, sizeof (TaskFile));
-  gt4_task_read_setup (&tf->task_read, &snpq->queue, source, snpq->wordlen);
+  gt4_task_read_setup (&tf->task_read, &snpq->queue, source, 0, snpq->wordlen);
   tf->seqfile = gt4_sequence_file_new (name, 1);
   return tf;
 }

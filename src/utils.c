@@ -105,31 +105,31 @@ delete_scouts () {
   In-place MSD hybrid radix sort (with insertion sort) */
 
 /* used for small buckets */
-void insertionSort (unsigned long long *begin, unsigned long long *end, unsigned int *begfreq)
+void insertionSort (unsigned long long *begin, unsigned long long *end, unsigned char *data, unsigned int data_size)
 {
   unsigned long long *p, *q;
   unsigned long long temp;
-  unsigned int temp_freq;
+  unsigned char tmp[32];
 
   for (p = begin + 1; p != end; p++) {
     for (q = p; q != begin && *q < *(q - 1); --q) {
       temp = *q;
       *q = *(q - 1);
       *(q - 1) = temp;
-      if (begfreq) {
-        temp_freq = begfreq[q - begin];
-        begfreq[q - begin] = begfreq[q - begin - 1];
-        begfreq[q - begin - 1] = temp_freq;
+      if (data) {
+        memcpy (tmp, data + (q - begin) * data_size, data_size);
+        memcpy (data + (q - begin) * data_size, data + (q - begin - 1) * data_size, data_size);
+        memcpy (data + (q - begin - 1) * data_size, tmp, data_size);
       }
     }
   }
 }
 
-void hybridInPlaceRadixSort256 (unsigned long long *begin, unsigned long long *end, unsigned int *begfreq, unsigned int shift)
+void hybridInPlaceRadixSort256 (unsigned long long *begin, unsigned long long *end, unsigned char *data, unsigned int data_size, unsigned int shift)
 {
   unsigned long long *p;
   unsigned long long temp, position, digit;
-  unsigned int temp_freq;
+  unsigned char tmp[32];
 
   size_t bins[256];  /* for counts */
   size_t positions[256]; /* for starting positions */
@@ -137,7 +137,7 @@ void hybridInPlaceRadixSort256 (unsigned long long *begin, unsigned long long *e
   unsigned long long i;
 
   if (end - begin <= 32) {
-    insertionSort (begin, end, begfreq);
+    insertionSort (begin, end, data, data_size);
     return;
   }
 
@@ -175,10 +175,10 @@ void hybridInPlaceRadixSort256 (unsigned long long *begin, unsigned long long *e
     *p = begin[position];
     begin[position] = temp;
 
-    if (begfreq) {
-      temp_freq = begfreq[i];
-      begfreq[i] = begfreq[position];
-      begfreq[position] = temp_freq;
+    if (data) {
+      memcpy (tmp, data + i * data_size, data_size);
+      memcpy (data + i * data_size, data + position * data_size, data_size);
+      memcpy (data + position * data_size, tmp, data_size);
     }
 
   }
@@ -187,10 +187,10 @@ void hybridInPlaceRadixSort256 (unsigned long long *begin, unsigned long long *e
   if (shift > 0) {
     for (i = 0; i < 256; i++) {
       if (bins[i] > 1) {
-        if (begfreq) {
-          hybridInPlaceRadixSort256 (begin + positions[i], begin + positions[i] + bins[i], begfreq + positions[i], shift - 8);
+        if (data) {
+          hybridInPlaceRadixSort256 (begin + positions[i], begin + positions[i] + bins[i], data + positions[i] * data_size, data_size, shift - 8);
         } else {
-          hybridInPlaceRadixSort256 (begin + positions[i], begin + positions[i] + bins[i], NULL, shift - 8);
+          hybridInPlaceRadixSort256 (begin + positions[i], begin + positions[i] + bins[i], NULL, 0, shift - 8);
         }
       }
     }

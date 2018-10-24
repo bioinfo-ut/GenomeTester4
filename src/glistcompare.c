@@ -420,6 +420,13 @@ include_in_complement (unsigned int freq1, unsigned int freq2, unsigned int *fre
   return *freq != 0;
 }
 
+static void
+write_word_to_file (unsigned long long word, unsigned freq, FILE *f)
+{
+  fwrite (&word, sizeof (unsigned long long), 1, f);
+  fwrite (&freq, sizeof (unsigned int), 1, f);
+}
+                        
 static int
 compare_wordmaps (AZObject *list1, AZObject *list2, int find_union, int find_intrsec, int find_diff, int find_ddiff, int subtract, int countonly, const char *out, unsigned int cutoff, int rule)
 {
@@ -688,7 +695,7 @@ subset (GT4WordMap *map, unsigned int subset_method, unsigned long long subset_s
   GT4WordTable *wt;
   unsigned long long i;
 
-  wt = wordtable_new (map->header->wordlength, subset_size);
+  wt = gt4_word_table_new (map->header->wordlength, subset_size);
   /* fixme: We rely here on RNG cycle being at least >>32 bits */
   if (subset_method == RAND_ALL) {
     while (subset_size > 0) {
@@ -696,7 +703,7 @@ subset (GT4WordMap *map, unsigned int subset_method, unsigned long long subset_s
       unsigned long long lhs = (unsigned long long) (((rand () + 1.0) / RAND_MAX) * 0xffffffff);
       unsigned long long rhs = (unsigned long long) (((rand () + 1.0) / RAND_MAX) * 0xffffffff);
       unsigned long long p = ((lhs << 32) | rhs) % map->header->nwords;
-      wordtable_add_word_nofreq (wt, WORDMAP_WORD(map, p), map->header->wordlength);
+      gt4_word_table_add_word_nofreq (wt, WORDMAP_WORD(map, p));
       subset_size -= 1;
     }
   } else if (subset_method == RAND_UNIQUE) {
@@ -711,14 +718,14 @@ subset (GT4WordMap *map, unsigned int subset_method, unsigned long long subset_s
       q[p] = t;
     }
     for (i = 0; i < subset_size; i++) {
-      wordtable_add_word_nofreq (wt, WORDMAP_WORD(map, q[i]), map->header->wordlength);
+      gt4_word_table_add_word_nofreq (wt, WORDMAP_WORD(map, q[i]));
     }
     free (q);
   }
   wordtable_sort (wt, 0);
   wordtable_find_frequencies (wt);
   wordtable_write_to_file (wt, filename, 1);
-  wordtable_delete (wt);
+  gt4_word_table_delete (wt);
   return 0;
 }
 
@@ -798,26 +805,26 @@ compare_wordmaps_mm (GT4WordMap *map1, GT4WordMap *map2, int find_diff, int find
           }
         }
         if (first_ge_cutoff && !second_ge_cutoff) {
-          wordtable_add_word (difftable, word1, freq1 - freq2, map1->header->wordlength);
+          gt4_word_table_add_word (difftable, word1, freq1 - freq2);
           c_diff1 += 1;
         }
       }
       if (find_ddiff && second_ge_cutoff && !first_ge_cutoff) {
-        wordtable_add_word (ddifftable, word2, freq2 - freq1, map2->header->wordlength);
+        gt4_word_table_add_word (ddifftable, word2, freq2 - freq1);
         c_diff2 += 1;
       }
 
     /* first word is smaller */
     } else if (word1 < word2) {
       if (find_diff && first_ge_cutoff && !subtract) {
-        wordtable_add_word (difftable, word1, freq1, map1->header->wordlength);
+        gt4_word_table_add_word (difftable, word1, freq1);
         c_diff1 += 1;
         
       }
     /* second word is smaller */
     } else {
       if (find_ddiff && second_ge_cutoff) {
-        wordtable_add_word (ddifftable, word2, freq2, map2->header->wordlength);
+        gt4_word_table_add_word (ddifftable, word2, freq2);
         c_diff2 += 1;
       }
     }
@@ -846,7 +853,7 @@ compare_wordmaps_mm (GT4WordMap *map1, GT4WordMap *map2, int find_diff, int find
 
   /* finding the mismatches */
   if (find_diff) {
-    if (debug > 0) fprintf (stderr, "Finding diff with mismatches (%llu entries)\n", difftable->nwords);
+    if (debug > 0) fprintf (stderr, "Finding diff with mismatches (%llu entries)\n", difftable->n_words);
     c_diff1 = fetch_relevant_words (difftable, map2, map1, cutoff, nmm, outf[2], subtract, countonly, &freqsum_diff1);
   }
   if (find_ddiff) {
@@ -886,20 +893,21 @@ fetch_relevant_words (GT4WordTable *table, GT4WordMap *map, GT4WordMap *querymap
   parameters p = {0};
   unsigned long long ri, wi, word, sumfreq = 0L, count = 0L;
   unsigned int freq, cnmm;
+  unsigned int *freqs = (unsigned int *) table->data;
 
-  if (table->nwords == 0) return 0;
+  if (table->n_words == 0) return 0;
   p.wordlength = table->wordlength;
 
   for (cnmm = 1; cnmm <= nmm; cnmm++) {
     p.nmm = cnmm;
     wi = 0L;
 
-    for (ri = 0L; ri < table->nwords; ri++) {
+    for (ri = 0L; ri < table->n_words; ri++) {
             if (debug > 2) {
               fprintf (stderr, "cnmm %u ri %llu wi %llu\n", cnmm, ri, wi);
             }
       word = table->words[ri];
-      freq = table->freqs[ri];      
+      freq = freqs[ri];      
       sumfreq = word_map_search_query (map, word, &p, 0, 1, subtract, querymap);
       
       
@@ -910,12 +918,12 @@ fetch_relevant_words (GT4WordTable *table, GT4WordMap *map, GT4WordMap *querymap
         
       } else if (sumfreq < cutoff) {
         table->words[wi] = word;
-        table->freqs[wi] = freq;
+        freqs[wi] = freq;
         wi += 1;
       }
 
     }
-    table->nwords = wi;
+    table->n_words = wi;
   }
   return count;
 }

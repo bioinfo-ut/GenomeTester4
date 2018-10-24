@@ -38,131 +38,122 @@ unsigned int debug_tables = 0;
 unsigned long long total_memory = 0;
 
 GT4WordTable *
-wordtable_new (unsigned int wordlength, unsigned long long size)
+gt4_word_table_new (unsigned int wordlength, unsigned long long size)
 {
-	int v;
-	GT4WordTable *table;
-	table = (GT4WordTable *) malloc (sizeof (GT4WordTable));
-	if (!table) return NULL;
-	memset (table, 0, sizeof (GT4WordTable));
-	table->wordlength = wordlength;
-	v = wordtable_ensure_size (table, size, 0);
-	if (v != 0) return NULL;
-	return table;
+  GT4WordTable *table = (GT4WordTable *) malloc (sizeof (GT4WordTable));
+  if (!table) return NULL;
+  memset (table, 0, sizeof (GT4WordTable));
+  table->wordlength = wordlength;
+  table->data_size = 4;
+  if (gt4_word_table_ensure_size (table, size)) {
+    gt4_word_table_delete (table);
+    return NULL;
+  }
+  return table;
 }
 
 void 
-wordtable_delete (GT4WordTable *table)
+gt4_word_table_delete (GT4WordTable *table)
 {
-	if (debug_tables) {
-		unsigned long long size =  table->nwordslots * 8 + table->nfreqslots * 4;
-		fprintf (stderr, "wordtable_delete: Releasing %llu total %.2fG\n", (unsigned long long) size, (double) total_memory / 1073741824.0);
-		total_memory -= size;
-	}
-	free (table->words);
-	free (table->freqs);
-	free (table);
-	return;
+  if (debug_tables) {
+    unsigned long long size =  table->n_word_slots * 8 + table->n_data_slots * table->data_size;
+    fprintf (stderr, "wordtable_delete: Releasing %llu total %.2fG\n", (unsigned long long) size, (double) total_memory / 1073741824.0);
+    total_memory -= size;
+  }
+  free (table->words);
+  if (table->data) free (table->data);
+  free (table);
 }
 
 void 
-wordtable_empty (GT4WordTable *table)
+gt4_word_table_clear (GT4WordTable *table)
 {
-	table->wordlength = 0;
-	table->nwords = 0L;
-	return;
+  table->wordlength = 0;
+  table->n_words = 0L;
 }
 
 int 
-wordtable_ensure_size (GT4WordTable *table, unsigned long long size, unsigned long long freqsize)
+gt4_word_table_ensure_size (GT4WordTable *table, unsigned long long size)
 {
-	if (table->nwordslots < size) {
-		if (debug_tables) {
-			unsigned long long asize =  (size - table->nwordslots) * 8;
-			total_memory += asize;
-			fprintf (stderr, "wordtable_ensure_size: Aallocating words %llu total %.2fG\n", (unsigned long long) asize, (double) total_memory / 1073741824.0);
-		}
-		table->nwordslots = size;
-		table->words = (unsigned long long *) realloc (table->words, table->nwordslots * sizeof (unsigned long long));
+	if (table->n_word_slots < size) {
+		table->n_word_slots = size;
+		table->words = (unsigned long long *) realloc (table->words, table->n_word_slots * sizeof (unsigned long long));
 		if (!table->words) return GT_OUT_OF_MEMORY_ERROR;
 	}
-	if (table->nfreqslots < freqsize) {
-		if (debug_tables) {
-			unsigned long long asize =  (freqsize - table->nfreqslots) * 4;
-			total_memory += asize;
-			fprintf (stderr, "wordtable_ensure_size: Allocating freqs %llu total %.2fG\n", (unsigned long long) asize, (double) total_memory / 1073741824.0);
-		}
-		table->nfreqslots = freqsize;
-		table->freqs = (unsigned int *) realloc (table->freqs, table->nfreqslots * sizeof (unsigned int));
-		if (!table->freqs) return GT_OUT_OF_MEMORY_ERROR;
+	if (table->data) {
+		return gt4_word_table_ensure_data_size (table, size);
+	}
+	return 0;
+}
+
+int
+gt4_word_table_ensure_data_size (GT4WordTable *table, unsigned long long size)
+{
+	if (table->n_data_slots < size) {
+		table->n_data_slots = size;
+		table->data = (unsigned char *) realloc (table->data, table->n_data_slots * table->data_size);
+		if (!table->data) return GT_OUT_OF_MEMORY_ERROR;
 	}
 	return 0;
 }
 
 #define WORDTABLE_MIN_SIZE 20000000
 
-int 
+static int 
 wordtable_enlarge (GT4WordTable *table)
 {
 	unsigned long long nslots;
 	int v;
-	if (table->nwordslots < WORDTABLE_MIN_SIZE && table->nfreqslots < WORDTABLE_MIN_SIZE) {
+	if (table->n_word_slots < WORDTABLE_MIN_SIZE && table->n_data_slots < WORDTABLE_MIN_SIZE) {
 		nslots = WORDTABLE_MIN_SIZE;
 	} else {
-		nslots = (table->nwordslots > table->nfreqslots ? table->nwordslots : table->nfreqslots) * 2;
+		nslots = (table->n_word_slots > table->n_data_slots ? table->n_word_slots : table->n_data_slots) * 2;
 	}
-	v = wordtable_ensure_size (table, nslots, nslots);
+	v = gt4_word_table_ensure_size (table, nslots);
 	if (v) return v;
 	return 0;
 }
 
-int 
+static int 
 wordtable_enlarge_nofreq (GT4WordTable *table)
 {
 	unsigned long long nslots;
 	int v;
-	if (table->nwordslots < 10000000 && table->nfreqslots < 10000000) {
+	if (table->n_word_slots < 10000000 && table->n_data_slots < 10000000) {
 		nslots = 10000000;
 	} else {
-		nslots = (table->nwordslots > table->nfreqslots ? table->nwordslots : table->nfreqslots) * 2;
+		nslots = (table->n_word_slots > table->n_data_slots ? table->n_word_slots : table->n_data_slots) * 2;
 	}
-	v = wordtable_ensure_size (table, nslots, 0);
+	v = gt4_word_table_ensure_size (table, nslots);
 	if (v) return v;
 	return 0;
 }
 
 int 
-wordtable_add_word (GT4WordTable *table, unsigned long long word, unsigned int freq, unsigned int wordlength)
+gt4_word_table_add_word (GT4WordTable *table, unsigned long long word, unsigned int freq)
 {
-	if (table->wordlength != wordlength) {
-		return GT_INCOMPATIBLE_WORDLENGTH_ERROR;
-	}
-	if (table->nwords == table->nfreqslots || table->nwords == table->nwordslots) {
+	unsigned int *freqs = (unsigned int *) table->data;
+	if (table->n_words == table->n_data_slots || table->n_words == table->n_word_slots) {
 		int v;
 		v = wordtable_enlarge (table);
 		if (v > 0) return v;
 	}
-	table->words[table->nwords] = word;
-	table->freqs[table->nwords] = freq;
-	table->nwords += 1;
+	table->words[table->n_words] = word;
+	freqs[table->n_words] = freq;
+	table->n_words += 1;
 	return 0;
 }
 
 int 
-wordtable_add_word_nofreq (GT4WordTable *table, unsigned long long word, unsigned int wordlength)
+gt4_word_table_add_word_nofreq (GT4WordTable *table, unsigned long long word)
 {
-#if 0
-	if (table->wordlength != wordlength) {
-		return GT_INCOMPATIBLE_WORDLENGTH_ERROR;
-	}
-#endif
-	if (table->nwords >= table->nwordslots) {
+	if (table->n_words >= table->n_word_slots) {
 		int v;
 		v = wordtable_enlarge_nofreq (table);
 		if (v > 0) return v;
 	}
-	table->words[table->nwords] = word;
-	table->nwords += 1;
+	table->words[table->n_words] = word;
+	table->n_words += 1;
 	return 0;
 }
 
@@ -172,15 +163,17 @@ wordtable_merge (GT4WordTable *table, GT4WordTable *other)
 	long long i = 0L, j = 0L, k;
 	unsigned long long nnew, incr, nequals;
 	int v;
+	unsigned int *t_freqs = (unsigned int *) table->data;
+	unsigned int *o_freqs = (unsigned int *) other->data;
 
 	if (table->wordlength != other->wordlength) return GT_INCOMPATIBLE_WORDLENGTH_ERROR;
 
 	nequals = 0L;
 	nnew = 0L;
-	while ((unsigned long long) j < other->nwords && (unsigned long long) i < table->nwords) {
+	while ((unsigned long long) j < other->n_words && (unsigned long long) i < table->n_words) {
 
 		if (table->words[i] == other->words[j]) {
-			table->freqs[i] += other->freqs[j];
+			t_freqs[i] += o_freqs[j];
 			i += 1;
 			j += 1;
 			nequals += 1;
@@ -190,39 +183,39 @@ wordtable_merge (GT4WordTable *table, GT4WordTable *other)
 			j += 1;
 		}
 	}
-	nnew = other->nwords - nequals;
+	nnew = other->n_words - nequals;
 	/* if (nnew == 0) return 0; */
 	incr = nnew;
-	if ((table->nwords + incr) > table->nwordslots) {
-		unsigned long long step = (table->nwordslots + 7) >> 3;
+	if ((table->n_words + incr) > table->n_word_slots) {
+		unsigned long long step = (table->n_word_slots + 7) >> 3;
 		if (incr < step) incr = step;
 	}
 
-	v = wordtable_ensure_size (table, table->nwords + incr, table->nwords + incr);
+	v = gt4_word_table_ensure_size (table, table->n_words + incr);
 	if (v > 0) return v;
 
-	i = table->nwords - 1;
-	j = other->nwords - 1;
+	i = table->n_words - 1;
+	j = other->n_words - 1;
 
-	for (k = table->nwords + nnew - 1; k >= 0; k--) {
+	for (k = table->n_words + nnew - 1; k >= 0; k--) {
 
 		if (j >= 0 && i >= 0 && table->words[i] == other->words[j]) {
 			table->words[k] = table->words[i];
-			table->freqs[k] = table->freqs[i];
+			t_freqs[k] = t_freqs[i];
 			i -= 1;
 			j -= 1;
 		} else if ((j < 0) || (i >= 0 && table->words[i] > other->words[j])) {
 			table->words[k] = table->words[i];
-			table->freqs[k] = table->freqs[i];
+			t_freqs[k] = t_freqs[i];
 			i -= 1;
 		} else {
 			table->words[k] = other->words[j];
-			table->freqs[k] = other->freqs[j];
+			t_freqs[k] = o_freqs[j];
 			j -= 1;
 		}
 	}
 
-	table->nwords += nnew;
+	table->n_words += nnew;
 	return 0;
 }
 
@@ -230,7 +223,7 @@ void
 wordtable_sort (GT4WordTable *table, int sortfreqs)
 {
 	unsigned int firstshift = 0;
-	if (table->nwords == 0) return;
+	if (table->n_words == 0) return;
 
 	/* calculate the number of shifted positions for making radix sort faster (no need to sort digits that are all zeros)*/
 	while (firstshift + 8 < table->wordlength * 2) {
@@ -238,67 +231,70 @@ wordtable_sort (GT4WordTable *table, int sortfreqs)
 	}
 
 	if (sortfreqs) {
-		hybridInPlaceRadixSort256 (table->words, table->words + table->nwords, table->freqs, firstshift);
+		hybridInPlaceRadixSort256 (table->words, table->words + table->n_words, table->data, table->data_size, firstshift);
 		return;
 	}
-	hybridInPlaceRadixSort256 (table->words, table->words + table->nwords, NULL, firstshift);
+	hybridInPlaceRadixSort256 (table->words, table->words + table->n_words, NULL, 0, firstshift);
 	return;
 }
 
 int 
 wordtable_find_frequencies (GT4WordTable *table)
 {
-	unsigned long long ri, wi, count, nunique;
+	unsigned long long ri, wi, count;
+	unsigned long long nunique;
 	int v;
+	unsigned int *freqs = (unsigned int *) table->data;
 
 	wi = 0;
 	count = 1;
-	if (table->nwords == 0) return 0;
+	if (table->n_words == 0) return 0;
+
 	nunique = wordtable_count_unique (table);
-	v = wordtable_ensure_size (table, nunique, nunique);
+	v = gt4_word_table_ensure_data_size (table, nunique);
 	if (v > 0) return v;
 
-	for (ri = 1; ri < table->nwords; ri++) {
+	for (ri = 1; ri < table->n_words; ri++) {
 		if (table->words[ri] == table->words[ri - 1]) {
 			count += 1;
 		} else {
 			table->words[wi] = table->words[ri - 1];
-			table->freqs[wi] = count;
+			freqs[wi] = count;
 			count = 1;
 			wi += 1;
 		}
 	}
 
 	table->words[wi] = table->words[ri - 1];
-	table->freqs[wi] = count;
-	table->nwords = nunique;
+	freqs[wi] = count;
+	table->n_words = wi + 1;
 	return 0;
 }
 
 void 
 wordtable_merge_freqs (GT4WordTable *table)
 {
-	unsigned long long ri, wi, count, nunique;
+	unsigned long long ri, wi, count;
+	unsigned int *freqs = (unsigned int *) table->data;
 
 	wi = 0;
-	if (table->nwords == 0) return;
-	nunique = wordtable_count_unique (table);
+	if (table->n_words == 0) return;
 
-	count = table->freqs[0];
-	for (ri = 1; ri < table->nwords; ri++) {
+	count = freqs[0];
+	for (ri = 1; ri < table->n_words; ri++) {
 		if (table->words[ri] == table->words[ri - 1]) {
-			count += table->freqs[ri];
+			count += freqs[ri];
 		} else {
 			table->words[wi] = table->words[ri - 1];
-			table->freqs[wi] = count;
-			count = table->freqs[ri];
+			freqs[wi] = count;
+			count = freqs[ri];
 			wi += 1;
 		}
 	}
 
 	table->words[wi] = table->words[ri - 1];
-	table->freqs[wi] = count;
-	table->nwords = nunique;
+	freqs[wi] = count;
+	table->n_words = wi + 1;
 	return;
 }
 
@@ -307,7 +303,7 @@ wordtable_count_unique (GT4WordTable *table)
 {
 	unsigned long long i, count;
 	count = 0;
-	for (i = 0; i < table->nwords; i++) {
+	for (i = 0; i < table->n_words; i++) {
 		if (i == 0 || table->words[i] != table->words[i - 1]) {
 			count += 1;
 		}
@@ -326,7 +322,8 @@ wordtable_write_to_file (GT4WordTable *table, const char *outputname, unsigned i
 	GT4ListHeader h;
 	char b[BSIZE + 12];
 	unsigned int bp;
-	if (table->nwords == 0) return 0;
+	unsigned int *freqs = (unsigned int *) table->data;
+	if (table->n_words == 0) return 0;
 
 	memset (&h, 0, sizeof (GT4ListHeader));
 
@@ -345,11 +342,11 @@ wordtable_write_to_file (GT4WordTable *table, const char *outputname, unsigned i
 	count = 0;
 	totalfreq = 0;
 	bp = 0;
-	for (i = 0; i < table->nwords; i++) {
-		if (table->freqs[i] >= cutoff) {
+	for (i = 0; i < table->n_words; i++) {
+		if (freqs[i] >= cutoff) {
 			memcpy (b + bp, &table->words[i], 8);
 			bp += 8;
-			memcpy (b + bp, &table->freqs[i], 4);
+			memcpy (b + bp, &freqs[i], 4);
 			bp += 4;
 			if (bp >= BSIZE) {
 				fwrite (b, 1, bp, f);
@@ -357,10 +354,10 @@ wordtable_write_to_file (GT4WordTable *table, const char *outputname, unsigned i
 			}
 #if 0
 			fwrite (&table->words[i], sizeof (table->words[i]), 1, f);
-			fwrite (&table->freqs[i], sizeof (table->freqs[i]), 1, f);
+			fwrite (&freqs[i], sizeof (freqs[i]), 1, f);
 #endif
 			count += 1;
-			totalfreq += table->freqs[i];
+			totalfreq += freqs[i];
 		}
 	}
 	if (bp) {
@@ -383,13 +380,6 @@ wordtable_write_to_file (GT4WordTable *table, const char *outputname, unsigned i
 	return 0;
 }
 
-void write_word_to_file (unsigned long long word, unsigned freq, FILE *f)
-{
-	fwrite (&word, sizeof (unsigned long long), 1, f);
-	fwrite (&freq, sizeof (unsigned int), 1, f);
-	return;
-}
-
 unsigned long long generate_mismatches (GT4WordTable *mmtable, unsigned long long word, unsigned int wordlength,
 		unsigned int givenfreq, unsigned int nmm, unsigned int startsite, int usesmallercomplement, int countonly,
 		int equalmmonly)
@@ -402,7 +392,7 @@ unsigned long long generate_mismatches (GT4WordTable *mmtable, unsigned long lon
 		if (usesmallercomplement) {
 			word = get_canonical_word (word, wordlength);
 		}
-		wordtable_add_word (mmtable, word, givenfreq, wordlength);
+		gt4_word_table_add_word (mmtable, word, givenfreq);
 	}
 	if (nmm == 0) return 1;
 
@@ -418,24 +408,3 @@ unsigned long long generate_mismatches (GT4WordTable *mmtable, unsigned long lon
 	return count;
 }
 
-/* Generates filename from wordtable and prefix */
-/* Returns the length of full filename */
-/* If c is NULL only length is returned */
-/* If length is insufficient string is truncated but full length returned */
-
-unsigned int
-wordtable_build_filename (GT4WordTable *table, char *c, unsigned int length, const char *prefix)
-{
-	unsigned int p, q;
-	char suffix[32];
-	sprintf (suffix, "_%d.list", table->wordlength);
-	if (c) {
-		p = 0;
-		q = 0;
-		while (prefix[p] && (q < (length - 1))) c[q++] = prefix[p++];
-		p = 0;
-		while (suffix[p] && (q < (length - 1))) c[q++] = suffix[p++];
-		c[q] = 0;
-	}
-	return strlen (prefix) + strlen (suffix);
-}

@@ -72,32 +72,41 @@ union _QValue {
 typedef struct _TaskRead TaskRead;
 typedef struct _TaskCollateTables TaskCollateTables;
 typedef struct _TaskCollateFiles TaskCollateFiles;
+typedef struct _GT4LMQBlock GT4LMQBlock;
+
+struct _GT4LMQBlock {
+  unsigned long long start;
+  unsigned long long length;
+  unsigned int file_idx;
+};
 
 struct _GT4ListMakerQueue {
-        GT4Queue queue;
+  GT4Queue queue;
 
-        /* Parameters */
-        unsigned int wordlen;
-        unsigned long long tablesize;
-        unsigned int cutoff;
+  /* Parameters */
+  unsigned int wordlen;
+  /* Bookkeeping */
+  unsigned int n_files_waiting;
+  unsigned int n_files_reading;
+  unsigned int n_tables_collating;
+  unsigned int n_running;
+  /* KMer tables */        
+  unsigned int n_free_s_tables;
+  GT4WordTable **free_s_tables;
+  unsigned int n_used_s_tables;
+  GT4WordTable **used_s_tables;
+  /* Temporary files */
+  unsigned int n_tmp_files;
+  char *tmp_files[4096];
+  unsigned int n_final_files;
+  char *final_files[256];
+  
+  /* Source data for indexing */
+  unsigned int n_blocks;
+  GT4LMQBlock blocks[1024];
 
-        unsigned int n_files_waiting;
-        unsigned int n_files_reading;
-        unsigned int n_tables_collating;
-
-        unsigned int n_running;
-        unsigned int n_free_s_tables;
-        GT4WordTable **free_s_tables;
-        unsigned int n_used_s_tables;
-        GT4WordTable **used_s_tables;
-
-        unsigned int n_tmp_files;
-        char *tmp_files[4096];
-        unsigned int n_final_files;
-        char *final_files[256];
-
-        /* Debug */
-        QValue tokens[NUM_ID_TOKENS];
+  /* Debug */
+  QValue tokens[NUM_ID_TOKENS];
 };
 
 struct _GT4ListMakerQueueClass {
@@ -118,12 +127,13 @@ struct _TaskRead {
   GT4Task task;
   AZObject *source;
   GT4FastaReader reader;
+  unsigned int idx;
+  void *data;
 };
 
-void gt4_task_read_setup (TaskRead *tr, GT4Queue *queue, AZObject *source, unsigned int wordlen);
+void gt4_task_read_setup (TaskRead *tr, GT4Queue *queue, AZObject *source, unsigned int idx, unsigned int wordlen);
 void gt4_task_read_release (TaskRead *tr);
-
-TaskRead *task_read_new (GT4Queue *queue, AZObject *source, unsigned int wordlen);
+TaskRead *task_read_new (GT4Queue *queue, AZObject *source, unsigned int idx, unsigned int wordlen);
 void task_read_delete (TaskRead *tr);
 
 struct _TaskCollateTables {

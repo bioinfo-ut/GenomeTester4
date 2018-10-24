@@ -44,10 +44,12 @@
 #include "word-table.h"
 
 #define MAX_FILES 200
+#define MAX_TABLES 256
 
+#define DEFAULT_CUTOFF 1
 #define DEFAULT_NUM_THREADS 8
-#define DEFAULT_TABLE_SIZE 500000000
-#define DEFAULT_MAX_TABLES 32
+#define DEFAULT_TABLE_SIZE (1024 * 1024ULL)
+#define DEFAULT_NUM_TABLES (32 * 128)
 
 #define BSIZE 10000000
 
@@ -62,25 +64,21 @@
 #define TIME_MERGE 6
 #define TIME_FF 7
 
-#define TMP_TABLE_SIZE (1024 * 1024)
-#define NUM_TMP_TABLES (32 * 128)
 #define TMP_MERGE_SIZE 64
 #define FILE_MERGE_SIZE 32
 
 /* Main thread loop */
-static void process (GT4Queue *queue, unsigned int idx, void *arg);
-
+static void process (GT4Queue *queue, unsigned int thread_idx, void *arg);
 /* Merge tables directly to disk */
 static unsigned long long merge_write_multi_nofreq (GT4WordTable *t[], unsigned int ntables, int ofile);
-
-/* */
-int process_word (GT4FastaReader *reader, unsigned long long word, void *data);
-
+/* Reading callback */
+static int process_word (GT4FastaReader *reader, unsigned long long word, void *data);
 /* Print usage and help menu */
 void print_help (int exitvalue);
 
 int debug = 0;
-int ntables = 0;
+int debug_threads = 0;
+unsigned int cutoff = DEFAULT_CUTOFF;
 const char *outputname = "out";
 const char *tmpdir = ".";
 
@@ -89,122 +87,82 @@ main (int argc, const char *argv[])
 {
   const char *files[1024];
   unsigned int n_files = 0;
-  unsigned int argidx, i;
+  unsigned int i;
   char *end;
 
   /* default values */
-  unsigned int wordlength = 16;
-  unsigned int cutoff = 1;
-  unsigned int nthreads = 0;
-  unsigned long long tablesize = 0;
+  unsigned int wordlength = 0;
+  unsigned int nthreads = DEFAULT_NUM_THREADS;
+  unsigned long long tablesize = DEFAULT_TABLE_SIZE;
+  unsigned int ntables = DEFAULT_NUM_TABLES;
   unsigned int stream = 0;
 
-  /* parsing commandline arguments */
-  for (argidx = 1; argidx < argc; argidx++) {
+  GT4ListMakerQueue mq;
 
-    if (!strcmp (argv[argidx], "-v") || !strcmp (argv[argidx], "--version")) {
+  /* parsing commandline arguments */
+  for (i = 1; i < argc; i++) {
+    if (!strcmp (argv[i], "-v") || !strcmp (argv[i], "--version")) {
       fprintf (stdout, "glistmaker version %u.%u.%u (%s)\n", VERSION_MAJOR, VERSION_MINOR, VERSION_MICRO, VERSION_QUALIFIER);
       return 0;
 
-    } else if (!strcmp (argv[argidx], "-h") || !strcmp (argv[argidx], "--help") || !strcmp (argv[argidx], "-?")) {
+    } else if (!strcmp (argv[i], "-h") || !strcmp (argv[i], "--help") || !strcmp (argv[i], "-?")) {
       print_help (0);
-    } else if (!strcmp (argv[argidx], "-o") || !strcmp (argv[argidx], "--outputname")) {
-      if (!argv[argidx + 1] || argv[argidx + 1][0] == '-') {
-        fprintf (stderr, "Warning: No output name specified!\n");
-        argidx += 1;
-        continue;
-      }
-      outputname = argv[argidx + 1];
-      argidx += 1;
-    } else if (!strcmp (argv[argidx], "-w") || !strcmp (argv[argidx], "--wordlength")) {
-      if (!argv[argidx + 1]  || argv[argidx + 1][0] == '-') {
-        fprintf (stderr, "Warning: No word-length specified! Using the default value: %d.\n", wordlength);
-        argidx += 1;
-        continue;
-      }
-      wordlength = strtol (argv[argidx + 1], &end, 10);
+    } else if (!strcmp (argv[i], "-o") || !strcmp (argv[i], "--outputname")) {
+      if (++i >= argc) print_help (1);
+      outputname = argv[i];
+    } else if (!strcmp (argv[i], "-w") || !strcmp (argv[i], "--wordlength")) {
+      if (++i >= argc) print_help (1);
+      wordlength = strtol (argv[i], &end, 10);
       if (*end != 0) {
-        fprintf (stderr, "Error: Invalid word-length: %s! Must be an integer.\n", argv[argidx + 1]);
+        fprintf (stderr, "Error: Invalid word-length: %s! Must be an integer.\n", argv[i]);
         print_help (1);
       }
-      argidx += 1;
-    } else if (!strcmp (argv[argidx], "-c") || !strcmp (argv[argidx], "--cutoff")) {
-      if (!argv[argidx + 1] || argv[argidx + 1][0] == '-') {
-        fprintf (stderr, "Warning: No frequency cut-off specified! Using the default value: %d.\n", cutoff);
-        argidx += 1;
-        continue;
-      }
-      cutoff = strtol (argv[argidx + 1], &end, 10);
+    } else if (!strcmp (argv[i], "-c") || !strcmp (argv[i], "--cutoff")) {
+      if (++i >= argc) print_help (1);
+      cutoff = strtol (argv[i], &end, 10);
       if (*end != 0) {
-        fprintf (stderr, "Error: Invalid frequency cut-off: %s! Must be an integer.\n", argv[argidx + 1]);
+        fprintf (stderr, "Error: Invalid frequency cut-off: %s! Must be an integer.\n", argv[i]);
         print_help (1);
       }
-      argidx += 1;
-    } else if (!strcmp (argv[argidx], "--num_threads")) {
-      if (!argv[argidx + 1]  || argv[argidx + 1][0] == '-') {
-        fprintf (stderr, "Warning: No num-threads specified! Using the default value: %d.\n", DEFAULT_NUM_THREADS);
-        argidx += 1;
-        continue;
-      }
-      nthreads = strtol (argv[argidx + 1], &end, 10);
+    } else if (!strcmp (argv[i], "--num_threads")) {
+      if (++i >= argc) print_help (1);
+      nthreads = strtol (argv[i], &end, 10);
       if (*end != 0) {
-        fprintf (stderr, "Error: Invalid num-threads: %s! Must be an integer.\n", argv[argidx + 1]);
+        fprintf (stderr, "Error: Invalid num-threads: %s! Must be an integer.\n", argv[i]);
         print_help (1);
       }
-      argidx += 1;
-    } else if (!strcmp (argv[argidx], "--max_tables")) {
-      if (!argv[argidx + 1]  || argv[argidx + 1][0] == '-') {
-        fprintf (stderr, "Warning: No max_tables specified! Using the default value: %d.\n", DEFAULT_MAX_TABLES);
-        argidx += 1;
-        continue;
-      }
-      ntables = strtol (argv[argidx + 1], &end, 10);
+    } else if (!strcmp (argv[i], "--max_tables")) {
+      if (++i >= argc) print_help (1);
+      ntables = strtol (argv[i], &end, 10);
       if (*end != 0) {
-        fprintf (stderr, "Error: Invalid max_tables: %s! Must be an integer.\n", argv[argidx + 1]);
+        fprintf (stderr, "Error: Invalid max_tables: %s! Must be an integer.\n", argv[i]);
         print_help (1);
       }
-      argidx += 1;
-    } else if (!strcmp (argv[argidx], "--table_size")) {
-      if (!argv[argidx + 1]  || argv[argidx + 1][0] == '-') {
-        fprintf (stderr, "Warning: No table-size specified! Using the default value: %llu.\n", (unsigned long long) DEFAULT_TABLE_SIZE);
-        argidx += 1;
-        continue;
-      }
-      tablesize = strtoll (argv[argidx + 1], &end, 10);
+    } else if (!strcmp (argv[i], "--table_size")) {
+      if (++i >= argc) print_help (1);
+      tablesize = strtoll (argv[i], &end, 10);
       if (*end != 0) {
-        fprintf (stderr, "Error: Invalid table-size: %s! Must be an integer.\n", argv[argidx + 1]);
+        fprintf (stderr, "Error: Invalid table-size: %s! Must be an integer.\n", argv[i]);
         print_help (1);
       }
-      argidx += 1;
-    } else if (!strcmp (argv[argidx], "--tmpdir")) {
-      argidx += 1;
-      if (argidx >= argc) print_help (1);
-      tmpdir = argv[argidx];
-    } else if (!strcmp (argv[argidx], "--stream")) {
+      i += 1;
+    } else if (!strcmp (argv[i], "--tmpdir")) {
+      if (++i >= argc) print_help (1);
+      tmpdir = argv[i];
+    } else if (!strcmp (argv[i], "--stream")) {
       stream = 1;
-    } else if (!strcmp (argv[argidx], "-D")) {
+    } else if (!strcmp (argv[i], "-D")) {
       debug += 1;
     } else {
       /* Input file */
-      if ((argv[argidx][0] == '-') && argv[argidx][1]) {
+      if ((argv[i][0] == '-') && argv[i][1]) {
         print_help (1);
       }
       if (n_files >= 1024) continue;
-      files[n_files++] = argv[argidx];
+      files[n_files++] = argv[i];
     }
   }
 
-  /* debug_tables = debug; */
-  
-  if (!nthreads) {
-    nthreads = DEFAULT_NUM_THREADS;
-  }
-  if (!tablesize) {
-    tablesize = DEFAULT_TABLE_SIZE;
-  }
-  if (!ntables) {
-    ntables = DEFAULT_MAX_TABLES;
-  }
   if (ntables > MAX_TABLES) ntables = MAX_TABLES;
 
   /* checking parameter values */
@@ -213,7 +171,7 @@ main (int argc, const char *argv[])
     print_help (1);
   }
   if (wordlength < 1 || wordlength > 32) {
-    fprintf (stderr, "Error: Invalid word-length: %d!\n", wordlength);
+    fprintf (stderr, "Error: Invalid word-length %d (must be 1 - 32)!\n", wordlength);
     print_help (1);
   }
   if (cutoff < 1) {
@@ -224,147 +182,66 @@ main (int argc, const char *argv[])
     fprintf (stderr, "Error: Output name exceeds the 200 character limit.");
     return 1;
   }
-  if (nthreads < 1) nthreads = 1;
   if (nthreads > 256) nthreads = 256;
   for (i = 0; i < n_files; i++) {
     if (!strcmp (files[i], "-")) continue;
     struct stat s;
     if (stat (files[i], &s)) {
-      fprintf (stderr, "Error: Cannot stat %s\n", files[i]);
+      fprintf (stderr, "main: No such file (cannot stat): %s\n", files[i]);
       exit (1);
     }
   }
-  
-  if (nthreads > 0) {
-    /* CASE: SEVERAL THREADS */
-    GT4ListMakerQueue mq;
-    int rc;
-    unsigned int finished = 0;
-
-    maker_queue_setup (&mq, nthreads, wordlength, NUM_TMP_TABLES, TMP_TABLE_SIZE);
-
-    for (i = 0; i < n_files; i++) {
-      maker_queue_add_file (&mq, files[i], stream);
-    }
-
-    mq.tablesize = tablesize;
-    mq.cutoff = cutoff;
-
-    if (debug) {
-      fprintf (stderr, "Num threads is %d\n", nthreads);
-      fprintf (stderr, "Num tables is %d\n", ntables);
-      fprintf (stderr, "Table size is %lld\n", mq.tablesize);
-    }
-
-    rc = gt4_queue_create_threads (&mq.queue, process, &mq);
-    if (rc) {
-         fprintf (stderr, "ERROR; return code from pthread_create() is %d\n", rc);
-         exit (-1);
-    }
-
-    process (&mq.queue, 0, &mq);
-
-    while (!finished) {
-      gt4_queue_lock (&mq.queue);
-      gt4_queue_broadcast (&mq.queue);
-      if (mq.queue.nthreads_running < 2) finished = 1;
-      gt4_queue_unlock (&mq.queue);
-      /* process (&mq.queue, 0, &mq); */
-      sleep (1);
-    }
-
-    if (mq.n_final_files > 0) {
-      AZObject *objs[4096];
-      char c[1024];
-      unsigned int i;
-      GT4ListHeader header;
-      int ofile;
-      for (i = 0; i < mq.n_final_files; i++) {
-        objs[i] = (AZObject *) gt4_word_list_stream_new (mq.final_files[i], VERSION_MAJOR);
-      }
-      snprintf (c, 1024, "%s_%u.list", outputname, wordlength);
-      ofile = creat (c, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
-      gt4_write_union (objs, mq.n_final_files, 1, ofile, &header);
-      close (ofile);
-      for (i = 0; i < mq.n_final_files; i++) {
-        gt4_word_list_stream_delete (GT4_WORD_LIST_STREAM (objs[i]));
-        unlink (mq.final_files[i]);
-      }
-    }
-    if (debug) {
-      fprintf (stderr, "Read %llu words at %.2f (%u words/s)\n", (unsigned long long) mq.tokens[NUM_READ].dval, mq.tokens[TIME_READ].dval, (unsigned int) (mq.tokens[NUM_READ].dval /  mq.tokens[TIME_READ].dval));
-      fprintf (stderr, "Sort %llu words at %.2f (%u words/s)\n", (unsigned long long) mq.tokens[NUM_SORT].dval, mq.tokens[TIME_SORT].dval, (unsigned int) (mq.tokens[NUM_SORT].dval /  mq.tokens[TIME_SORT].dval));
-      fprintf (stderr, "Write tmp %llu words at %.2f (%u words/s)\n", (unsigned long long) mq.tokens[NUM_WRITE_TMP].dval, mq.tokens[TIME_WRITE_TMP].dval, (unsigned int) (mq.tokens[NUM_WRITE_TMP].dval /  mq.tokens[TIME_WRITE_TMP].dval));
-      fprintf (stderr, "Collate %.2f\n", mq.tokens[TIME_FF].dval);
-      fprintf (stderr, "Merge %.2f\n", mq.tokens[TIME_MERGE].dval);
-    }
-
-    maker_queue_release (&mq);
-  } else {
-#if 0
-    /* CASE: ONE THREAD */
-    GT4WordTable *table, *temptable;
-    int v;
-    
-    /* creating initial tables */
-    table = wordtable_new (wordlength, 20000);
-    temptable = wordtable_new (wordlength, 20000);
-    
-    for (i = 0; i < n_files; i++) {
-      GT4FastaReader reader;
-      AZObject *obj;
-
-      temptable->wordlength = wordlength;
-
-      if (!strcmp (files[i], "-")) {
-  /* stdin */
-  GT4SequenceStream *stream = gt4_sequence_stream_new_from_stream (stdin, 0);
-  fasta_reader_init (&reader, wordlength, 1, GT4_SEQUENCE_STREAM_SEQUENCE_SOURCE_IMPLEMENTATION(stream), &stream->source_instance);
-  obj = AZ_OBJECT (stream);
-      } else {
-  GT4SequenceFile *seqf = gt4_sequence_file_new (files[i], 0);
-  gt4_sequence_file_map_sequence (seqf);
-  fasta_reader_init (&reader, wordlength, 1, GT4_SEQUENCE_FILE_SEQUENCE_SOURCE_IMPLEMENTATION(seqf), &seqf->block.source_instance);
-  obj = AZ_OBJECT (seqf);
-      }
-
-      /* reading words from FastA/FastQ */
-      v = fasta_reader_read_nwords (&reader, 0xffffffffffffffffULL, NULL, NULL, NULL, NULL, process_word, (void *) temptable);
-      if (v) return print_error_message (v);
-      fasta_reader_release (&reader);
-
-      /* radix sorting */
-      wordtable_sort (temptable, 0);
-      v = wordtable_find_frequencies (temptable);
-      if (v) return print_error_message (v);
-
-
-      /* merging two tables */
-      if (i > 0) {
-  v = wordtable_merge (table, temptable);
-  if (v) return print_error_message (v);
-      } else {
-  GT4WordTable *t = table;
-  table = temptable;
-  temptable = t;
-      }
-
-      /* empty the temporary table */
-      wordtable_empty (temptable);
-
-      az_object_unref (obj);
-    }
-
-    /* write the final list into a file */
-    if (debug > 0) fprintf (stderr, "Writing list %s\n", outputname);
-    if (wordtable_write_to_file (table, outputname, cutoff)) {
-      fprintf (stderr, "Cannot write list to file\n");
-    }
-#endif
+  if (debug) {
+    fprintf (stderr, "Num threads is %d\n", nthreads);
+    fprintf (stderr, "Num tables is %d\n", ntables);
+    fprintf (stderr, "Table size is %lld\n", tablesize);
   }
 
-  /*wordtable_delete (temptable);
-  wordtable_delete (table);*/
+  /* Set up queue */
+  maker_queue_setup (&mq, nthreads, wordlength, ntables, tablesize);
+  for (i = 0; i < n_files; i++) maker_queue_add_file (&mq, files[i], stream);
+  if (gt4_queue_create_threads (&mq.queue, process, &mq)) {
+    fprintf (stderr, "main: Cannot create threads\n");
+    exit (1);
+  }
+
+  /* Do work */
+  process (&mq.queue, 0, &mq);
+  gt4_queue_lock (&mq.queue);
+  while (mq.queue.nthreads_running > 1) {
+    gt4_queue_wait (&mq.queue);
+    gt4_queue_broadcast (&mq.queue);
+  }
+  gt4_queue_unlock (&mq.queue);
+
+  if (mq.n_final_files > 0) {
+    AZObject *objs[4096];
+    char c[1024];
+    unsigned int i;
+    GT4ListHeader header;
+    int ofile;
+    for (i = 0; i < mq.n_final_files; i++) {
+      objs[i] = (AZObject *) gt4_word_list_stream_new (mq.final_files[i], VERSION_MAJOR);
+    }
+    snprintf (c, 1024, "%s_%u.list", outputname, wordlength);
+    ofile = creat (c, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
+    gt4_write_union (objs, mq.n_final_files, 1, ofile, &header);
+    close (ofile);
+    for (i = 0; i < mq.n_final_files; i++) {
+      gt4_word_list_stream_delete (GT4_WORD_LIST_STREAM (objs[i]));
+      unlink (mq.final_files[i]);
+    }
+  }
+
+  if (debug) {
+    fprintf (stderr, "Read %llu words at %.2f (%u words/s)\n", (unsigned long long) mq.tokens[NUM_READ].dval, mq.tokens[TIME_READ].dval, (unsigned int) (mq.tokens[NUM_READ].dval /  mq.tokens[TIME_READ].dval));
+    fprintf (stderr, "Sort %llu words at %.2f (%u words/s)\n", (unsigned long long) mq.tokens[NUM_SORT].dval, mq.tokens[TIME_SORT].dval, (unsigned int) (mq.tokens[NUM_SORT].dval /  mq.tokens[TIME_SORT].dval));
+    fprintf (stderr, "Write tmp %llu words at %.2f (%u words/s)\n", (unsigned long long) mq.tokens[NUM_WRITE_TMP].dval, mq.tokens[TIME_WRITE_TMP].dval, (unsigned int) (mq.tokens[NUM_WRITE_TMP].dval /  mq.tokens[TIME_WRITE_TMP].dval));
+    fprintf (stderr, "Collate %.2f\n", mq.tokens[TIME_FF].dval);
+    fprintf (stderr, "Merge %.2f\n", mq.tokens[TIME_MERGE].dval);
+  }
+
+  maker_queue_release (&mq);
 
   pthread_exit (NULL);
 }
@@ -435,7 +312,7 @@ collate_tables (GT4ListMakerQueue *mq, TaskCollateTables *tc)
   mq->n_tables_collating -= 1;
 
   for (i = 0; i < tc->n_tables; i++) {
-    wordtable_empty (tc->tables[i]);
+    gt4_word_table_clear (tc->tables[i]);
     mq->free_s_tables[mq->n_free_s_tables++] = tc->tables[i];
   }
   mq->tmp_files[mq->n_tmp_files++] = tmpname;
@@ -468,10 +345,11 @@ read_table (GT4ListMakerQueue *mq, TaskRead *tr)
 
   gt4_queue_unlock (&mq->queue);
   tbl->wordlength = mq->wordlen;
+  tr->data = tbl;
   t0 = get_time ();
-  fasta_reader_read_nwords (&tr->reader, TMP_TABLE_SIZE, NULL, NULL, NULL, NULL, process_word, tbl);
+  fasta_reader_read_nwords (&tr->reader, tbl->n_word_slots, NULL, NULL, NULL, NULL, process_word, tr);
   t1 = get_time ();
-  if (tbl->nwords) wordtable_sort (tbl, 0);
+  if (tbl->n_words) wordtable_sort (tbl, 0);
   t2 = get_time ();
   gt4_queue_lock (&mq->queue);
 
@@ -482,38 +360,46 @@ read_table (GT4ListMakerQueue *mq, TaskRead *tr)
     gt4_queue_add_task (&mq->queue, &tr->task, 0);
     mq->n_files_waiting += 1;
   }
-  if (tbl->nwords) {
+  if (tbl->n_words) {
     mq->used_s_tables[mq->n_used_s_tables++] = tbl;
   } else {
     mq->free_s_tables[mq->n_free_s_tables++] = tbl;
   }
-  if ((mq->n_used_s_tables >= TMP_MERGE_SIZE) || (!mq->n_files_reading && !mq->n_files_waiting)) {
+  /*
+   * Schedule merging if:
+   *   - merge size is achieved
+   *   - no more files reading or waiting
+   *   - no more files reading and no free tables
+   */
+  if ((mq->n_used_s_tables >= TMP_MERGE_SIZE) || (!mq->n_files_reading && !mq->n_files_waiting) || (!mq->n_files_reading && !mq->n_free_s_tables)) {
     unsigned int n_tables, i;
     /* Create collation task */
     n_tables = mq->n_used_s_tables;
     if (n_tables > TMP_MERGE_SIZE) n_tables = TMP_MERGE_SIZE;
-    TaskCollateTables *tc = task_collate_tables_new (mq, n_tables);
-    for (i = 0; i < n_tables; i++) {
-      tc->tables[tc->n_tables++] = mq->used_s_tables[--mq->n_used_s_tables];
+    if (n_tables) {
+      TaskCollateTables *tc = task_collate_tables_new (mq, n_tables);
+      for (i = 0; i < n_tables; i++) {
+        tc->tables[tc->n_tables++] = mq->used_s_tables[--mq->n_used_s_tables];
+      }
+      gt4_queue_add_task (&mq->queue, &tc->task, 0);
     }
-    gt4_queue_add_task (&mq->queue, &tc->task, 0);
   }
-  mq->tokens[NUM_READ].dval += tbl->nwords;
+  mq->tokens[NUM_READ].dval += tbl->n_words;
   mq->tokens[TIME_READ].dval += (t1 - t0);
-  mq->tokens[NUM_SORT].dval += tbl->nwords;
+  mq->tokens[NUM_SORT].dval += tbl->n_words;
   mq->tokens[TIME_SORT].dval += (t2 - t1);
   return 0;
 }
 
 static void
-process (GT4Queue *queue, unsigned int idx, void *arg)
+process (GT4Queue *queue, unsigned int thread_idx, void *arg)
 {
   GT4ListMakerQueue *mq = (GT4ListMakerQueue *) arg;
   unsigned int finished = 0;
 
-  if (debug > 1) {
+  if (debug_threads > 1) {
     gt4_queue_lock (queue);
-    fprintf (stderr, "Thread %d started (total %d)\n", idx, queue->nthreads_running);
+    fprintf (stderr, "Thread %d started (total %d)\n", thread_idx, queue->nthreads_running);
     gt4_queue_unlock (queue);
   }
 
@@ -521,12 +407,15 @@ process (GT4Queue *queue, unsigned int idx, void *arg)
   while (!finished) {
     unsigned int wait = 0;
     gt4_queue_lock (queue);
-    if (!queue->tasks && !mq->n_running) {
-      /* Finish */
-      finished = 1;
-    } else if (!queue->tasks) {
-      /* Wait */
-      wait = 1;
+    if (!queue->tasks) {
+      /* No tasks left */
+      if (!mq->n_running) {
+        /* No other threads running - finish */
+        finished = 1;
+      } else if (!queue->tasks) {
+        /* Other tasks still working - Wait */
+        wait = 1;
+      }
     } else {
       GT4Task *task;
       for (task = queue->tasks; task; task = task->next) {
@@ -566,8 +455,9 @@ process (GT4Queue *queue, unsigned int idx, void *arg)
 int 
 process_word (GT4FastaReader *reader, unsigned long long word, void *data)
 {
-  GT4WordTable *table = (GT4WordTable *) data;
-  wordtable_add_word_nofreq (table, word, reader->wordlength);
+  TaskRead *tr = (TaskRead *) data;
+  GT4WordTable *table = (GT4WordTable *) tr->data;
+  gt4_word_table_add_word_nofreq (table, word);
   return 0;
 }
 
@@ -597,7 +487,7 @@ merge_write_multi_nofreq (GT4WordTable *tables[], unsigned int ntables_in, int o
 
   ntables = 0;
   for (j = 0; j < ntables_in; j++) {
-    if (!tables[j]->nwords) continue;
+    if (!tables[j]->n_words) continue;
     t[ntables] = tables[j];
     i[ntables] = 0;
     ntables += 1;
@@ -619,7 +509,7 @@ merge_write_multi_nofreq (GT4WordTable *tables[], unsigned int ntables_in, int o
       if (t[j]->words[i[j]] == word) {
         freq += 1;
         i[j] += 1;
-        if (i[j] >= t[j]->nwords) {
+        if (i[j] >= t[j]->n_words) {
           ntables -= 1;
           if (ntables > 0) {
             t[j] = t[ntables];
@@ -633,15 +523,17 @@ merge_write_multi_nofreq (GT4WordTable *tables[], unsigned int ntables_in, int o
         j += 1;
       }
     }
-    memcpy (&b[bp], &word, 8);
-    memcpy (&b[bp + 8], &freq, 4);
-    bp += 12;
-    if (bp >= TMP_BUF_SIZE) {
-      write (ofile, b, bp);
-      bp = 0;
+    if (freq >= cutoff) {
+      memcpy (&b[bp], &word, 8);
+      memcpy (&b[bp + 8], &freq, 4);
+      bp += 12;
+      if (bp >= TMP_BUF_SIZE) {
+        write (ofile, b, bp);
+        bp = 0;
+      }
+      h.nwords += 1;
+      h.totalfreq += freq;
     }
-    h.nwords += 1;
-    h.totalfreq += freq;
     word = next;
   }
   if (bp > 0) {
@@ -663,12 +555,12 @@ print_help (int exitvalue)
   fprintf (stderr, "Options:\n");
   fprintf (stderr, "    -v, --version           - print version information and exit\n");
   fprintf (stderr, "    -h, --help              - print this usage screen and exit\n");
-  fprintf (stderr, "    -w, --wordlength NUMBER - specify index wordsize (1-32) (default 16)\n");
-  fprintf (stderr, "    -c, --cutoff NUMBER     - specify frequency cut-off (default 1)\n");
+  fprintf (stderr, "    -w, --wordlength NUMBER - specify index wordsize (1-32)\n");
+  fprintf (stderr, "    -c, --cutoff NUMBER     - specify frequency cut-off (default %u)\n", DEFAULT_CUTOFF);
   fprintf (stderr, "    -o, --outputname STRING - specify output name (default \"out\")\n");
-  fprintf (stderr, "    --num_threads           - number of threads the program is run on (default MIN(8, num_input_files))\n");
-  fprintf (stderr, "    --max_tables            - maximum number of temporary tables (default MAX(num_threads, 2))\n");
-  fprintf (stderr, "    --table_size            - maximum size of the temporary table (default 500000000)\n");
+  fprintf (stderr, "    --num_threads           - number of threads (default %u)\n", DEFAULT_NUM_THREADS);
+  fprintf (stderr, "    --max_tables            - maximum number of temporary tables (default %u)\n", DEFAULT_NUM_TABLES);
+  fprintf (stderr, "    --table_size            - maximum size of the temporary table (default %llu)\n", DEFAULT_TABLE_SIZE);
   fprintf (stderr, "    --tmpdir                - directory for temporary files (may need an order of magnitude more space than the size of the final list)\n");
   fprintf (stderr, "    --stream                - read files as streams instead of memory-mapping (slower but uses less virtual memory)\n");
   fprintf (stderr, "    -D                      - increase debug level\n");
