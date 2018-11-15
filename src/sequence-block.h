@@ -35,11 +35,14 @@ typedef struct _GT4SequenceBlockClass GT4SequenceBlockClass;
 #define GT4_SEQUENCE_BLOCK(o) (AZ_CHECK_INSTANCE_CAST ((o), GT4_TYPE_SEQUENCE_BLOCK, GT4SequenceBlock))
 #define GT4_IS_SEQUENCE_BLOCK(o) (AZ_CHECK_INSTANCE_TYPE ((o), GT4_TYPE_SEQUENCE_BLOCK))
 
-#define GT4_SEQUENCE_BLOCK_FROM_SEQUENCE_SOURCE_INSTANCE(i) (GT4SequenceBlock *) AZ_BASE_ADDRESS(GT4SequenceBlock,source_instance,i)
-#define GT4_SEQUENCE_BLOCK_SEQUENCE_SOURCE_IMPLEMENTATION(o) ((GT4SequenceBlockClass *) ((AZObject *) (o))->klass)->source_implementation
+#define GT4_SEQUENCE_BLOCK_FROM_SEQUENCE_SOURCE_INSTANCE(i) (GT4SequenceBlock *) AZ_BASE_ADDRESS(GT4SequenceBlock,source_inst,i)
+#define GT4_SEQUENCE_BLOCK_SEQUENCE_SOURCE_IMPLEMENTATION(o) &((GT4SequenceBlockClass *) ((AZObject *) (o))->klass)->source_impl
+#define GT4_SEQUENCE_BLOCK_FROM_SEQUENCE_COLLECTION_INSTANCE(i) (GT4SequenceBlock *) AZ_BASE_ADDRESS(GT4SequenceBlock,collection_inst,i)
+#define GT4_SEQUENCE_BLOCK_SEQUENCE_COLLECTION_IMPLEMENTATION(o) &((GT4SequenceBlockClass *) ((AZObject *) (o))->klass)->collection_impl
 
 #include <az/object.h>
 
+#include "sequence-collection.h"
 #include "sequence-source.h"
 
 struct _GT4SequenceBlock {
@@ -50,13 +53,23 @@ struct _GT4SequenceBlock {
   unsigned long long csize;
   unsigned long long pos;
   /* GT4SequenceSource instance */
-  GT4SequenceSourceInstance source_instance;
+  GT4SequenceSourceInstance source_inst;
+  /* GT4SequenceCollection instance */
+  GT4SequenceCollectionInstance collection_inst;
+  /* Subsequence data */
+  unsigned int n_subseqs;
+  GT4SubSequence *subseqs;
+  /* Bookkeeping */
+  unsigned int size_subseqs;
+  unsigned int subseq_block_size;
 };
 
 struct _GT4SequenceBlockClass {
   AZObjectClass object_class;
   /* GT4SequenceSource implementation */
-  GT4SequenceSourceImplementation source_implementation;
+  GT4SequenceSourceImplementation source_impl;
+  /* GT4SequenceCollection implementation */
+  GT4SequenceCollectionImplementation collection_impl;
 };
 
 unsigned int gt4_sequence_block_get_type (void);

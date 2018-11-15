@@ -42,7 +42,6 @@ struct _GT4WordTableLocation {
 
 struct _GT4WordTable {
   unsigned long long n_word_slots;
-  unsigned long long n_data_slots;
   unsigned long long n_words;
   unsigned long long *words;
   unsigned char *data;
@@ -50,14 +49,13 @@ struct _GT4WordTable {
   unsigned int wordlength;
 };
 
-GT4WordTable *gt4_word_table_new (unsigned int wordlen, unsigned long long size);
+GT4WordTable *gt4_word_table_new (unsigned int wordlen, unsigned long long n_slots, unsigned int data_size);
 void gt4_word_table_delete (GT4WordTable *table);
 
 void gt4_word_table_clear (GT4WordTable *table);
 int gt4_word_table_ensure_size (GT4WordTable *table, unsigned long long size);
-int gt4_word_table_ensure_data_size (GT4WordTable *table, unsigned long long size);
 
-int gt4_word_table_add_word (GT4WordTable *table, unsigned long long word, unsigned int freq);
+int gt4_word_table_add_word (GT4WordTable *table, unsigned long long word, void *data);
 int gt4_word_table_add_word_nofreq (GT4WordTable *table, unsigned long long word);
 
 int wordtable_merge (GT4WordTable *table, GT4WordTable *other);

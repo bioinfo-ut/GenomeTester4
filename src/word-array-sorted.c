@@ -33,8 +33,6 @@
 
 #include "word-array-sorted.h"
 
-static void sarray_class_init (GT4WordSArrayClass *klass);
-
 unsigned int sarray_type = 0;
 GT4WordSArrayClass *sarray_class = 0;
 
@@ -42,18 +40,11 @@ unsigned int
 gt4_word_sarray_get_type (void)
 {
   if (!sarray_type) {
-    sarray_class = (GT4WordSArrayClass *) az_register_interface_type (&sarray_type, AZ_TYPE_INTERFACE, (const unsigned char *) "GT4WordArraySorted",
+    sarray_class = (GT4WordSArrayClass *) az_register_interface_type (&sarray_type, GT4_TYPE_WORD_SLIST, (const unsigned char *) "GT4WordArraySorted",
       sizeof (GT4WordSArrayClass), sizeof (GT4WordSArrayImplementation), sizeof (GT4WordSArrayInstance),
-      (void (*) (AZClass *)) sarray_class_init,
-      NULL, NULL, NULL);
+      NULL, NULL, NULL, NULL);
   }
   return sarray_type;
-}
-
-static void
-sarray_class_init (GT4WordSArrayClass *klass)
-{
-  klass->interface_class.klass.flags = AZ_CLASS_ZERO_MEMORY;
 }
 
 unsigned int
@@ -61,9 +52,7 @@ gt4_word_sarray_get_first_word (GT4WordSArrayImplementation *impl, GT4WordSArray
 {
   arikkei_return_val_if_fail (impl != NULL, 0);
   arikkei_return_val_if_fail (inst != NULL, 0);
-  inst->idx = 0;
-  if (!inst->num_words) return 0;
-  return impl->get_first_word (impl, inst);
+  return gt4_word_slist_get_first_word (&impl->slist_impl, &inst->slist_inst);
 }
 
 unsigned int
@@ -71,8 +60,5 @@ gt4_word_sarray_get_next_word (GT4WordSArrayImplementation *impl, GT4WordSArrayI
 {
   arikkei_return_val_if_fail (impl != NULL, 0);
   arikkei_return_val_if_fail (inst != NULL, 0);
-  if (inst->idx >= inst->num_words) return 0;
-  inst->idx += 1;
-  if (inst->idx >= inst->num_words) return 0;
-  return impl->get_next_word (impl, inst);
+  return gt4_word_slist_get_next_word (&impl->slist_impl, &inst->slist_inst);
 }

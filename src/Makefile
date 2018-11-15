@@ -10,9 +10,11 @@ LISTMAKER_SOURCES = \
 	listmaker-queue.c listmaker-queue.h \
 	queue.c queue.h \
 	fasta.c fasta.h \
+	file-array.c file-array.h \
 	buffer.c buffer.h \
 	sequence.c sequence.h \
 	sequence-block.c sequence-block.h \
+	sequence-collection.c sequence-collection.h \
 	sequence-file.c sequence-file.h \
 	sequence-source.c sequence-source.h \
 	sequence-stream.c sequence-stream.h \
@@ -21,7 +23,9 @@ LISTMAKER_SOURCES = \
 	common.c common.h \
 	utils.c utils.h \
 	word-array-sorted.c word-array-sorted.h \
+	word-dict.c word-dict.h \
 	word-list.c word-list.h \
+	word-list-sorted.c word-list-sorted.h \
 	word-list-stream.c word-list-stream.h \
 	word-map.c word-map.h \
 	word-table.c word-table.h
@@ -31,7 +35,10 @@ LISTQUERY_SOURCES = \
 	listmaker-queue.c listmaker-queue.h \
 	fasta.c fasta.h \
 	buffer.c buffer.h \
+	file-array.c file-array.h \
+	index-map.c index-map.h \
 	sequence.c sequence.h \
+	sequence-collection.c sequence-collection.h \
 	sequence-block.c sequence-block.h \
 	sequence-file.c sequence-file.h \
 	sequence-source.c sequence-source.h \
@@ -42,6 +49,8 @@ LISTQUERY_SOURCES = \
 	utils.c utils.h \
 	word-list.c word-list.h \
 	word-array-sorted.c word-array-sorted.h \
+	word-dict.c word-dict.h \
+	word-list-sorted.c word-list-sorted.h \
 	word-map.c word-map.h \
 	word-table.c word-table.h
 
@@ -50,7 +59,9 @@ LISTCOMPARE_SOURCES = \
 	listmaker-queue.c listmaker-queue.h \
 	fasta.c \
 	buffer.c \
+	file-array.c file-array.h \
 	sequence.c \
+	sequence-collection.c sequence-collection.h \
 	sequence-block.c sequence-block.h \
 	sequence-file.c sequence-file.h \
 	sequence-source.c sequence-source.h \
@@ -60,7 +71,9 @@ LISTCOMPARE_SOURCES = \
 	queue.c queue.h \
 	utils.c \
 	word-array-sorted.c word-array-sorted.h \
+	word-dict.c word-dict.h \
 	word-list.c word-list.h \
+	word-list-sorted.c word-list-sorted.h \
 	word-list-stream.c word-list-stream.h \
 	word-map.c word-map.h \
 	word-table.c word-table.h
@@ -72,6 +85,7 @@ GMER_COUNTER_SOURCES = \
 	listmaker-queue.c listmaker-queue.h \
 	trie.c trie.h \
 	sequence.c sequence.h \
+	sequence-collection.c sequence-collection.h \
 	sequence-block.c sequence-block.h \
 	sequence-file.c sequence-file.h \
 	sequence-source.c sequence-source.h \
@@ -108,6 +122,7 @@ GASSEMBLER_SOURCES = \
 	queue.c queue.h \
 	sequence.c sequence.h \
 	sequence-block.c sequence-block.h \
+	sequence-collection.c sequence-collection.h \
 	sequence-file.c sequence-file.h \
 	sequence-source.c sequence-source.h \
 	trie.c trie.h \
@@ -120,6 +135,13 @@ ALEQ_SOURCES = \
 	simplex.c simplex.h \
 	utils.c utils.h \
 	aleq.c
+
+KMER_PREDICTOR_SOURCES = \
+	utils.c utils.h \
+	word-list-stream.c word-list-stream.h \
+	word-array-sorted.c word-array-sorted.h \
+	word-list.c word-list.h \
+	kmer-predictor.c
 
 ARIKKEI_SOURCES = \
 	libarikkei/arikkei-strlib.c libarikkei/arikkei-strlib.h \
@@ -172,6 +194,9 @@ gassembler: $(GASSEMBLER_SOURCES) $(AZ_SOURCES) $(ARIKKEI_SOURCES)
 
 aleq: $(ALEQ_SOURCES)
 	$(CXX) $(ALEQ_SOURCES) -o aleq $(LIBS) $(CXXFLAGS) -Wall
+
+kmer_predictor: $(KMER_PREDICTOR_SOURCES)
+	$(CXX) $(KMER_PREDICTOR_SOURCES)  $(AZ_SOURCES) $(ARIKKEI_SOURCES) -o kmer_predictor $(LIBS) $(AZ_FLAGS) $(CXXFLAGS)
 	
 clean: clean-custom
 	rm -f *.o $(BINS)

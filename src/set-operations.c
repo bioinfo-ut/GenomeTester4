@@ -40,8 +40,8 @@ static unsigned int debug = 1;
 unsigned int
 gt4_write_union (AZObject *arrays[], unsigned int n_arrays, unsigned int cutoff, int ofile, GT4ListHeader *header)
 {
-  GT4WordSArrayImplementation *impls[GT4_MAX_SETS];
-  GT4WordSArrayInstance *insts[GT4_MAX_SETS];
+  GT4WordSListImplementation *impls[GT4_MAX_SETS];
+  GT4WordSListInstance *insts[GT4_MAX_SETS];
   unsigned int n_sources;
   unsigned long long total = 0;
   unsigned int j;
@@ -50,9 +50,9 @@ gt4_write_union (AZObject *arrays[], unsigned int n_arrays, unsigned int cutoff,
   
   n_sources = 0;
   for (j = 0; j < n_arrays; j++) {
-    impls[n_sources] = (GT4WordSArrayImplementation *) az_object_get_interface (AZ_OBJECT(arrays[j]), GT4_TYPE_WORD_SARRAY, (void **) &insts[n_sources]);
+    impls[n_sources] = (GT4WordSListImplementation *) az_object_get_interface (AZ_OBJECT(arrays[j]), GT4_TYPE_WORD_SLIST, (void **) &insts[n_sources]);
     if (insts[n_sources]->num_words) {
-      gt4_word_sarray_get_first_word (impls[n_sources], insts[n_sources]);
+      gt4_word_slist_get_first_word (impls[n_sources], insts[n_sources]);
       total += insts[n_sources]->num_words;
       n_sources += 1;
     }
@@ -86,7 +86,7 @@ gt4_write_union (AZObject *arrays[], unsigned int n_arrays, unsigned int cutoff,
       while (j < n_sources) {
         if (insts[j]->word == word) {
           freq += insts[j]->count;
-          if (!gt4_word_sarray_get_next_word (impls[j], insts[j])) {
+          if (!gt4_word_slist_get_next_word (impls[j], insts[j])) {
             n_sources -= 1;
             if (n_sources > 0) {
               impls[j] = impls[n_sources];

@@ -60,18 +60,17 @@ sequence_file_class_init (GT4SequenceFileClass *klass)
 {
   parent_class = (GT4SequenceBlockClass *) ((AZClass *) klass)->parent;
   ((AZObjectClass *) klass)->shutdown = sequence_file_shutdown;
-  klass->block_class.source_implementation.open = sequence_file_open;
-  klass->block_class.source_implementation.close = sequence_file_close;
+  klass->block_class.source_impl.open = sequence_file_open;
+  klass->block_class.source_impl.close = sequence_file_close;
 }
 
 static void
 sequence_file_shutdown (AZObject *obj)
 {
   GT4SequenceFile *seqf = (GT4SequenceFile *) obj;
-  if (seqf->block.source_instance.open) {
-    gt4_sequence_source_close (GT4_SEQUENCE_FILE_SEQUENCE_SOURCE_IMPLEMENTATION(seqf), &seqf->block.source_instance);
+  if (seqf->block.source_inst.open) {
+    gt4_sequence_source_close (GT4_SEQUENCE_FILE_SEQUENCE_SOURCE_IMPLEMENTATION(seqf), &seqf->block.source_inst);
   }
-  if (seqf->subseqs) free (seqf->subseqs);
   if (seqf->lock) pthread_mutex_destroy (&seqf->mutex);
   if (seqf->path) free (seqf->path);
   if (((AZObjectClass *) parent_class)->shutdown) {
@@ -108,27 +107,27 @@ sequence_file_close (GT4SequenceSourceImplementation *impl, GT4SequenceSourceIns
 GT4SequenceFile *
 gt4_sequence_file_new (const char *path, unsigned int lock)
 {
-  GT4SequenceFile *seqfile;
+  GT4SequenceFile *seqf;
   struct stat st;
   if (stat (path, &st) < 0) {
     fprintf (stderr, "Cannot stat file %s\n", path);
     //return NULL;
     st.st_size = 0;
   }
-  seqfile = (GT4SequenceFile *) az_object_new (GT4_TYPE_SEQUENCE_FILE);
-  if (path) seqfile->path = strdup (path);
-  seqfile->size = st.st_size;
+  seqf = (GT4SequenceFile *) az_object_new (GT4_TYPE_SEQUENCE_FILE);
+  if (path) seqf->path = strdup (path);
+  seqf->size = st.st_size;
+  seqf->block.collection_inst.writable = 1;
   if (lock) {
     pthread_mutexattr_t attr;
-    seqfile->lock = 1;
+    seqf->lock = 1;
     pthread_mutexattr_init (&attr);
     pthread_mutexattr_settype (&attr, PTHREAD_MUTEX_RECURSIVE);
-    pthread_mutex_init (&seqfile->mutex, &attr);
+    pthread_mutex_init (&seqf->mutex, &attr);
     pthread_mutexattr_destroy (&attr);
   }
-  seqfile->subseq_block_size = 1024;
 
-  return seqfile;
+  return seqf;
 }
 
 void
@@ -168,23 +167,15 @@ void
 gt4_sequence_file_map_sequence (GT4SequenceFile *seqf)
 {
   gt4_sequence_file_lock (seqf);
-  gt4_sequence_source_open (GT4_SEQUENCE_FILE_SEQUENCE_SOURCE_IMPLEMENTATION(seqf), &seqf->block.source_instance);
+  gt4_sequence_source_open (GT4_SEQUENCE_FILE_SEQUENCE_SOURCE_IMPLEMENTATION(seqf), &seqf->block.source_inst);
   gt4_sequence_file_unlock (seqf);
 }
 
 unsigned int
-gt4_sequence_file_add_subsequence (GT4SequenceFile *seqfile, unsigned long long name_pos, unsigned int name_len)
+gt4_sequence_file_add_subsequence (GT4SequenceFile *seqf, unsigned long long name_pos, unsigned int name_len)
 {
-  unsigned int index;
-  gt4_sequence_file_lock (seqfile);
-  if (seqfile->n_subseqs >= seqfile->size_subseqs) {
-    seqfile->size_subseqs = seqfile->size_subseqs << 1;
-    if (seqfile->size_subseqs < seqfile->subseq_block_size) seqfile->size_subseqs = seqfile->subseq_block_size;
-    seqfile->subseqs = (GT4SubSequence *) realloc (seqfile->subseqs, seqfile->size_subseqs * sizeof (GT4SubSequence));
-  }
-  index = seqfile->n_subseqs++;
-  seqfile->subseqs[index].name_pos = name_pos;
-  seqfile->subseqs[index].name_len = name_len;
-  gt4_sequence_file_unlock (seqfile);
-  return index;
+  gt4_sequence_file_lock (seqf);
+  int result = gt4_sequence_collection_add_subsequence (GT4_SEQUENCE_BLOCK_SEQUENCE_COLLECTION_IMPLEMENTATION(&seqf->block), &seqf->block.collection_inst, name_pos, name_len);
+  gt4_sequence_file_unlock (seqf);
+  return result;
 }

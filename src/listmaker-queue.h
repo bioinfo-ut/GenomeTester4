@@ -72,12 +72,18 @@ union _QValue {
 typedef struct _TaskRead TaskRead;
 typedef struct _TaskCollateTables TaskCollateTables;
 typedef struct _TaskCollateFiles TaskCollateFiles;
-typedef struct _GT4LMQBlock GT4LMQBlock;
+typedef struct _GT4LMQSource GT4LMQSource;
 
-struct _GT4LMQBlock {
+struct _GT4LMQSource {
+  unsigned int file_idx;
+  unsigned int block_idx;
   unsigned long long start;
   unsigned long long length;
-  unsigned int file_idx;
+  /* Subsequence data */
+  unsigned int n_subseqs;
+  GT4SubSequence *subseqs;
+  /* Bookkeeping */
+  unsigned int size_subseqs;
 };
 
 struct _GT4ListMakerQueue {
@@ -102,8 +108,9 @@ struct _GT4ListMakerQueue {
   char *final_files[256];
   
   /* Source data for indexing */
-  unsigned int n_blocks;
-  GT4LMQBlock blocks[1024];
+  unsigned int n_sources;
+  GT4LMQSource sources[1024];
+  unsigned int subseq_block_size;
 
   /* Debug */
   QValue tokens[NUM_ID_TOKENS];
@@ -115,11 +122,14 @@ struct _GT4ListMakerQueueClass {
 
 unsigned int gt4_listmaker_queue_get_type (void);
 
-void maker_queue_setup (GT4ListMakerQueue *mq, unsigned int n_threads, unsigned int w_len, unsigned int n_tmp_tables, unsigned int tmp_table_size);
+void maker_queue_setup (GT4ListMakerQueue *mq, unsigned int n_threads, unsigned int w_len, unsigned int n_tmp_tables, unsigned int tmp_table_size, unsigned int data_size);
 void maker_queue_release (GT4ListMakerQueue *mq);
 
 /* Add new file task to queue (not thread-safe) */
-void maker_queue_add_file (GT4ListMakerQueue *mq, const char *filename, unsigned int stream);
+void maker_queue_add_file (GT4ListMakerQueue *mq, const char *filename, unsigned int stream, unsigned int file_idx);
+
+/* Not thread-safe (Each source should have their own thread) */
+unsigned int maker_queue_add_subsequence (GT4ListMakerQueue *mq, unsigned int source_idx, unsigned long long name_pos, unsigned int name_len);
 
 /* Tasks */
 

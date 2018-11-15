@@ -236,12 +236,25 @@ print_position (AssemblyData *adata, unsigned int n_aligned, unsigned int pos)
   if (!n_aligned) {
     fprintf (stdout, "%s\t%u\t%c\t0\t0\t0\t0\t0\t0\tNC\n", chr_names[adata->chr], adata->start + pos, adata->ref[pos - adata->start]);
   } else {
+    /* CHR POS REF COV */
     fprintf (stdout, "%s\t%u\t%c\t%u", chr_names[adata->chr], adata->calls[pos].pos, n2c[adata->calls[pos].ref], adata->calls[pos].cov);
+    /* A C G T GAP */
     fprintf (stdout, "\t%u\t%u\t%u\t%u\t%u", adata->calls[pos].counts[A], adata->calls[pos].counts[C], adata->calls[pos].counts[G], adata->calls[pos].counts[T], adata->calls[pos].counts[GAP]);
+    /* CALL */
     if (adata->calls[pos].nucl[0] == NONE) {
       fprintf (stdout, "\tNC");
     } else {
       fprintf (stdout, "\t%c%c%c", n2c[adata->calls[pos].nucl[0]], n2c[adata->calls[pos].nucl[1]], (adata->calls[pos].poly) ? '*' : ' ');
+    }
+    /* CLASS */
+    if (adata->calls[pos].ref == GAP) {
+      fprintf (stdout, "\tI");
+    } else if (adata->calls[pos].nucl[1] == GAP) {
+      fprintf (stdout, "\tD");
+    } else if (adata->calls[pos].poly) {
+      fprintf (stdout, "\tS");
+    } else {
+      fprintf (stdout, "\t0");
     }
     fprintf (stdout, "\t%.5f\t%.5f\t%.5f\t%.5f\t%.5f", adata->calls[pos].prob, adata->calls[pos].rprob, adata->calls[pos].hzprob, adata->calls[pos].prob_higher, adata->calls[pos].prob_lower);
     fprintf (stdout, "\t%2u", adata->calls[pos].end_dist);
@@ -270,7 +283,7 @@ process (GT4Queue *queue, unsigned int idx, void *data)
       if (ntokenz < 5) {
         fprintf (stderr, "process: Too few tokens at line %u\n", gasm_queue->line);
       } else {
-        const char *kmers[MAX_KMERS];
+        char *kmers[MAX_KMERS];
         unsigned int nkmers;
         unsigned int i;
         int n_aligned;
@@ -280,15 +293,16 @@ process (GT4Queue *queue, unsigned int idx, void *data)
         if (lengths[0] > 31) lengths[0] = 31;
         memcpy (chr, tokenz[0], lengths[0]);
         chr[lengths[0]] = 0;
-        adata->chr = chr_from_text (chr);
-        adata->start = strtol ((const char *) tokenz[1], NULL, 10);
-        adata->end = strtol ((const char *) tokenz[2], NULL, 10);
-        adata->ref = (const char *) tokenz[3];
         nkmers = 0;
         for (i = 4; i < ntokenz; i++) {
           kmers[nkmers++] = strndup ((const char *) tokenz[i], lengths[i]);
         }
-        n_aligned = assemble (adata, kmers, nkmers, 2, 0);
+        assembly_data_clear (adata);
+        adata->chr = chr_from_text (chr);
+        adata->start = strtol ((const char *) tokenz[1], NULL, 10);
+        adata->end = strtol ((const char *) tokenz[2], NULL, 10);
+        adata->ref = (const char *) tokenz[3];
+        n_aligned = assemble (adata, (const char **) kmers, nkmers, 2, 0);
         if (n_aligned > 0) {
           gt4_queue_lock (queue);
           for (i = 0; i < n_aligned; i++) {
@@ -297,7 +311,12 @@ process (GT4Queue *queue, unsigned int idx, void *data)
           }
           gt4_queue_unlock (queue);
         }
-        n_aligned = assemble (adata, kmers, nkmers, 1, 0);
+        assembly_data_clear (adata);
+        adata->chr = chr_from_text (chr);
+        adata->start = strtol ((const char *) tokenz[1], NULL, 10);
+        adata->end = strtol ((const char *) tokenz[2], NULL, 10);
+        adata->ref = (const char *) tokenz[3];
+        n_aligned = assemble (adata, (const char **) kmers, nkmers, 1, 0);
         gt4_queue_lock (queue);
         if (n_aligned > 0) {
           if (n_aligned > 0) {
@@ -307,6 +326,7 @@ process (GT4Queue *queue, unsigned int idx, void *data)
             }
           }
         }
+        for (i = 0; i < nkmers; i++) free (kmers[i]);
         gasm_queue->nrunning -= 1;
       }
       gt4_queue_broadcast (queue);
@@ -1226,7 +1246,7 @@ group (AssemblyData *adata, unsigned int n_groups_req, unsigned int print)
     adata->calls[i].prob_lower = prob_lower;
     adata->calls[i].compat_both = compat_both;
 
-    adata->calls[i].end_dist = (i > (adata->p_len - 1 - i)) ? i : adata->p_len - 1 - i;
+    adata->calls[i].end_dist = (i < (adata->p_len - 1 - i)) ? i : adata->p_len - 1 - i;
 #if 0
     /* NC if too close to end */
     if ((i < min_end_distance) || (i > (adata->p_len - 1 - min_end_distance))) continue;
@@ -1307,7 +1327,7 @@ group (AssemblyData *adata, unsigned int n_groups_req, unsigned int print)
 
   /* Output alignment */
   if (print) {
-    fprintf (stdout, "CHR\tPOS      \tREF\tKMERS\tCOVERAGE\tDISCARDED\tA\tC\tG\tT\tN\tGAP\tCALL\tPROB\tRPROB\tPROB_HI\tPROB_LO\tEDIST\tGRP_ALL\tGRP\tDIV0\tDIV1\tG0\tG1\tG0_COMP\tG1_COMP\tCOMP_2");
+    fprintf (stdout, "CHR\tPOS      \tREF\tKMERS\tCOVERAGE\tDISCARDED\tA\tC\tG\tT\tN\tGAP\tCALL\tCLASS\tPROB\tRPROB\tPROB_HI\tPROB_LO\tEDIST\tGRP_ALL\tGRP\tDIV0\tDIV1\tG0\tG1\tG0_COMP\tG1_COMP\tCOMP_2");
     if (debug) {
       fprintf (stdout, "\t ");
       for (i = 0; i < n_included; i++) {

@@ -13,6 +13,7 @@ unsigned int gt4_trie_debug = 0;
 
 static TrieRef trie_node_add_word (Trie *trie, TrieRef ref, unsigned int level, unsigned long long word, unsigned int nbits, unsigned int count, unsigned int aidx);
 static unsigned int trie_node_lookup (Trie *trie, TrieRef ref, unsigned long long word, unsigned int nbits);
+static int trie_node_foreach (Trie *trie, TrieRef ref, unsigned int nbits, unsigned long long *idx, int (*callback) (Trie *trie, unsigned long long word, unsigned int code, unsigned long long word_idx, void *data), void *data);
 
 #define ALLOCATOR_BLOCK_SIZE 65536
 
@@ -78,7 +79,19 @@ unsigned int
 trie_lookup (Trie *trie, unsigned long long word)
 {
   unsigned int cbits = trie->nbits - trie->nbits_root;
-  return trie_node_lookup (trie, trie->roots[word >> cbits],  word % (1ULL << cbits), cbits);
+  return trie_node_lookup (trie, trie->roots[word >> cbits], word % (1ULL << cbits), cbits);
+}
+
+int
+trie_foreach (Trie *trie, int (*callback) (Trie *trie, unsigned long long word, unsigned int code, unsigned long long word_idx, void *data), void *data)
+{
+  unsigned long long idx = 0;
+  unsigned int cbits = trie->nbits - trie->nbits_root;
+  unsigned int i;
+  for (i = 0; i < (1U << trie->nbits_root); i++) {
+    unsigned int result = trie_node_foreach (trie, trie->roots[i], cbits, &idx, callback, data);
+  }
+  return 0;
 }
 
 unsigned int
@@ -411,3 +424,10 @@ trie_node_lookup (Trie *trie, TrieRef ref, unsigned long long word, unsigned int
     return trie_node_branch_lookup (trie, ref, word, nbits);
   }
 }
+
+static int
+trie_node_foreach (Trie *trie, TrieRef ref, unsigned int nbits, unsigned long long *idx, int (*callback) (Trie *trie, unsigned long long word, unsigned int code, unsigned long long word_idx, void *data), void *data)
+{
+  return 1;
+}
+

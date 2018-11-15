@@ -25,7 +25,7 @@
 
 unsigned int listmaker_queue_debug = 1;
 
-#define BLOCK_SIZE 10000000000ULL
+#define BLOCK_SIZE 1000000000ULL
 
 #include <string.h>
 #include <sys/mman.h>
@@ -63,6 +63,7 @@ listmaker_queue_class_init (GT4ListMakerQueueClass *klass)
 static void
 listmaker_queue_init (GT4ListMakerQueueClass *klass, GT4ListMakerQueue *mq)
 {
+  mq->subseq_block_size = 1024;
 }
 
 static void
@@ -73,10 +74,11 @@ listmaker_queue_finalize (GT4ListMakerQueueClass *klass, GT4ListMakerQueue *mq)
   free (mq->used_s_tables);
   for (i = 0; i < mq->n_tmp_files; i++) free (mq->tmp_files[i]);
   for (i = 0; i < mq->n_final_files; i++) free (mq->final_files[i]);
+  for (i = 0; i < mq->n_sources; i++) if (mq->sources[i].subseqs) free (mq->sources[i].subseqs);
 }
 
 void
-maker_queue_setup (GT4ListMakerQueue *mq, unsigned int n_threads, unsigned int wlen, unsigned int n_tmp_tables, unsigned int tmp_table_size)
+maker_queue_setup (GT4ListMakerQueue *mq, unsigned int n_threads, unsigned int wlen, unsigned int n_tmp_tables, unsigned int tmp_table_size, unsigned int data_size)
 {
   unsigned int i;
   az_instance_init (mq, GT4_TYPE_LISTMAKER_QUEUE);
@@ -85,7 +87,7 @@ maker_queue_setup (GT4ListMakerQueue *mq, unsigned int n_threads, unsigned int w
   mq->free_s_tables = (GT4WordTable **) malloc (n_tmp_tables * sizeof (GT4WordTable *));
   mq->used_s_tables = (GT4WordTable **) malloc (n_tmp_tables * sizeof (GT4WordTable *));
   for (i = 0; i < n_tmp_tables; i++) {
-    mq->free_s_tables[mq->n_free_s_tables++] = gt4_word_table_new (wlen, tmp_table_size);
+    mq->free_s_tables[mq->n_free_s_tables++] = gt4_word_table_new (wlen, tmp_table_size, data_size);
   }
 }
 
@@ -99,16 +101,20 @@ maker_queue_release (GT4ListMakerQueue *mq)
 }
 
 static void
-maker_queue_add_source (GT4ListMakerQueue *mq, AZObject *source, const char *name)
+maker_queue_add_source (GT4ListMakerQueue *mq, AZObject *source, unsigned int file_idx, unsigned int block_idx, unsigned long long start, unsigned long long length)
 {
   az_object_ref (AZ_OBJECT(source));
-  TaskRead *tr = task_read_new (&mq->queue, source, mq->n_blocks++, mq->wordlen);
+  mq->sources[mq->n_sources].file_idx = file_idx;
+  mq->sources[mq->n_sources].block_idx = block_idx;
+  mq->sources[mq->n_sources].start = start;
+  mq->sources[mq->n_sources].length = length;
+  TaskRead *tr = task_read_new (&mq->queue, source, mq->n_sources++, mq->wordlen);
   gt4_queue_add_task (&mq->queue, &tr->task, 0);
   mq->n_files_waiting += 1;
 }
 
 void
-maker_queue_add_file (GT4ListMakerQueue *mq, const char *filename, unsigned int stream)
+maker_queue_add_file (GT4ListMakerQueue *mq, const char *filename, unsigned int stream, unsigned int file_idx)
 {
   unsigned int len = (unsigned int) strlen (filename);
   if ((len > 3) && !strcmp (filename + len - 3, ".gz")) {
@@ -120,19 +126,19 @@ maker_queue_add_file (GT4ListMakerQueue *mq, const char *filename, unsigned int 
       fprintf (stderr, "Cannot open compressed stream %s\n", filename);
       return;
     }
-    maker_queue_add_source (mq, AZ_OBJECT (zstream), filename);
+    maker_queue_add_source (mq, AZ_OBJECT (zstream), file_idx, 0, 0, 0);
   } else if (!strcmp (filename, "-")) {
     /* stdin, add as Stream */
     GT4SequenceStream *stream;
     if (listmaker_queue_debug) fprintf (stderr, "maker_queue_add_file: stdin\n");
     stream = gt4_sequence_stream_new_from_stream (stdin, 0);
-    maker_queue_add_source (mq, AZ_OBJECT (stream), "stdin");
+    maker_queue_add_source (mq, AZ_OBJECT (stream), file_idx, 0, 0, 0);
   } else if (stream) {
     /* standard file, add as Stream */
     GT4SequenceStream *stream;
     if (listmaker_queue_debug) fprintf (stderr, "maker_queue_add_file: Stream %s\n", filename);
     stream = gt4_sequence_stream_new (filename);
-    maker_queue_add_source (mq, AZ_OBJECT (stream), filename);
+    maker_queue_add_source (mq, AZ_OBJECT (stream), file_idx, 0, 0, 0);
   } else {
     unsigned int nblocks, i;
     GT4SequenceFile *seqf;
@@ -148,10 +154,27 @@ maker_queue_add_file (GT4ListMakerQueue *mq, const char *filename, unsigned int 
       char c[32];
       snprintf (c, 32, "Block %u", i);
       if (listmaker_queue_debug) fprintf (stderr, "  Block %u from %llu to %llu\n", i, (unsigned long long) (blocks[i]->cdata - seqf->block.cdata), (unsigned long long) ((blocks[i]->cdata + blocks[i]->csize) - seqf->block.cdata));
-      maker_queue_add_source (mq, AZ_OBJECT (blocks[i]), c);
+      maker_queue_add_source (mq, AZ_OBJECT (blocks[i]), file_idx, i, blocks[i]->cdata - seqf->block.cdata, 0);
     }
     az_object_unref (AZ_OBJECT (seqf));
   }
+}
+
+unsigned int
+maker_queue_add_subsequence (GT4ListMakerQueue *mq, unsigned int source_idx, unsigned long long name_pos, unsigned int name_len)
+{
+  unsigned int index;
+  GT4LMQSource *source = &mq->sources[source_idx];
+  if (source->n_subseqs >= source->size_subseqs) {
+    source->size_subseqs = source->size_subseqs << 1;
+    if (source->size_subseqs < mq->subseq_block_size) source->size_subseqs = mq->subseq_block_size;
+    source->subseqs = (GT4SubSequence *) realloc (source->subseqs, source->size_subseqs * sizeof (GT4SubSequence));
+  }
+  index = source->n_subseqs++;
+  memset (&source->subseqs[index], 0, sizeof (GT4SubSequence));
+  source->subseqs[index].name_pos = name_pos;
+  source->subseqs[index].name_len = name_len;
+  return index;
 }
 
 /* Tasks */

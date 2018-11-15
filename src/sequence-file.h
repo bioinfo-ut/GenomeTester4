@@ -24,29 +24,24 @@
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
+/*
+ * Subclass of GT4SequenceBlock for memory mapped whole files
+ *
+ */
+
 typedef struct _GT4SequenceFile GT4SequenceFile;
 typedef struct _GT4SequenceFileClass GT4SequenceFileClass;
-typedef struct _GT4SubSequence GT4SubSequence;
 
 #define GT4_TYPE_SEQUENCE_FILE (gt4_sequence_file_get_type ())
 #define GT4_SEQUENCE_FILE(o) (AZ_CHECK_INSTANCE_CAST ((o), GT4_TYPE_SEQUENCE_FILE, GT4SequenceFile))
 #define GT4_IS_SEQUENCE_FILE(o) (AZ_CHECK_INSTANCE_TYPE ((o), GT4_TYPE_SEQUENCE_FILE))
 
-#define GT4_SEQUENCE_FILE_FROM_SEQUENCE_SOURCE_INSTANCE(i) (GT4SequenceFile *) AZ_BASE_ADDRESS(GT4SequenceBlock,source_instance,i)
-#define GT4_SEQUENCE_FILE_SEQUENCE_SOURCE_IMPLEMENTATION(o) &((GT4SequenceBlockClass *) ((AZObject *) (o))->klass)->source_implementation
+#define GT4_SEQUENCE_FILE_FROM_SEQUENCE_SOURCE_INSTANCE(i) (GT4SequenceFile *) AZ_BASE_ADDRESS(GT4SequenceBlock,source_inst,i)
+#define GT4_SEQUENCE_FILE_SEQUENCE_SOURCE_IMPLEMENTATION(o) &((GT4SequenceBlockClass *) ((AZObject *) (o))->klass)->source_impl
 
 #include <pthread.h>
 
 #include "sequence-block.h"
-
-struct _GT4SubSequence {
-  /* Start of name in memory mapped file */
-  unsigned long long name_pos;
-  unsigned int name_len;
-  /* Start of sequence data relative to name */
-  unsigned int sequence_pos;
-  unsigned int sequence_len;
-};
 
 struct _GT4SequenceFile {
   GT4SequenceBlock block;
@@ -56,14 +51,8 @@ struct _GT4SequenceFile {
   /* Flags */
   /* Whether to use explicit locking */
   unsigned int lock : 1;
-  /* Subsequences */
-  unsigned int n_subseqs;
-  GT4SubSequence *subseqs;
   /* For concurrent access */
   pthread_mutex_t mutex;
-  /* Bookkeeping */
-  unsigned int size_subseqs;
-  unsigned int subseq_block_size;
 };
 
 struct _GT4SequenceFileClass {

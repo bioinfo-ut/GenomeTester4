@@ -36,9 +36,9 @@ static void word_list_stream_class_init (GT4WordListStreamClass *klass);
 /* AZObject implementation */
 static void word_list_stream_shutdown (AZObject *object);
 
-/* GT4WordSArray implementation */
-unsigned int word_list_stream_get_first_word (GT4WordSArrayImplementation *impl, GT4WordSArrayInstance *inst);
-unsigned int word_list_stream_get_next_word (GT4WordSArrayImplementation *impl, GT4WordSArrayInstance *inst);
+/* GT4WordSList implementation */
+unsigned int word_list_stream_get_first_word (GT4WordSListImplementation *impl, GT4WordSListInstance *inst);
+unsigned int word_list_stream_get_next_word (GT4WordSListImplementation *impl, GT4WordSListInstance *inst);
 
 static unsigned int word_list_stream_type = 0;
 GT4WordListStreamClass *gt4_word_list_stream_class = NULL;
@@ -60,10 +60,10 @@ word_list_stream_class_init (GT4WordListStreamClass *klass)
 {
   klass->object_class.shutdown = word_list_stream_shutdown;
   az_class_set_num_interfaces ((AZClass *) klass, 1);
-  az_class_declare_interface ((AZClass *) klass, 0, GT4_TYPE_WORD_SARRAY, ARIKKEI_OFFSET (GT4WordListStreamClass, sarray_implementation), ARIKKEI_OFFSET (GT4WordListStream, sarray_instance));
-  /* GT4WordSArray implementation */
-  klass->sarray_implementation.get_first_word = word_list_stream_get_first_word;
-  klass->sarray_implementation.get_next_word = word_list_stream_get_next_word;
+  az_class_declare_interface ((AZClass *) klass, 0, GT4_TYPE_WORD_SLIST, ARIKKEI_OFFSET (GT4WordListStreamClass, slist_implementation), ARIKKEI_OFFSET (GT4WordListStream, slist_instance));
+  /* GT4WordSList implementation */
+  klass->slist_implementation.get_first_word = word_list_stream_get_first_word;
+  klass->slist_implementation.get_next_word = word_list_stream_get_next_word;
 }
 
 static void
@@ -98,28 +98,28 @@ stream_read (GT4WordListStream *stream)
 }
 
 unsigned int
-word_list_stream_get_first_word (GT4WordSArrayImplementation *impl, GT4WordSArrayInstance *inst)
+word_list_stream_get_first_word (GT4WordSListImplementation *impl, GT4WordSListInstance *inst)
 {
-  GT4WordListStream *stream = GT4_WORD_LIST_STREAM_FROM_SARRAY_INSTANCE(inst);
+  GT4WordListStream *stream = GT4_WORD_LIST_STREAM_FROM_SLIST_INSTANCE(inst);
   lseek (stream->ifile, stream->header.list_start, SEEK_SET);
   stream->bp = 0;
   stream->bsize = 0;
   if (!stream_read (stream)) return 0;
-  memcpy (&stream->sarray_instance.word, &stream->b[stream->bp], 8);
-  memcpy (&stream->sarray_instance.count, &stream->b[stream->bp + 8], 4);
+  memcpy (&stream->slist_instance.word, &stream->b[stream->bp], 8);
+  memcpy (&stream->slist_instance.count, &stream->b[stream->bp + 8], 4);
   stream->bp += 12;
   return 1;
 }
 
 unsigned int
-word_list_stream_get_next_word (GT4WordSArrayImplementation *impl, GT4WordSArrayInstance *inst)
+word_list_stream_get_next_word (GT4WordSListImplementation *impl, GT4WordSListInstance *inst)
 {
-  GT4WordListStream *stream = GT4_WORD_LIST_STREAM_FROM_SARRAY_INSTANCE(inst);
+  GT4WordListStream *stream = GT4_WORD_LIST_STREAM_FROM_SLIST_INSTANCE(inst);
   if ((stream->bp + 12) > stream->bsize) {
     if (!stream_read (stream)) return 0;
   }
-  memcpy (&stream->sarray_instance.word, &stream->b[stream->bp], 8);
-  memcpy (&stream->sarray_instance.count, &stream->b[stream->bp + 8], 4);
+  memcpy (&stream->slist_instance.word, &stream->b[stream->bp], 8);
+  memcpy (&stream->slist_instance.count, &stream->b[stream->bp + 8], 4);
   stream->bp += 12;
   return 1;
 }
@@ -168,16 +168,17 @@ gt4_word_list_stream_new (const char *filename, unsigned int major_version)
   }
 
   /* Set up sorted array interface */
-  stream->sarray_instance.num_words = stream->header.nwords;
-  stream->sarray_instance.word_length = stream->header.wordlength;
-  if (stream->sarray_instance.num_words > 0) {
+  stream->slist_instance.num_words = stream->header.nwords;
+  stream->slist_instance.sum_counts = stream->header.totalfreq;
+  stream->slist_instance.word_length = stream->header.wordlength;
+  if (stream->slist_instance.num_words > 0) {
     lseek (stream->ifile, stream->header.list_start, SEEK_SET);
     if (!stream_read (stream)) {
       gt4_word_list_stream_delete (stream);
       return NULL;
     }
-    memcpy (&stream->sarray_instance.word, &stream->b[stream->bp], 8);
-    memcpy (&stream->sarray_instance.count, &stream->b[stream->bp + 8], 4);
+    memcpy (&stream->slist_instance.word, &stream->b[stream->bp], 8);
+    memcpy (&stream->slist_instance.count, &stream->b[stream->bp + 8], 4);
     stream->bp += 12;
   }
 

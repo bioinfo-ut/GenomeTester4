@@ -35,8 +35,10 @@ typedef struct _GT4WordMapClass GT4WordMapClass;
 #define GT4_WORD_MAP(o) (AZ_CHECK_INSTANCE_CAST ((o), GT4_TYPE_WORD_MAP, GT4WordMap))
 #define GT4_IS_WORD_MAP(o) (AZ_CHECK_INSTANCE_TYPE ((o), GT4_TYPE_WORD_MAP))
 
-#define GT4_WORD_MAP_FROM_SARRAY_INSTANCE(i) (GT4WordMap *) AZ_BASE_ADDRESS(GT4WordMap,sarray_instance,i)
-#define GT4_WORD_MAP_SARRAY_IMPLEMENTATION(o) &((GT4WordMapClass *) ((AZObject *) (o))->klass)->sarray_implementation
+#define GT4_WORD_MAP_FROM_SARRAY_INST(i) (GT4WordMap *) AZ_BASE_ADDRESS(GT4WordMap,sarray_inst,i)
+#define GT4_WORD_MAP_SARRAY_IMPL(o) &((GT4WordMapClass *) ((AZObject *) (o))->klass)->sarray_impl
+#define GT4_WORD_MAP_FROM_DICT_INST(i) (GT4WordMap *) AZ_BASE_ADDRESS(GT4WordMap,dict_inst,i)
+#define GT4_WORD_MAP_DICT_IMPL(o) &((GT4WordMapClass *) ((AZObject *) (o))->klass)->dict_impl
 
 #ifndef __GT4_WORD_MAP_C__
 /* Class pointer, valid after get_type is called once */
@@ -50,6 +52,7 @@ extern unsigned int debug_wordmap;
 #include "word-list.h"
 
 #include "word-array-sorted.h"
+#include "word-dict.h"
 
 #define WORDMAP_ELEMENT_SIZE (sizeof (unsigned long long) + sizeof (unsigned int))
 
@@ -69,13 +72,17 @@ struct _GT4WordMap {
   const unsigned char *wordlist;
   void *user_data;
   /* GT4WordSArray instance */
-  GT4WordSArrayInstance sarray_instance;
+  GT4WordSArrayInstance sarray_inst;
+  /* GT4WordDict instance */
+  GT4WordDictInstance dict_inst;
 };
 
 struct _GT4WordMapClass {
   AZObjectClass object_class;
   /* GT4WordSArray implementation */
-  GT4WordSArrayImplementation sarray_implementation;
+  GT4WordSArrayImplementation sarray_impl;
+  /* GT4WordDict implementation */
+  GT4WordDictImplementation dict_impl;
 };
 
 unsigned int gt4_word_map_get_type (void);

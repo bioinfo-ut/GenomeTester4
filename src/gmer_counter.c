@@ -7,6 +7,7 @@
 #include <pthread.h>
 #include <sys/mman.h>
 
+#include "listmaker-queue.h"
 #include "utils.h"
 #include "trie.h"
 #include "sequence.h"
@@ -40,12 +41,15 @@ struct _TaskFile {
   unsigned int idx;
 };
 
-TaskFile *task_file_new (SNPQueue *snpq, const char *filename);
-TaskFile *task_file_new_from_source (SNPQueue *snpq, AZObject *source, const char *filename);
+TaskFile *task_file_new (SNPQueue *snpq, const char *filename, unsigned int idx);
+TaskFile *task_file_new_from_source (SNPQueue *snpq, AZObject *source, const char *filename, unsigned int idx);
 void task_file_delete (TaskFile *tf);
+
+#define TASK_TABLE (TASK_READ + 1)
 
 typedef struct _TaskTable TaskTable;
 struct _TaskTable {
+  GT4Task task;
   TaskTable *next;
   GT4SequenceFile *seqfile;
   unsigned int nwords;
@@ -55,21 +59,19 @@ struct _TaskTable {
   unsigned long long n_nucl;
   unsigned long long n_gc;
   /* Read indexing */
-  unsigned int file_idx;
+  unsigned int idx;
   unsigned long long name_npos;
   Read *reads;
 };
 
-TaskTable *task_table_new (unsigned int index);
+TaskTable *task_table_new (GT4Queue *queue, unsigned int compile_index);
 void task_table_free (TaskTable *tt);
 
 struct _SNPQueue {
-  GT4Queue queue;
-  unsigned int wordlen;
+  GT4ListMakerQueue lmq;
   /* Files to process */
   unsigned int nfiles;
   unsigned int n_read_tasks;
-  /* TaskFile *files; */
   /* Free tables */
   TaskTable *free_tables;
   /* Filled tables */
@@ -132,16 +134,14 @@ add_task (SNPQueue *snpq, const char *filename)
   if ((len > 3) && !strcmp (filename + len - 3, ".gz")) {
     fprintf (stderr, "Opening compressed stream %s\n", filename);
     GT4SequenceZStream *zstream = gt4_sequence_zstream_new (filename);
-    TaskFile *tf = task_file_new_from_source (snpq, AZ_OBJECT (zstream), filename);
-    tf->idx = snpq->nfiles++;
-    gt4_queue_add_task (&snpq->queue, &tf->task_read.task, 0);
+    TaskFile *tf = task_file_new_from_source (snpq, AZ_OBJECT (zstream), filename, snpq->nfiles++);
+    gt4_queue_add_task (&snpq->lmq.queue, &tf->task_read.task, 0);
     snpq->n_read_tasks += 1;
   } else if (!strcmp (filename, "-")) {
     GT4SequenceStream *stream;
     stream = gt4_sequence_stream_new_from_stream (stdin, 0);
-    TaskFile *tf = task_file_new_from_source (snpq, AZ_OBJECT (stream), "stdin");
-    tf->idx = snpq->nfiles++;
-    gt4_queue_add_task (&snpq->queue, &tf->task_read.task, 0);
+    TaskFile *tf = task_file_new_from_source (snpq, AZ_OBJECT (stream), "stdin", snpq->nfiles++);
+    gt4_queue_add_task (&snpq->lmq.queue, &tf->task_read.task, 0);
     snpq->n_read_tasks += 1;
   } else {
     unsigned int nseqs, i;
@@ -152,10 +152,9 @@ add_task (SNPQueue *snpq, const char *filename)
     if (nseqs > 32) nseqs = 32;
     nseqs = gt4_sequence_block_split (&seqf->block, seqs, nseqs);
     for (i = 0; i < nseqs; i++) {
-      TaskFile *tf = task_file_new_from_source (snpq, AZ_OBJECT (seqs[i]), "block");
+      TaskFile *tf = task_file_new_from_source (snpq, AZ_OBJECT (seqs[i]), "block", snpq->nfiles++);
       if (debug) fprintf (stderr, "%s:%u from %llu to %llu\n", filename, i, (unsigned long long) seqs[i]->cdata - (unsigned long long) seqf->block.cdata, (unsigned long long) seqs[i]->cdata - (unsigned long long) seqf->block.cdata + seqs[i]->csize);
-      tf->idx = snpq->nfiles++;
-      gt4_queue_add_task (&snpq->queue, &tf->task_read.task, 0);
+      gt4_queue_add_task (&snpq->lmq.queue, &tf->task_read.task, 0);
       snpq->n_read_tasks += 1;
     }
     az_object_unref (AZ_OBJECT (seqf));
@@ -360,9 +359,8 @@ main (int argc, const char *argv[])
 
   if (nseqs > 0) {
     memset (&snpq, 0, sizeof (SNPQueue));
-    az_instance_init (&snpq.queue, GT4_TYPE_QUEUE);
-    gt4_queue_setup (&snpq.queue, nthreads);
-    snpq.wordlen = db.wordsize;
+    az_instance_init (&snpq.lmq, GT4_TYPE_LISTMAKER_QUEUE);
+    maker_queue_setup (&snpq.lmq, nthreads, db.wordsize, 0, 0, 0);
     /* Read files */
     snpq.db = &db;
     for (i = 0; i < nseqs; i++) {
@@ -371,15 +369,14 @@ main (int argc, const char *argv[])
         if (!strcmp (seqnames[i], "-")) {
           GT4SequenceStream *stream;
           stream = gt4_sequence_stream_new_from_stream (stdin, 0);
-          tf = task_file_new_from_source (&snpq, AZ_OBJECT (stream), seqnames[i]);
+          tf = task_file_new_from_source (&snpq, AZ_OBJECT (stream), seqnames[i], i);
           az_object_unref (AZ_OBJECT (stream));
         } else {
-          tf = task_file_new (&snpq, seqnames[i]);
+          tf = task_file_new (&snpq, seqnames[i], i);
         }
         seq_files[i] = tf->seqfile;
         gt4_sequence_file_ref (seq_files[i]);
-        tf->idx = i;
-        gt4_queue_add_task (&snpq.queue, &tf->task_read.task, 0);
+        gt4_queue_add_task (&snpq.lmq.queue, &tf->task_read.task, 0);
         snpq.n_read_tasks += 1;
         snpq.nfiles += 1;
       } else {
@@ -387,7 +384,7 @@ main (int argc, const char *argv[])
       }
     }
     for (i = 0; i < DEFAULT_NUM_TABLES; i++) {
-      TaskTable *tt = task_table_new (index != NULL);
+      TaskTable *tt = task_table_new (&snpq.lmq.queue, index != NULL);
       tt->next = snpq.free_tables;
       snpq.free_tables = tt;
     }
@@ -395,13 +392,13 @@ main (int argc, const char *argv[])
       snpq.reads = (ReadList **) malloc (db.n_kmers * sizeof (ReadList *));
       memset (snpq.reads, 0, db.n_kmers * sizeof (ReadList *));
     }
-    gt4_queue_create_threads (&snpq.queue, process, &snpq);
-    process (&snpq.queue, 0, &snpq);
-    gt4_queue_lock (&snpq.queue);
-    while (snpq.queue.nthreads_running > 1) {
-      gt4_queue_wait (&snpq.queue);
+    gt4_queue_create_threads (&snpq.lmq.queue, process, &snpq);
+    process (&snpq.lmq.queue, 0, &snpq);
+    gt4_queue_lock (&snpq.lmq.queue);
+    while (snpq.lmq.queue.nthreads_running > 1) {
+      gt4_queue_wait (&snpq.lmq.queue);
     }
-    gt4_queue_unlock (&snpq.queue);
+    gt4_queue_unlock (&snpq.lmq.queue);
 
     if (debug) {
       fprintf (stderr, "Finished reading files\n");
@@ -426,7 +423,7 @@ main (int argc, const char *argv[])
     }
 
     /* Need queue for stats */
-    az_instance_finalize (&snpq.queue, GT4_TYPE_QUEUE);
+    az_instance_finalize (&snpq.lmq, GT4_TYPE_LISTMAKER_QUEUE);
 
     if (header) {
       fprintf (stdout, "NODE\tN_KMERS");
@@ -461,7 +458,7 @@ main (int argc, const char *argv[])
           ReadList *rl;
           kmer_idx = db.nodes[i].kmers + j;
           for (rl = snpq.reads[kmer_idx]; rl; rl = rl->next) {
-            unsigned long long name_pos = seq_files[rl->read.file_idx]->subseqs[rl->read.subseq].name_pos;
+            unsigned long long name_pos = seq_files[rl->read.file_idx]->block.subseqs[rl->read.subseq].name_pos;
             if (name_pos > max_name_pos) max_name_pos = name_pos;
             if (rl->read.kmer_pos > max_kmer_pos) max_kmer_pos = rl->read.kmer_pos;
           }
@@ -498,7 +495,7 @@ main (int argc, const char *argv[])
         unsigned int read_idx = 0;
         ReadList *rl;
         for (rl = snpq.reads[i]; rl; rl = rl->next) {
-          unsigned long long name_pos = seq_files[rl->read.file_idx]->subseqs[rl->read.subseq].name_pos;
+          unsigned long long name_pos = seq_files[rl->read.file_idx]->block.subseqs[rl->read.subseq].name_pos;
           unsigned long long code = ((unsigned long long) rl->read.dir << (db.index.nbits_file + db.index.nbits_npos + db.index.nbits_kmer)) |
             ((unsigned long long) rl->read.file_idx << (db.index.nbits_npos + db.index.nbits_kmer)) |
             (name_pos << db.index.nbits_kmer) |
@@ -628,7 +625,7 @@ process (GT4Queue *queue, unsigned int idx, void *arg)
 
   finished = 0;
         
-  if (debug > 1) fprintf (stderr, "Thread %d started (total %d)\n", idx, snpq->queue.nthreads_running);
+  if (debug > 1) fprintf (stderr, "Thread %d started (total %d)\n", idx, snpq->lmq.queue.nthreads_running);
   /* Do work */
   while (!finished) {
     /* Get exclusive lock on queue */
@@ -638,8 +635,8 @@ process (GT4Queue *queue, unsigned int idx, void *arg)
       TaskTable *tt;
       unsigned int result;
       /* Create new file reading task */
-      tf = (TaskFile *) snpq->queue.tasks;
-      gt4_queue_remove_task (&snpq->queue, &tf->task_read.task, 0);
+      tf = (TaskFile *) snpq->lmq.queue.tasks;
+      gt4_queue_remove_task (&snpq->lmq.queue, &tf->task_read.task, 0);
       snpq->n_read_tasks -= 1;
       tt = snpq->free_tables;
       snpq->free_tables = tt->next;
@@ -649,7 +646,7 @@ process (GT4Queue *queue, unsigned int idx, void *arg)
       tt->seqfile = tf->seqfile;
       gt4_sequence_file_ref (tt->seqfile);
       tt->nwords = 0;
-      tt->file_idx = tf->idx;
+      tt->idx = tf->task_read.idx;
       tt->n_nucl = 0;
       tt->n_gc = 0;
       if (debug > 0) fprintf (stderr, "Thread %d: reading file %s from %llu\n", idx, tt->seqfile->path, tf->task_read.reader.cpos);
@@ -669,8 +666,8 @@ process (GT4Queue *queue, unsigned int idx, void *arg)
       }
       tt->next = snpq->full_tables;
       snpq->full_tables = tt;
-      pthread_cond_broadcast (&snpq->queue.cond);
-      pthread_mutex_unlock (&snpq->queue.mutex);
+      gt4_queue_broadcast (&snpq->lmq.queue);
+      gt4_queue_unlock (&snpq->lmq.queue);
     } else if (snpq->full_tables) {
       TaskTable *tt;
       unsigned int i;
@@ -678,7 +675,7 @@ process (GT4Queue *queue, unsigned int idx, void *arg)
       tt = (TaskTable *) snpq->full_tables;
       snpq->full_tables = tt->next;
 
-      pthread_mutex_unlock (&snpq->queue.mutex);
+      gt4_queue_unlock (&snpq->lmq.queue);
       if (debug > 1) fprintf (stderr, "Thread %d: table lookup\n", idx);
       for (i = 0; i < tt->nwords; i++) {
         if ((debug > 1) && ((i % 10000) == 0)) fprintf (stderr, ".");
@@ -686,7 +683,7 @@ process (GT4Queue *queue, unsigned int idx, void *arg)
       }
       if (debug > 1) fprintf (stderr, "Thread %d: finished lookup\n", idx);
 
-      pthread_mutex_lock (&snpq->queue.mutex);
+      gt4_queue_lock (&snpq->lmq.queue);
       /* fixme: Create separate task / mutex */
       if (stats) {
         snpq->n_nucl += tt->n_nucl;
@@ -735,24 +732,24 @@ process (GT4Queue *queue, unsigned int idx, void *arg)
       tt->seqfile = NULL;
       tt->next = snpq->free_tables;
       snpq->free_tables = tt;
-      pthread_cond_broadcast (&snpq->queue.cond);
-      pthread_mutex_unlock (&snpq->queue.mutex);
+      gt4_queue_broadcast (&snpq->lmq.queue);
+      gt4_queue_unlock (&snpq->lmq.queue);
     } else if (snpq->nfiles) {
       /* All tables are in processing, wait */
       if (debug > 1) fprintf (stderr, "Thread %d: Waiting\n", idx);
-      pthread_cond_wait (&snpq->queue.cond, &snpq->queue.mutex);
+      gt4_queue_wait (&snpq->lmq.queue);
       if (debug > 1) fprintf (stderr, "Thread %d: Woke up\n", idx);
-      pthread_mutex_unlock (&snpq->queue.mutex);
+      gt4_queue_unlock (&snpq->lmq.queue);
     } else {
       /* Nothing to do */
       if (debug > 1) fprintf (stderr, "Thread %d: Exiting\n", idx);
-      pthread_cond_broadcast (&snpq->queue.cond);
-      pthread_mutex_unlock (&snpq->queue.mutex);
+      gt4_queue_broadcast (&snpq->lmq.queue);
+      gt4_queue_unlock (&snpq->lmq.queue);
       finished = 1;
     }
   }
   /* Exit if everything is done */
-  if (debug > 1) fprintf (stderr, "Thread %u exiting (remaining %d)\n", idx, snpq->queue.nthreads_running);
+  if (debug > 1) fprintf (stderr, "Thread %u exiting (remaining %d)\n", idx, snpq->lmq.queue.nthreads_running);
 }
 
 
@@ -760,35 +757,56 @@ static int
 start_sequence (GT4FastaReader *reader, void *data)
 {
   TaskTable *tt = (TaskTable *) data;
+  GT4ListMakerQueue *mq = (GT4ListMakerQueue *) tt->task.queue;
+  GT4LMQSource *src = &mq->sources[tt->idx];
+  maker_queue_add_subsequence (mq, tt->idx, reader->name_pos, reader->name_length);
+  src->subseqs[src->n_subseqs - 1].sequence_pos = reader->cpos;
+
   if (debug > 2) fprintf (stderr, "%s\n", reader->name);
   gt4_sequence_file_lock (tt->seqfile);
   gt4_sequence_file_add_subsequence (tt->seqfile, reader->name_pos, reader->name_length);
-  tt->seqfile->subseqs[tt->seqfile->n_subseqs - 1].sequence_pos = reader->cpos;
+  tt->seqfile->block.subseqs[tt->seqfile->block.n_subseqs - 1].sequence_pos = reader->cpos;
   gt4_sequence_file_unlock (tt->seqfile);
   return 0;
 }
-
+            
 static int
 end_sequence (GT4FastaReader *reader, void *data)
 {
   TaskTable *tt = (TaskTable *) data;
+  GT4ListMakerQueue *mq = (GT4ListMakerQueue *) tt->task.queue;
+  GT4LMQSource *src = &mq->sources[tt->idx];
+  src->subseqs[src->n_subseqs - 1].sequence_len = reader->cpos - src->subseqs[src->n_subseqs - 1].sequence_pos;
+
   if (debug > 2) fprintf (stderr, "%s\n", reader->name);
   gt4_sequence_file_lock (tt->seqfile);
-  tt->seqfile->subseqs[tt->seqfile->n_subseqs - 1].sequence_len = reader->cpos - tt->seqfile->subseqs[tt->seqfile->n_subseqs - 1].sequence_pos;
+  tt->seqfile->block.subseqs[tt->seqfile->block.n_subseqs - 1].sequence_len = reader->cpos - tt->seqfile->block.subseqs[tt->seqfile->block.n_subseqs - 1].sequence_pos;
   gt4_sequence_file_unlock (tt->seqfile);
   return 0;
 }
+
 
 static int
 read_word (GT4FastaReader *reader, unsigned long long word, void *data)
 {
   TaskTable *tt = (TaskTable *) data;
+  GT4ListMakerQueue *mq = (GT4ListMakerQueue *) tt->task.queue;
+  GT4LMQSource *src = &mq->sources[tt->idx];
+
   tt->words[tt->nwords] = word;
   if (tt->reads) {
-    tt->reads[tt->nwords].file_idx = tt->file_idx;
-    tt->reads[tt->nwords].subseq = tt->seqfile->n_subseqs - 1;
+#if 1
+    tt->reads[tt->nwords].file_idx = tt->idx;
+    tt->reads[tt->nwords].subseq = src->n_subseqs - 1;
+    tt->reads[tt->nwords].kmer_pos = reader->seq_npos + 1 - reader->wordlength;
+    /* tt->reads[tt->nwords].kmer_pos = reader->cpos - reader->name_pos + 1 - reader->wordlength; */
+    tt->reads[tt->nwords].dir = (word != reader->wordfw);
+#else
+    tt->reads[tt->nwords].file_idx = tt->idx;
+    tt->reads[tt->nwords].subseq = tt->seqfile->block.n_subseqs - 1;
     tt->reads[tt->nwords].kmer_pos = reader->seq_npos + 1 - reader->wordlength;
     tt->reads[tt->nwords].dir = (word != reader->wordfw);
+#endif
   }
   tt->nwords += 1;
   return 0;
@@ -873,13 +891,16 @@ get_pair_median (KMerDB *db)
 }
 
 TaskTable *
-task_table_new (unsigned int index)
+task_table_new (GT4Queue *queue, unsigned int compile_index)
 {
   TaskTable *tt = (TaskTable *) malloc (sizeof (TaskTable));
   memset (tt, 0, sizeof (TaskTable));
+  tt->task.queue = queue;
+  tt->task.type = TASK_TABLE;
+  tt->task.priority = 10;
   tt->words = (unsigned long long *) malloc (BLOCK_SIZE * 8);
   tt->alleles = (unsigned int *) malloc (BLOCK_SIZE * 4);
-  if (index) {
+  if (compile_index) {
     tt->reads = (Read *) malloc (BLOCK_SIZE * sizeof (Read));
   }
   return tt;
@@ -900,25 +921,25 @@ task_table_free (TaskTable *tt)
 /* File parsing tasks */
 
 TaskFile *
-task_file_new (SNPQueue *snpq, const char *filename)
+task_file_new (SNPQueue *snpq, const char *filename, unsigned int idx)
 {
   TaskFile *tf;
   GT4SequenceFile *seqf;
   seqf = gt4_sequence_file_new (filename, 1);
   tf = (TaskFile *) malloc (sizeof (TaskFile));
   memset (tf, 0, sizeof (TaskFile));
-  gt4_task_read_setup (&tf->task_read, &snpq->queue, (AZObject *) tf->seqfile, 0, snpq->wordlen);
+  gt4_task_read_setup (&tf->task_read, &snpq->lmq.queue, (AZObject *) seqf, idx, snpq->lmq.wordlen);
   tf->seqfile = seqf;
   return tf;
 }
 
 TaskFile *
-task_file_new_from_source (SNPQueue *snpq, AZObject *source, const char *name)
+task_file_new_from_source (SNPQueue *snpq, AZObject *source, const char *name, unsigned int idx)
 {
   TaskFile *tf;
   tf = (TaskFile *) malloc (sizeof (TaskFile));
   memset (tf, 0, sizeof (TaskFile));
-  gt4_task_read_setup (&tf->task_read, &snpq->queue, source, 0, snpq->wordlen);
+  gt4_task_read_setup (&tf->task_read, &snpq->lmq.queue, source, idx, snpq->lmq.wordlen);
   tf->seqfile = gt4_sequence_file_new (name, 1);
   return tf;
 }

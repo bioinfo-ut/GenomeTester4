@@ -1,5 +1,5 @@
-#ifndef __GT4_WORD_ARRAY_SORTED_H__
-#define __GT4_WORD_ARRAY_SORTED_H__
+#ifndef __GT4_WORD_DICT_H__
+#define __GT4_WORD_DICT_H__
 
 /*
  * GenomeTester4
@@ -30,31 +30,33 @@
  * After initialization it should point to the first word
  */
 
-typedef struct _GT4WordSArrayImplementation GT4WordSArrayImplementation;
-typedef struct _GT4WordSArrayInstance GT4WordSArrayInstance;
-typedef struct _GT4WordSArrayClass GT4WordSArrayClass;
+typedef struct _GT4WordDictImplementation GT4WordDictImplementation;
+typedef struct _GT4WordDictInstance GT4WordDictInstance;
+typedef struct _GT4WordDictClass GT4WordDictClass;
 
-#define GT4_TYPE_WORD_SARRAY (gt4_word_sarray_get_type ())
+#define GT4_TYPE_WORD_DICT (gt4_word_dict_get_type ())
 
-#include "word-list-sorted.h"
+#include <stdint.h>
+#include <az/interface.h>
 
-struct _GT4WordSArrayImplementation {
-  GT4WordSListImplementation slist_impl;
-
-  unsigned int (* lookup_word) (GT4WordSArrayImplementation *impl, GT4WordSArrayInstance *inst);
+struct _GT4WordDictImplementation {
+  AZImplementation implementation;
+  unsigned int (* lookup) (GT4WordDictImplementation *impl, GT4WordDictInstance *inst, unsigned long long word);
 };
 
-struct _GT4WordSArrayInstance {
-  GT4WordSListInstance slist_inst;
+struct _GT4WordDictInstance {
+  unsigned long long num_words;
+  unsigned int value;
+  unsigned int word_length;
 };
 
-struct _GT4WordSArrayClass {
-  GT4WordSListClass slist_class;
+struct _GT4WordDictClass {
+  AZInterfaceClass interface_class;
 };
 
-unsigned int gt4_word_sarray_get_type (void);
+unsigned int gt4_word_dict_get_type (void);
 
 /* All methods return 1 on success, 0 on error */
-unsigned int gt4_word_sarray_lookup_word (GT4WordSArrayImplementation *impl, GT4WordSArrayInstance *inst, unsigned long long word);
+unsigned int gt4_word_dict_lookup (GT4WordDictImplementation *impl, GT4WordDictInstance *inst, unsigned long long word);
 
 #endif

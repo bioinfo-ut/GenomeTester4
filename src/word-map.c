@@ -42,9 +42,11 @@ static void word_map_class_init (GT4WordMapClass *klass);
 /* AZObject implementation */
 static void word_map_shutdown (AZObject *object);
 
-/* GT4WordSArray implementation */
-unsigned int word_map_get_first_word (GT4WordSArrayImplementation *impl, GT4WordSArrayInstance *inst);
-unsigned int word_map_get_next_word (GT4WordSArrayImplementation *impl, GT4WordSArrayInstance *inst);
+/* GT4WordSList implementation */
+unsigned int word_map_get_first_word (GT4WordSListImplementation *impl, GT4WordSListInstance *inst);
+unsigned int word_map_get_next_word (GT4WordSListImplementation *impl, GT4WordSListInstance *inst);
+/* GT4WordDict implementation */
+unsigned int word_map_lookup (GT4WordDictImplementation *impl, GT4WordDictInstance *inst, unsigned long long word);
 
 static unsigned int word_map_type = 0;
 GT4WordMapClass *gt4_word_map_class = NULL;
@@ -65,11 +67,14 @@ static void
 word_map_class_init (GT4WordMapClass *klass)
 {
   klass->object_class.shutdown = word_map_shutdown;
-  az_class_set_num_interfaces ((AZClass *) klass, 1);
-  az_class_declare_interface ((AZClass *) klass, 0, GT4_TYPE_WORD_SARRAY, ARIKKEI_OFFSET (GT4WordMapClass, sarray_implementation), ARIKKEI_OFFSET (GT4WordMap, sarray_instance));
-  /* GT4WordSArray implementation */
-  klass->sarray_implementation.get_first_word = word_map_get_first_word;
-  klass->sarray_implementation.get_next_word = word_map_get_next_word;
+  az_class_set_num_interfaces ((AZClass *) klass, 2);
+  az_class_declare_interface ((AZClass *) klass, 0, GT4_TYPE_WORD_SARRAY, ARIKKEI_OFFSET (GT4WordMapClass, sarray_impl), ARIKKEI_OFFSET (GT4WordMap, sarray_inst));
+  az_class_declare_interface ((AZClass *) klass, 1, GT4_TYPE_WORD_DICT, ARIKKEI_OFFSET (GT4WordMapClass, dict_impl), ARIKKEI_OFFSET (GT4WordMap, dict_inst));
+  /* GT4WordSList implementation */
+  klass->sarray_impl.slist_impl.get_first_word = word_map_get_first_word;
+  klass->sarray_impl.slist_impl.get_next_word = word_map_get_next_word;
+  /* GT4WordDict implementation */
+  klass->dict_impl.lookup = word_map_lookup;
 }
 
 static void
@@ -91,22 +96,46 @@ word_map_shutdown (AZObject *object)
 }
 
 unsigned int
-word_map_get_first_word (GT4WordSArrayImplementation *impl, GT4WordSArrayInstance *inst)
+word_map_get_first_word (GT4WordSListImplementation *impl, GT4WordSListInstance *inst)
 {
-  GT4WordMap *wmap = GT4_WORD_MAP_FROM_SARRAY_INSTANCE(inst);
+  GT4WordMap *wmap = GT4_WORD_MAP_FROM_SARRAY_INST(inst);
   inst->word = WORDMAP_WORD(wmap,0);
   inst->count = WORDMAP_FREQ(wmap,0);
   return 1;
 }
 
 unsigned int
-word_map_get_next_word (GT4WordSArrayImplementation *impl, GT4WordSArrayInstance *inst)
+word_map_get_next_word (GT4WordSListImplementation *impl, GT4WordSListInstance *inst)
 {
-  GT4WordMap *wmap = GT4_WORD_MAP_FROM_SARRAY_INSTANCE(inst);
+  GT4WordMap *wmap = GT4_WORD_MAP_FROM_SARRAY_INST(inst);
   inst->word = WORDMAP_WORD(wmap,inst->idx);
   inst->count = WORDMAP_FREQ(wmap,inst->idx);
   __builtin_prefetch (&WORDMAP_WORD(wmap,inst->idx + 4), 0, 0);
   return 1;
+}
+
+unsigned int
+word_map_lookup (GT4WordDictImplementation *impl, GT4WordDictInstance *inst, unsigned long long word)
+{
+  GT4WordMap *wmap = GT4_WORD_MAP_FROM_DICT_INST(inst);
+  unsigned long long current, low, high, mid;
+  low = 0;
+  high = wmap->header->nwords - 1;
+  mid = (low + high) / 2;
+  while (low <= high) {
+    current = WORDMAP_WORD (wmap, mid);
+    if (current < word) {
+      low = mid + 1;
+    } else if (current > word) {
+      if (mid == 0) break;
+      high = mid - 1;
+    } else {
+      inst->value = WORDMAP_FREQ (wmap, mid);
+      return 1;
+    }
+    mid = (low + high) / 2;
+  }
+  return 0;
 }
 
 GT4WordMap * 
@@ -158,12 +187,14 @@ gt4_word_map_new (const char *listfilename, unsigned int major_version, unsigned
   }
 
   /* Set up sorted array interface */
-  wmap->sarray_instance.num_words = wmap->header->nwords;
-  if (wmap->sarray_instance.num_words > 0) {
-    wmap->sarray_instance.word = WORDMAP_WORD(wmap,0);
-    wmap->sarray_instance.count = WORDMAP_FREQ(wmap,0);
+  wmap->sarray_inst.slist_inst.num_words = wmap->header->nwords;
+  wmap->sarray_inst.slist_inst.sum_counts = wmap->header->totalfreq;
+  wmap->sarray_inst.slist_inst.word_length = wmap->header->wordlength;
+  if (wmap->sarray_inst.slist_inst.num_words > 0) {
+    wmap->sarray_inst.slist_inst.word = WORDMAP_WORD(wmap,0);
+    wmap->sarray_inst.slist_inst.count = WORDMAP_FREQ(wmap,0);
   }
-  wmap->sarray_instance.word_length = wmap->header->wordlength;
+  wmap->dict_inst.word_length = wmap->header->wordlength;
 
   return wmap;
 }
@@ -227,24 +258,10 @@ word_map_search_query (GT4WordMap *map, unsigned long long query, parameters *p,
 }
 
 unsigned int 
-gt4_word_map_lookup_canonical (GT4WordMap *map, unsigned long long query)
+gt4_word_map_lookup_canonical (GT4WordMap *wmap, unsigned long long query)
 {
-  unsigned long long word, low, high, mid;
-  low = 0;
-  high = map->header->nwords - 1;
-  mid = (low + high) / 2;
-      
-  while (low <= high) {
-    word = WORDMAP_WORD (map, mid);
-    if (word < query) {
-      low = mid + 1;
-    } else if (word > query) {
-      if (mid == 0) break;
-      high = mid - 1;
-    } else {
-      return WORDMAP_FREQ (map, mid);
-    }
-    mid = (low + high) / 2;
+  if (gt4_word_dict_lookup (GT4_WORD_MAP_DICT_IMPL(wmap), &wmap->dict_inst, query)) {
+    return wmap->dict_inst.value;
   }
   return 0;
 }

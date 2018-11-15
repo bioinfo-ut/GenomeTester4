@@ -99,6 +99,9 @@ void trie_add_word (Trie *trie, unsigned long long word, unsigned int count);
 void trie_add_word_with_allocator (Trie *trie, unsigned long long word, unsigned int count, unsigned int aidx);
 unsigned int trie_lookup (Trie *trie, unsigned long long word);
 
+/* If callback return not 0 lookup stops */
+int trie_foreach (Trie *trie, int (*callback) (Trie *trie, unsigned long long word, unsigned int code, unsigned long long word_idx, void *data), void *data);
+
 unsigned int trie_setup_from_file (Trie *trie, FILE *ofs);
 unsigned int trie_setup_from_data (Trie *trie, const unsigned char *cdata);
 unsigned long long trie_write_to_file (Trie *trie, FILE *ofs);

@@ -30,11 +30,16 @@
 #include "sequence-block.h"
 
 static void sequence_block_class_init (GT4SequenceBlockClass *klass);
+static void sequence_block_init (GT4SequenceBlockClass *klass, GT4SequenceBlock *blk);
 
 /* AZObject implementation */
 static void sequence_block_shutdown (AZObject *obj);
 /* GT4SequenceSource implementation */
 static int sequence_block_read (GT4SequenceSourceImplementation *impl, GT4SequenceSourceInstance *inst);
+/* GT4SequenceCollection implementation */
+static unsigned int collection_get_subsequence (GT4SequenceCollectionImplementation *impl, GT4SequenceCollectionInstance *inst, unsigned int idx);
+static int collection_add_subsequence (GT4SequenceCollectionImplementation *impl, GT4SequenceCollectionInstance *inst, unsigned long long name_pos, unsigned int name_len);
+static unsigned int collection_set_subsequence (GT4SequenceCollectionImplementation *impl, GT4SequenceCollectionInstance *inst, unsigned int idx, unsigned int sequence_pos, unsigned int sequence_len);
 
 static unsigned int sequence_block_type = 0;
 static GT4SequenceBlockClass *sequence_block_class = NULL;
@@ -46,7 +51,8 @@ gt4_sequence_block_get_type (void)
     sequence_block_class = (GT4SequenceBlockClass *) az_register_type (&sequence_block_type, AZ_TYPE_OBJECT, (const unsigned char *) "GT4SequenceBlock",
       sizeof (GT4SequenceBlockClass), sizeof (GT4SequenceBlock),
       (void (*) (AZClass *)) sequence_block_class_init,
-      NULL, NULL);
+      (void (*) (AZImplementation *, void *)) sequence_block_init,
+      NULL);
   }
   return sequence_block_type;
 }
@@ -54,18 +60,33 @@ gt4_sequence_block_get_type (void)
 static void
 sequence_block_class_init (GT4SequenceBlockClass *klass)
 {
-  az_class_set_num_interfaces ((AZClass *) klass, 1);
-  az_class_declare_interface ((AZClass *) klass, 0, GT4_TYPE_SEQUENCE_SOURCE, ARIKKEI_OFFSET(GT4SequenceBlockClass,source_implementation), ARIKKEI_OFFSET(GT4SequenceBlock,source_instance));
+  az_class_set_num_interfaces ((AZClass *) klass, 2);
+  az_class_declare_interface ((AZClass *) klass, 0, GT4_TYPE_SEQUENCE_SOURCE, ARIKKEI_OFFSET(GT4SequenceBlockClass,source_impl), ARIKKEI_OFFSET(GT4SequenceBlock,source_inst));
+  az_class_declare_interface ((AZClass *) klass, 1, GT4_TYPE_SEQUENCE_COLLECTION, ARIKKEI_OFFSET(GT4SequenceBlockClass,collection_impl), ARIKKEI_OFFSET(GT4SequenceBlock,collection_inst));
   /* AZObject implementation */
   ((AZObjectClass *) klass)->shutdown = sequence_block_shutdown;
   /* GT4SequenceSource implementation */
-  klass->source_implementation.read = sequence_block_read;
+  klass->source_impl.read = sequence_block_read;
+  /* GT4SequenceCollection implementation */
+  klass->collection_impl.get_subsequence = collection_get_subsequence;
+  klass->collection_impl.add_subsequence = collection_add_subsequence;
+  klass->collection_impl.set_subsequence = collection_set_subsequence;
+}
+
+static void
+sequence_block_init (GT4SequenceBlockClass *klass, GT4SequenceBlock *blk)
+{
+  blk->subseq_block_size = 1024;
 }
 
 static void
 sequence_block_shutdown (AZObject *obj)
 {
   GT4SequenceBlock *blk = (GT4SequenceBlock *) obj;
+  if (blk->subseqs) {
+    free (blk->subseqs);
+    blk->subseqs = NULL;
+  }
   if (blk->parent) {
     az_object_unref (AZ_OBJECT (blk->parent));
     blk->parent = NULL;
@@ -78,6 +99,34 @@ sequence_block_read (GT4SequenceSourceImplementation *impl, GT4SequenceSourceIns
   GT4SequenceBlock *blk = GT4_SEQUENCE_BLOCK_FROM_SEQUENCE_SOURCE_INSTANCE(inst);
   if (blk->pos >= blk->csize) return 0;
   return blk->cdata[blk->pos++];
+}
+
+static unsigned int
+collection_get_subsequence (GT4SequenceCollectionImplementation *impl, GT4SequenceCollectionInstance *inst, unsigned int idx)
+{
+  return 0;
+}
+
+static int
+collection_add_subsequence (GT4SequenceCollectionImplementation *impl, GT4SequenceCollectionInstance *inst, unsigned long long name_pos, unsigned int name_len)
+{
+  GT4SequenceBlock *blk = GT4_SEQUENCE_BLOCK_FROM_SEQUENCE_COLLECTION_INSTANCE(inst);
+  unsigned int index;
+  if (blk->n_subseqs >= blk->size_subseqs) {
+    blk->size_subseqs = blk->size_subseqs << 1;
+    if (blk->size_subseqs < blk->subseq_block_size) blk->size_subseqs = blk->subseq_block_size;
+    blk->subseqs = (GT4SubSequence *) realloc (blk->subseqs, blk->size_subseqs * sizeof (GT4SubSequence));
+  }
+  index = blk->n_subseqs++;
+  blk->subseqs[index].name_pos = name_pos;
+  blk->subseqs[index].name_len = name_len;
+  return index;
+}
+
+static unsigned int
+collection_set_subsequence (GT4SequenceCollectionImplementation *impl, GT4SequenceCollectionInstance *inst, unsigned int idx, unsigned int sequence_pos, unsigned int sequence_len)
+{
+  return 0;
 }
 
 GT4SequenceBlock *

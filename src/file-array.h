@@ -1,5 +1,5 @@
-#ifndef __GT4_WORD_ARRAY_SORTED_H__
-#define __GT4_WORD_ARRAY_SORTED_H__
+#ifndef __GT4_FILE_ARRAY_H__
+#define __GT4_FILE_ARRAY_H__
 
 /*
  * GenomeTester4

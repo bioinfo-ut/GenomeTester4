@@ -1,4 +1,4 @@
-#define __GT4_FILE_ARRAY_C__
+#define __GT4_WORD_DICT_C__
 
 /*
  * GenomeTester4
@@ -31,46 +31,36 @@
 
 #include <libarikkei/arikkei-utils.h>
 
-#include "file-array.h"
+#include "word-dict.h"
 
-static void file_array_class_init (GT4FileArrayClass *klass);
+static void dict_class_init (GT4WordDictClass *klass);
 
-unsigned int file_array_type = 0;
-GT4FileArrayClass *file_array_class = 0;
+unsigned int dict_type = 0;
+GT4WordDictClass *dict_class = 0;
 
 unsigned int
-gt4_file_array_get_type (void)
+gt4_word_dict_get_type (void)
 {
-  if (!file_array_type) {
-    file_array_class = (GT4FileArrayClass *) az_register_interface_type (&file_array_type, AZ_TYPE_INTERFACE, (const unsigned char *) "GT4FileArray",
-      sizeof (GT4FileArrayClass), sizeof (GT4FileArrayImplementation), sizeof (GT4FileArrayInstance),
-      (void (*) (AZClass *)) file_array_class_init,
+  if (!dict_type) {
+    dict_class = (GT4WordDictClass *) az_register_interface_type (&dict_type, AZ_TYPE_INTERFACE, (const unsigned char *) "GT4WordDict",
+      sizeof (GT4WordDictClass), sizeof (GT4WordDictImplementation), sizeof (GT4WordDictInstance),
+      (void (*) (AZClass *)) dict_class_init,
       NULL, NULL, NULL);
   }
-  return file_array_type;
+  return dict_type;
 }
 
 static void
-file_array_class_init (GT4FileArrayClass *klass)
+dict_class_init (GT4WordDictClass *klass)
 {
   klass->interface_class.klass.flags = AZ_CLASS_ZERO_MEMORY;
 }
 
 unsigned int
-gt4_file_array_get_file (GT4FileArrayImplementation *impl, GT4FileArrayInstance *inst, unsigned int idx)
+gt4_word_dict_lookup (GT4WordDictImplementation *impl, GT4WordDictInstance *inst, unsigned long long word)
 {
   arikkei_return_val_if_fail (impl != NULL, 0);
   arikkei_return_val_if_fail (inst != NULL, 0);
-  arikkei_return_val_if_fail (idx < inst->num_files, 0);
-  return impl->get_file (impl, inst, idx);
-}
-
-unsigned int
-gt4_file_array_get_sequence (GT4FileArrayImplementation *impl, GT4FileArrayInstance *inst, unsigned long long idx)
-{
-  arikkei_return_val_if_fail (impl != NULL, 0);
-  arikkei_return_val_if_fail (inst != NULL, 0);
-  arikkei_return_val_if_fail (idx < inst->n_sequences, 0);
-  return impl->get_sequence (impl, inst, idx);
+  return impl->lookup (impl, inst, word);
 }
 

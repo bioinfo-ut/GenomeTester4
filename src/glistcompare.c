@@ -324,7 +324,7 @@ int main (int argc, const char *argv[])
     az_object_shutdown (AZ_OBJECT (list2));
   } else {
     AZObject *maps[MAX_FILES];
-    GT4WordSArrayInstance *inst;
+    GT4WordSListInstance *inst;
     GT4ListHeader header;
     unsigned int i;
     char name[2048];
@@ -338,7 +338,7 @@ int main (int argc, const char *argv[])
         if (!maps[i]) exit (1);
       }
     }
-    az_object_get_interface (maps[0], GT4_TYPE_WORD_SARRAY, (void **) &inst);
+    az_object_get_interface (maps[0], GT4_TYPE_WORD_SLIST, (void **) &inst);
     if (!countonly) {
       sprintf (name, "%s_%d_union.list", outputname, inst->word_length);
       ofile = creat (name, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
@@ -430,8 +430,8 @@ write_word_to_file (unsigned long long word, unsigned freq, FILE *f)
 static int
 compare_wordmaps (AZObject *list1, AZObject *list2, int find_union, int find_intrsec, int find_diff, int find_ddiff, int subtract, int countonly, const char *out, unsigned int cutoff, int rule)
 {
-  GT4WordSArrayImplementation *impl1, *impl2;
-  GT4WordSArrayInstance *inst1, *inst2;
+  GT4WordSListImplementation *impl1, *impl2;
+  GT4WordSListInstance *inst1, *inst2;
   FILE *outf[4] = { 0 };
   GT4ListHeader h_out;
 
@@ -441,8 +441,8 @@ compare_wordmaps (AZObject *list1, AZObject *list2, int find_union, int find_int
   unsigned long long freqsum_union = 0L, freqsum_inters = 0L, freqsum_diff1 = 0L, freqsum_diff2 = 0L;
   char fname[256]; /* the length is limited in main(..) method */
 
-  impl1 = (GT4WordSArrayImplementation *) az_object_get_interface (list1, GT4_TYPE_WORD_SARRAY, (void **) &inst1);
-  impl2 = (GT4WordSArrayImplementation *) az_object_get_interface (list2, GT4_TYPE_WORD_SARRAY, (void **) &inst2);
+  impl1 = (GT4WordSListImplementation *) az_object_get_interface (list1, GT4_TYPE_WORD_SLIST, (void **) &inst1);
+  impl2 = (GT4WordSListImplementation *) az_object_get_interface (list2, GT4_TYPE_WORD_SLIST, (void **) &inst2);
 
   if (inst1->word_length != inst2->word_length) {
     fprintf (stderr, "compare_wordmaps: Word lengths of lists differ: %u != %u\n", inst1->word_length, inst2->word_length);
@@ -476,10 +476,10 @@ compare_wordmaps (AZObject *list1, AZObject *list2, int find_union, int find_int
     fwrite (&h_out, sizeof (GT4ListHeader), 1, outf[3]);
   }
 
-  gt4_word_sarray_get_first_word (impl1, inst1);
+  gt4_word_slist_get_first_word (impl1, inst1);
   word1 = inst1->word;
   freq1 = inst1->count;
-  gt4_word_sarray_get_first_word (impl2, inst2);
+  gt4_word_slist_get_first_word (impl2, inst2);
   word2 = inst2->word;
   freq2 = inst2->count;
 
@@ -507,10 +507,10 @@ compare_wordmaps (AZObject *list1, AZObject *list2, int find_union, int find_int
         freqsum_diff2 += freq;
         c_diff2 += 1;
       }
-      gt4_word_sarray_get_next_word (impl1, inst1);
+      gt4_word_slist_get_next_word (impl1, inst1);
       word1 = inst1->word;
       freq1 = inst1->count;
-      gt4_word_sarray_get_next_word (impl2, inst2);
+      gt4_word_slist_get_next_word (impl2, inst2);
       word2 = inst2->word;
       freq2 = inst2->count;
     } else if ((inst1->idx < inst1->num_words) && ((inst2->idx >= inst2->num_words) || (word1 < word2))) {
@@ -526,7 +526,7 @@ compare_wordmaps (AZObject *list1, AZObject *list2, int find_union, int find_int
         c_diff1 += 1;
         
       }
-      gt4_word_sarray_get_next_word (impl1, inst1);
+      gt4_word_slist_get_next_word (impl1, inst1);
       word1 = inst1->word;
       freq1 = inst1->count;
     } else if ((inst2->idx < inst2->num_words) && ((inst1->idx >= inst1->num_words) || (word2 < word1))) {
@@ -541,7 +541,7 @@ compare_wordmaps (AZObject *list1, AZObject *list2, int find_union, int find_int
         freqsum_diff2 += freq;
         c_diff2 += 1;
       }
-      gt4_word_sarray_get_next_word (impl2, inst2);
+      gt4_word_slist_get_next_word (impl2, inst2);
       word2 = inst2->word;
       freq2 = inst2->count;
     }
@@ -598,8 +598,8 @@ compare_wordmaps (AZObject *list1, AZObject *list2, int find_union, int find_int
 static unsigned int
 union_multi (AZObject *m[], unsigned int nmaps, unsigned int cutoff, int ofile, GT4ListHeader *header)
 {
-  GT4WordSArrayImplementation *impls[MAX_FILES];
-  GT4WordSArrayInstance *insts[MAX_FILES];
+  GT4WordSListImplementation *impls[MAX_FILES];
+  GT4WordSListInstance *insts[MAX_FILES];
   unsigned int n_sources;
   unsigned int j;
   unsigned long long word;
@@ -610,9 +610,9 @@ union_multi (AZObject *m[], unsigned int nmaps, unsigned int cutoff, int ofile, 
   
   n_sources = 0;
   for (j = 0; j < nmaps; j++) {
-    impls[n_sources] = (GT4WordSArrayImplementation *) az_object_get_interface (AZ_OBJECT(m[j]), GT4_TYPE_WORD_SARRAY, (void **) &insts[n_sources]);
+    impls[n_sources] = (GT4WordSListImplementation *) az_object_get_interface (AZ_OBJECT(m[j]), GT4_TYPE_WORD_SLIST, (void **) &insts[n_sources]);
     if (insts[n_sources]->num_words) {
-      gt4_word_sarray_get_first_word (impls[n_sources], insts[n_sources]);
+      gt4_word_slist_get_first_word (impls[n_sources], insts[n_sources]);
       total += insts[n_sources]->num_words;
       n_sources += 1;
     }
@@ -642,7 +642,7 @@ union_multi (AZObject *m[], unsigned int nmaps, unsigned int cutoff, int ofile, 
     while (j < n_sources) {
       if (insts[j]->word == word) {
         freq += insts[j]->count;
-        if (!gt4_word_sarray_get_next_word (impls[j], insts[j])) {
+        if (!gt4_word_slist_get_next_word (impls[j], insts[j])) {
           n_sources -= 1;
           if (n_sources > 0) {
             impls[j] = impls[n_sources];
@@ -695,7 +695,7 @@ subset (GT4WordMap *map, unsigned int subset_method, unsigned long long subset_s
   GT4WordTable *wt;
   unsigned long long i;
 
-  wt = gt4_word_table_new (map->header->wordlength, subset_size);
+  wt = gt4_word_table_new (map->header->wordlength, subset_size, 4);
   /* fixme: We rely here on RNG cycle being at least >>32 bits */
   if (subset_method == RAND_ALL) {
     while (subset_size > 0) {
@@ -805,26 +805,28 @@ compare_wordmaps_mm (GT4WordMap *map1, GT4WordMap *map2, int find_diff, int find
           }
         }
         if (first_ge_cutoff && !second_ge_cutoff) {
-          gt4_word_table_add_word (difftable, word1, freq1 - freq2);
+          unsigned int freq = freq1 - freq2;
+          gt4_word_table_add_word (difftable, word1, &freq);
           c_diff1 += 1;
         }
       }
       if (find_ddiff && second_ge_cutoff && !first_ge_cutoff) {
-        gt4_word_table_add_word (ddifftable, word2, freq2 - freq1);
+        unsigned int freq = freq2 - freq1;
+        gt4_word_table_add_word (ddifftable, word2, &freq);
         c_diff2 += 1;
       }
 
     /* first word is smaller */
     } else if (word1 < word2) {
       if (find_diff && first_ge_cutoff && !subtract) {
-        gt4_word_table_add_word (difftable, word1, freq1);
+        gt4_word_table_add_word (difftable, word1, &freq1);
         c_diff1 += 1;
         
       }
     /* second word is smaller */
     } else {
       if (find_ddiff && second_ge_cutoff) {
-        gt4_word_table_add_word (ddifftable, word2, freq2);
+        gt4_word_table_add_word (ddifftable, word2, &freq2);
         c_diff2 += 1;
       }
     }

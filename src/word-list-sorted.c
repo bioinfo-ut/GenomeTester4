@@ -1,4 +1,4 @@
-#define __GT4_FILE_ARRAY_C__
+#define __GT4_WORD_LIST_SORTED_C__
 
 /*
  * GenomeTester4
@@ -31,46 +31,48 @@
 
 #include <libarikkei/arikkei-utils.h>
 
-#include "file-array.h"
+#include "word-list-sorted.h"
 
-static void file_array_class_init (GT4FileArrayClass *klass);
+static void slist_class_init (GT4WordSListClass *klass);
 
-unsigned int file_array_type = 0;
-GT4FileArrayClass *file_array_class = 0;
+unsigned int slist_type = 0;
+GT4WordSListClass *slist_class = 0;
 
 unsigned int
-gt4_file_array_get_type (void)
+gt4_word_slist_get_type (void)
 {
-  if (!file_array_type) {
-    file_array_class = (GT4FileArrayClass *) az_register_interface_type (&file_array_type, AZ_TYPE_INTERFACE, (const unsigned char *) "GT4FileArray",
-      sizeof (GT4FileArrayClass), sizeof (GT4FileArrayImplementation), sizeof (GT4FileArrayInstance),
-      (void (*) (AZClass *)) file_array_class_init,
+  if (!slist_type) {
+    slist_class = (GT4WordSListClass *) az_register_interface_type (&slist_type, AZ_TYPE_INTERFACE, (const unsigned char *) "GT4WordArraySorted",
+      sizeof (GT4WordSListClass), sizeof (GT4WordSListImplementation), sizeof (GT4WordSListInstance),
+      (void (*) (AZClass *)) slist_class_init,
       NULL, NULL, NULL);
   }
-  return file_array_type;
+  return slist_type;
 }
 
 static void
-file_array_class_init (GT4FileArrayClass *klass)
+slist_class_init (GT4WordSListClass *klass)
 {
   klass->interface_class.klass.flags = AZ_CLASS_ZERO_MEMORY;
 }
 
 unsigned int
-gt4_file_array_get_file (GT4FileArrayImplementation *impl, GT4FileArrayInstance *inst, unsigned int idx)
+gt4_word_slist_get_first_word (GT4WordSListImplementation *impl, GT4WordSListInstance *inst)
 {
   arikkei_return_val_if_fail (impl != NULL, 0);
   arikkei_return_val_if_fail (inst != NULL, 0);
-  arikkei_return_val_if_fail (idx < inst->num_files, 0);
-  return impl->get_file (impl, inst, idx);
+  inst->idx = 0;
+  if (!inst->num_words) return 0;
+  return impl->get_first_word (impl, inst);
 }
 
 unsigned int
-gt4_file_array_get_sequence (GT4FileArrayImplementation *impl, GT4FileArrayInstance *inst, unsigned long long idx)
+gt4_word_slist_get_next_word (GT4WordSListImplementation *impl, GT4WordSListInstance *inst)
 {
   arikkei_return_val_if_fail (impl != NULL, 0);
   arikkei_return_val_if_fail (inst != NULL, 0);
-  arikkei_return_val_if_fail (idx < inst->n_sequences, 0);
-  return impl->get_sequence (impl, inst, idx);
+  if (inst->idx >= inst->num_words) return 0;
+  inst->idx += 1;
+  if (inst->idx >= inst->num_words) return 0;
+  return impl->get_next_word (impl, inst);
 }
-

@@ -35,8 +35,8 @@ typedef struct _GT4WordListStreamClass GT4WordListStreamClass;
 #define GT4_WORD_LIST_STREAM(o) (AZ_CHECK_INSTANCE_CAST ((o), GT4_TYPE_WORD_LIST_STREAM, GT4WordListStream))
 #define GT4_IS_WORD_LIST_STREAM(o) (AZ_CHECK_INSTANCE_TYPE ((o), GT4_TYPE_WORD_LIST_STREAM))
 
-#define GT4_WORD_LIST_STREAM_FROM_SARRAY_INSTANCE(i) (GT4WordListStream *) AZ_BASE_ADDRESS(GT4WordListStream,sarray_instance,i)
-#define GT4_WORD_LIST_STREAM_SARRAY_IMPLEMENTATION(o) &((GT4WordListStreamClass *) ((AZObject *) (o))->klass)->sarray_implementation
+#define GT4_WORD_LIST_STREAM_FROM_SLIST_INSTANCE(i) (GT4WordListStream *) AZ_BASE_ADDRESS(GT4WordListStream,slist_instance,i)
+#define GT4_WORD_LIST_STREAM_SLIST_IMPLEMENTATION(o) &((GT4WordListStreamClass *) ((AZObject *) (o))->klass)->slist_implementation
 
 #define GT4_WORD_LIST_STREAM_BUF_SIZE (12 * 256)
 
@@ -45,7 +45,7 @@ typedef struct _GT4WordListStreamClass GT4WordListStreamClass;
 #include <az/object.h>
 
 #include "word-map.h"
-#include "word-array-sorted.h"
+#include "word-list-sorted.h"
 
 struct _GT4WordListStream {
   AZObject object;
@@ -55,13 +55,13 @@ struct _GT4WordListStream {
   unsigned int bp, bsize;
   GT4ListHeader header;
   /* GT4WordSArray instance */
-  GT4WordSArrayInstance sarray_instance;
+  GT4WordSListInstance slist_instance;
 };
 
 struct _GT4WordListStreamClass {
   AZObjectClass object_class;
   /* GT4WordSArray implementation */
-  GT4WordSArrayImplementation sarray_implementation;
+  GT4WordSListImplementation slist_implementation;
 };
 
 unsigned int gt4_word_list_stream_get_type (void);

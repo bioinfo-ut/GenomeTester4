@@ -388,7 +388,7 @@ read_database_from_binary (KMerDB *db, const unsigned char *cdata, unsigned long
   cpos += 2;
   if (debug) fprintf (stderr, "Database version %u.%u\n", major, minor);
   version = (major << 16) | minor;
-  if (version < 1) return 0;
+  /* if (version < 1) return 0; */
   if (version >= 3) has_index = 1;
 
   memcpy (&db->wordsize, cdata + cpos, 4);

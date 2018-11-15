@@ -27,11 +27,13 @@
 #include <limits.h>
 
 #include "common.h"
+#include "file-array.h"
 #include "utils.h"
 #include "sequence.h"
 #include "sequence-stream.h"
 #include "fasta.h"
 #include "version.h"
+#include "index-map.h"
 #include "word-map.h"
 #include "word-table.h"
 
@@ -48,11 +50,12 @@ int search_n_query_strings (GT4WordMap *map, const char *queryfile, parameters *
 int search_fasta (GT4WordMap *map, const char *seqfilename, parameters *p, unsigned int minfreq, unsigned int maxfreq, int printall);
 int search_list (GT4WordMap *map, const char *querylistfilename, parameters *p, unsigned int minfreq, unsigned int maxfreq, int printall);
 int process_word (GT4FastaReader *reader, unsigned long long word, void *data);
-int print_full_map (GT4WordMap *map);
-void get_statistics (GT4WordMap *map);
+int print_full_map (AZObject *obj);
+void get_statistics (AZObject *obj);
 void print_median (GT4WordMap *map);
 void print_distro (GT4WordMap *map, unsigned int size);
 void print_gc (GT4WordMap *map);
+static int print_files (AZObject *obj);
 void print_help (int exitvalue);
 
 int debug = 0;
@@ -65,12 +68,13 @@ int main (int argc, const char *argv[])
 	const char *listfilename = NULL;
 	const char *querystring = NULL, *queryfilename = NULL, *seqfilename = NULL, *querylistfilename = NULL;
 	parameters p = {0};
-	GT4WordMap *map;
 	char *end;
 	int printall = 0, getstat = 0, getmed = 0;
 	unsigned int minfreq = 0, maxfreq = UINT_MAX;
 	unsigned int distro = 0;
 	unsigned int gc = 0;
+	AZObject *obj = NULL;
+	GT4WordMap *map = NULL;
 
 	/* parsing commandline */
 	
@@ -220,18 +224,22 @@ int main (int argc, const char *argv[])
 		print_help (1);	  
 	}
 
-	map = gt4_word_map_new (listfilename, VERSION_MAJOR, !getstat && use_scouts);
-	if (!map) {
-		fprintf (stderr, "Error: Could not make wordmap from file %s!\n", listfilename);
-		return 1;
-	}
-	
+	FILE *ifs;
+	unsigned int code;
+	ifs = fopen (listfilename, "r");
+	fread (&code, 4, 1, ifs);
+	fclose (ifs);
+	if (code == GT4_LIST_CODE) {
+	        obj = (AZObject *) gt4_word_map_new (listfilename, VERSION_MAJOR, !getstat && use_scouts);
+	        map = GT4_WORD_MAP(obj);
+        } else if (code == GT4_INDEX_CODE) {
+                obj = (AZObject *) gt4_index_map_new (listfilename, VERSION_MAJOR, !getstat && use_scouts);
+                print_files (obj);
+        }
 	if (getstat) {
-		get_statistics (map);
+		get_statistics (obj);
 		exit (0);
-	}
-
-	if (getmed) {
+	} else if (getmed) {
 		print_median (map);
 		exit (0);
 	}
@@ -246,6 +254,16 @@ int main (int argc, const char *argv[])
 		exit (0);
 	}
 
+	if (!seqfilename && !querylistfilename && !querystring) {
+	        print_full_map (obj);
+	        exit (0);
+	}
+
+	if (!map) {
+		fprintf (stderr, "Error: Could not make wordmap from file %s!\n", listfilename);
+		return 1;
+	}
+	
 	p.wordlength = map->header->wordlength;
 
 	/* glistquery options */
@@ -274,28 +292,38 @@ int main (int argc, const char *argv[])
 			return 1;
 		}
 		search_one_query_string (map, querystring, &p, 0, UINT_MAX, printall);
-
-	} else { /* no query */
-
-		print_full_map (map);
 	}
 	exit (0);
 }
 
-/* print the whole list */
-int print_full_map (GT4WordMap *map)
+static int
+print_files (AZObject *obj)
 {
-	unsigned long long i, word;
-	unsigned int freq;
-	char *word_str;
+        GT4FileArrayImplementation *impl;
+        GT4FileArrayInstance *inst;
+        unsigned int i;
+        impl = (GT4FileArrayImplementation *) az_object_get_interface (obj, GT4_TYPE_FILE_ARRAY, (void **) &inst);
+        for (i = 0; i < inst->num_files; i++) {
+                gt4_file_array_get_file (impl, inst, i);
+                fprintf (stderr, "%u\t%s\t%llu\t%llu\n", i, inst->file_name, inst->file_size, inst->n_sequences);
+        }
+        return 0;
+}
 
-	for (i = 0; i < map->header->nwords; i++) {
-		word = *((unsigned long long *) (map->wordlist + i * (sizeof (unsigned long long) + sizeof (unsigned))));
-		freq = *((unsigned *) (map->wordlist + i * (sizeof (unsigned long long) + sizeof (unsigned)) + sizeof (unsigned long long)));
-		word_str = word_to_string (word, map->header->wordlength);
-		fprintf (stdout, "%s\t%u\n", word_str, freq);
-	}
-	fprintf (stdout, "NUnique\t%llu\nNTotal\t%lld\n", map->header->nwords, map->header->totalfreq);
+/* Print the whole list */
+int
+print_full_map (AZObject *obj)
+{
+        GT4WordSListImplementation *impl;
+        GT4WordSListInstance *inst;
+        impl = (GT4WordSListImplementation *) az_object_get_interface (obj, GT4_TYPE_WORD_SARRAY, (void **) &inst);
+        gt4_word_slist_get_first_word (impl, inst);
+        while (inst->idx < inst->num_words) {
+                char b[64];
+                word2string (b, inst->word, inst->word_length);
+                fprintf (stdout, "%s\t%u\n", b, inst->count);
+                gt4_word_slist_get_next_word (impl, inst);
+        }
 	return 0;
 }
 
@@ -395,12 +423,21 @@ int process_word (GT4FastaReader *reader, unsigned long long word, void *data)
 	return 0;
 }
 
-void get_statistics (GT4WordMap *map)
+void get_statistics (AZObject *obj)
 {
-	fprintf (stdout, "Statistics of %s <<Built with glistmaker version %d.%d>>\n", map->filename, map->header->version_major, map->header->version_minor);
-	fprintf (stdout, "Wordlength\t%u\n", map->header->wordlength);
-	fprintf (stdout, "NUnique\t%llu\n", map->header->nwords);
-	fprintf (stdout, "NTotal\t%llu\n", map->header->totalfreq);
+        GT4WordSListImplementation *impl;
+        GT4WordSListInstance *inst;
+        impl = (GT4WordSListImplementation *) az_object_get_interface (obj, GT4_TYPE_WORD_SARRAY, (void **) &inst);
+        if (GT4_IS_WORD_MAP (obj)) {
+                GT4WordMap *map = GT4_WORD_MAP(obj);
+	        fprintf (stdout, "Statistics of list file %s <<Built with glistmaker version %d.%d>>\n", map->filename, map->header->version_major, map->header->version_minor);
+        } else if (GT4_IS_INDEX_MAP (obj)) {
+                GT4IndexMap *imap = GT4_INDEX_MAP(obj);
+                fprintf (stdout, "Statistics of index file %s <<Built with glistmaker version %d.%d>>\n", imap->filename, imap->header->version_major, imap->header->version_minor);
+        }
+	fprintf (stdout, "Wordlength\t%u\n", inst->word_length);
+	fprintf (stdout, "NUnique\t%llu\n", inst->num_words);
+	fprintf (stdout, "NTotal\t%llu\n", inst->sum_counts);
 	return;
 }
 
