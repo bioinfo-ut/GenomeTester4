@@ -38,6 +38,27 @@
 unsigned int debug_tables = 0;
 unsigned long long total_memory = 0;
 
+void
+gt4_word_table_setup (GT4WordTable *table, unsigned int wordlen, unsigned long long n_slots, unsigned int data_size)
+{
+  memset (table, 0, sizeof (GT4WordTable));
+  table->wordlength = wordlen;
+  table->data_size = data_size;
+  gt4_word_table_ensure_size (table, n_slots);
+}
+
+void
+gt4_word_table_release (GT4WordTable *table)
+{
+  if (debug_tables) {
+    unsigned long long size =  table->n_word_slots * 8 + table->n_word_slots * table->data_size;
+    fprintf (stderr, "wordtable_delete: Releasing %llu total %.2fG\n", (unsigned long long) size, (double) total_memory / 1073741824.0);
+    total_memory -= size;
+  }
+  free (table->words);
+  if (table->data) free (table->data);
+}
+
 GT4WordTable *
 gt4_word_table_new (unsigned int wordlength, unsigned long long n_slots, unsigned int data_size)
 {
@@ -360,9 +381,7 @@ unsigned long long generate_mismatches (GT4WordTable *mmtable, unsigned long lon
 
 	/* first I put the current word into the table */
 	if (!countonly && (nmm == 0 || !equalmmonly)) {
-		if (usesmallercomplement) {
-			word = get_canonical_word (word, wordlength);
-		}
+		if (usesmallercomplement) word = get_canonical_word (word, wordlength);
 		gt4_word_table_add_word (mmtable, word, &givenfreq);
 	}
 	if (nmm == 0) return 1;

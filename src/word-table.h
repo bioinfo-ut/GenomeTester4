@@ -49,6 +49,8 @@ struct _GT4WordTable {
   unsigned int wordlength;
 };
 
+void gt4_word_table_setup (GT4WordTable *table, unsigned int wordlen, unsigned long long n_slots, unsigned int data_size);
+void gt4_word_table_release (GT4WordTable *table);
 GT4WordTable *gt4_word_table_new (unsigned int wordlen, unsigned long long n_slots, unsigned int data_size);
 void gt4_word_table_delete (GT4WordTable *table);
 

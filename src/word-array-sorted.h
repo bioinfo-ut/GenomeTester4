@@ -41,7 +41,7 @@ typedef struct _GT4WordSArrayClass GT4WordSArrayClass;
 struct _GT4WordSArrayImplementation {
   GT4WordSListImplementation slist_impl;
 
-  unsigned int (* lookup_word) (GT4WordSArrayImplementation *impl, GT4WordSArrayInstance *inst);
+  unsigned int (* get_word) (GT4WordSArrayImplementation *impl, GT4WordSArrayInstance *inst, unsigned long long idx);
 };
 
 struct _GT4WordSArrayInstance {
@@ -55,6 +55,6 @@ struct _GT4WordSArrayClass {
 unsigned int gt4_word_sarray_get_type (void);
 
 /* All methods return 1 on success, 0 on error */
-unsigned int gt4_word_sarray_lookup_word (GT4WordSArrayImplementation *impl, GT4WordSArrayInstance *inst, unsigned long long word);
+unsigned int gt4_word_sarray_get_word (GT4WordSArrayImplementation *impl, GT4WordSArrayInstance *inst, unsigned long long idx);
 
 #endif

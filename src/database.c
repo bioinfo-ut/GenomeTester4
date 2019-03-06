@@ -4,6 +4,7 @@
 
 #include "sequence.h"
 #include "utils.h"
+#include "version.h"
 
 #include "database.h"
 
@@ -117,6 +118,8 @@ read_db_from_text (KMerDB *db, const unsigned char *cdata, unsigned long long cs
     return 0;
   }
   /* Set up DB */
+  db->major = 0;
+  db->minor = 4;
   db->wordsize = wordsize;
   db->node_bits = node_bits;
   db->kmer_bits = kmer_bits;
@@ -268,10 +271,18 @@ static const char *DBKEY = "GMDB";
 unsigned int
 write_db_to_file (KMerDB *db, FILE *ofs, unsigned int kmers)
 {
+  return write_db_to_file_with_reads_callback (db, ofs, kmers, NULL, NULL);
+}
+
+unsigned int
+write_db_to_file_with_reads_callback (KMerDB *db, FILE *ofs, unsigned int kmers, unsigned long long (*write_reads) (GT4Index *index, FILE *ofs, void *data), void *data)
+{
   unsigned long long written = 0, blocksize, nodes_start, kmers_start, names_start, trie_start, index_start;
-  static const unsigned short major = 0, minor = 3;
+  unsigned short major, minor;
   fwrite (DBKEY, 4, 1, ofs);
+  major = 0;
   fwrite (&major, 2, 1, ofs);
+  minor = 4;
   fwrite (&minor, 2, 1, ofs);
 
   fwrite (&db->wordsize, 4, 1, ofs);
@@ -339,7 +350,7 @@ write_db_to_file (KMerDB *db, FILE *ofs, unsigned int kmers)
   index_start = written;
   fwrite (&blocksize, 8, 1, ofs);
   written += 8;
-  blocksize = gt4_index_write (&db->index, ofs, db->n_kmers);
+  blocksize = gt4_index_write_with_reads_callback (&db->index, ofs, db->n_kmers, write_reads, data);
   blocksize = (blocksize + 15) & 0xfffffffffffffff0;
   written += blocksize;
   fseek (ofs, index_start, SEEK_SET);
@@ -383,11 +394,13 @@ read_database_from_binary (KMerDB *db, const unsigned char *cdata, unsigned long
   if (memcmp (cdata + cpos, DBKEY, 4)) return 0;
   cpos += 4;
   memcpy (&major, cdata + cpos, 2);
+  db->major = major;
   cpos += 2;
   memcpy (&minor, cdata + cpos, 2);
+  db->minor = minor;
   cpos += 2;
   if (debug) fprintf (stderr, "Database version %u.%u\n", major, minor);
-  version = (major << 16) | minor;
+  version = (db->major << 16) | db->minor;
   /* if (version < 1) return 0; */
   if (version >= 3) has_index = 1;
 
@@ -439,6 +452,7 @@ read_database_from_binary (KMerDB *db, const unsigned char *cdata, unsigned long
     fprintf (stderr, "  Names start: %llu\n", names_start);
     fprintf (stderr, "  Trie start: %llu\n", trie_start);
     fprintf (stderr, "  Index start: %llu\n", index_start);
+    fprintf (stderr, "  Compatibility: %s\n", (version < ((4U << 16) | 1)) ? "yes" : "no");
   }
 
   /* Nodes */
@@ -488,7 +502,7 @@ read_database_from_binary (KMerDB *db, const unsigned char *cdata, unsigned long
     cpos = index_start;
     memcpy (&blocksize, cdata + cpos, 8);
     cpos += 8;
-    gt4_index_init_from_data (&db->index, cdata + cpos, blocksize, db->n_kmers);
+    gt4_index_init_from_data (&db->index, cdata + cpos, blocksize, db->n_kmers, version < 4);
   }
   return 1;
 }
@@ -505,4 +519,36 @@ ReadList
     n_lists = 0;
   }
   return &lists[n_lists++];
+}
+
+void
+gt4_db_dump (KMerDB *db, FILE *ofs)
+{
+  unsigned long long i;
+  unsigned int version = (db->major << 16) | db->minor;
+  fprintf (ofs, "Database layout\n");
+  fprintf (ofs, "  Wordsize: %u\n", db->wordsize);
+  fprintf (ofs, "  Node bits: %u\n", db->node_bits);
+  fprintf (ofs, "  KMer bits: %u\n", db->kmer_bits);
+  fprintf (ofs, "  Count bits: %u\n", db->count_bits);
+  fprintf (ofs, "  Nodes: %llu\n", db->n_nodes);
+  fprintf (ofs, "  Kmers: %llu\n", db->n_kmers);
+  fprintf (ofs, "  Names size: %llu\n", db->names_size);
+  fprintf (ofs, "  Compatibility: %s\n", (version < 4) ? "yes" : "no");
+  for (i = 0; i < db->n_nodes; i++) {
+    Node *node = &db->nodes[i];
+    unsigned int j;
+    fprintf (ofs, "Node %llu %s kmers %u nkmers %u\n", i, &db->names[node->name], node->kmers, node->nkmers);
+    for (j = 0; j < node->nkmers; j++) {
+      unsigned int count;
+      unsigned long long start = gt4_index_get_kmer_info (&db->index, node->kmers + j, &count);
+      unsigned int k;
+      for (k = 0; k < count; k++) {
+        unsigned int file_idx, dir;
+        unsigned long long name_pos;
+        unsigned long long pos = gt4_index_get_read_info (&db->index, start + k, &file_idx, &name_pos, &dir);
+        fprintf (ofs, "  %u %u %llu %llu %u\n", j, file_idx, name_pos, pos, dir);
+      }
+    }
+  }
 }

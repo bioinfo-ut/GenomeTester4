@@ -52,7 +52,7 @@ int search_list (GT4WordMap *map, const char *querylistfilename, parameters *p, 
 int process_word (GT4FastaReader *reader, unsigned long long word, void *data);
 int print_full_map (AZObject *obj);
 void get_statistics (AZObject *obj);
-void print_median (GT4WordMap *map);
+void print_median (AZObject *obj);
 void print_distro (GT4WordMap *map, unsigned int size);
 void print_gc (GT4WordMap *map);
 static int print_files (AZObject *obj);
@@ -75,11 +75,6 @@ int main (int argc, const char *argv[])
 	unsigned int gc = 0;
 	AZObject *obj = NULL;
 	GT4WordMap *map = NULL;
-
-	/* parsing commandline */
-	
-	/* FIXME: null argumenti!!! */
-	
 	
 	for (argidx = 1; argidx < argc; argidx++) {
 
@@ -91,7 +86,6 @@ int main (int argc, const char *argv[])
 			print_help (0);
 
 		} else if (argidx == 1) {
-			/* get the locations of the input files */
 			if (argv[argidx][0] == '-') {
 				fprintf(stderr, "Error: No list file specified!\n");
 				print_help (0);
@@ -234,13 +228,13 @@ int main (int argc, const char *argv[])
 	        map = GT4_WORD_MAP(obj);
         } else if (code == GT4_INDEX_CODE) {
                 obj = (AZObject *) gt4_index_map_new (listfilename, VERSION_MAJOR, !getstat && use_scouts);
-                print_files (obj);
+                if (debug) print_files (obj);
         }
 	if (getstat) {
 		get_statistics (obj);
 		exit (0);
 	} else if (getmed) {
-		print_median (map);
+		print_median (obj);
 		exit (0);
 	}
 
@@ -254,7 +248,7 @@ int main (int argc, const char *argv[])
 		exit (0);
 	}
 
-	if (!seqfilename && !querylistfilename && !querystring) {
+	if (!seqfilename && !querylistfilename && !queryfilename && !querystring) {
 	        print_full_map (obj);
 	        exit (0);
 	}
@@ -268,20 +262,13 @@ int main (int argc, const char *argv[])
 
 	/* glistquery options */
 	if (seqfilename) { /* fasta input */
-
 		search_fasta (map, seqfilename, &p, minfreq, maxfreq, printall);
-
 	} else if (querylistfilename) { /* list input */	
-		
 		search_list (map, querylistfilename, &p, minfreq, maxfreq, printall);
-	  
 	} else if (queryfilename) { /* list of queries */
-
 		v = search_n_query_strings (map, queryfilename, &p, minfreq, maxfreq, printall);
 		if (v) return v;
-
 	} else if (querystring) { /* one query */
-
 		/* checking possible errors */
 		if (p.wordlength != strlen (querystring)) {
 			fprintf (stderr, "Error: Incompatible wordlengths! Wordlength in list: %u, query length: %lu\n", p.wordlength, strlen (querystring));
@@ -427,7 +414,7 @@ void get_statistics (AZObject *obj)
 {
         GT4WordSListImplementation *impl;
         GT4WordSListInstance *inst;
-        impl = (GT4WordSListImplementation *) az_object_get_interface (obj, GT4_TYPE_WORD_SARRAY, (void **) &inst);
+        impl = (GT4WordSListImplementation *) az_object_get_interface (obj, GT4_TYPE_WORD_SLIST, (void **) &inst);
         if (GT4_IS_WORD_MAP (obj)) {
                 GT4WordMap *map = GT4_WORD_MAP(obj);
 	        fprintf (stdout, "Statistics of list file %s <<Built with glistmaker version %d.%d>>\n", map->filename, map->header->version_major, map->header->version_minor);
@@ -441,17 +428,20 @@ void get_statistics (AZObject *obj)
 	return;
 }
 
-void print_median (GT4WordMap *map)
+void print_median (AZObject *obj)
 {
 	unsigned int min, max, med, gmin, gmax;
 	unsigned long long i;
+        GT4WordSArrayImplementation *impl;
+        GT4WordSArrayInstance *inst;
+        impl = (GT4WordSArrayImplementation *) az_object_get_interface (obj, GT4_TYPE_WORD_SARRAY, (void **) &inst);
 	gmin = 0xffffffff;
 	gmax = 0;
 	if (debug > 0) fprintf (stderr, "Finding min/max...");
-	for (i = 0; i < map->header->nwords; i++) {
-		unsigned int freq = WORDMAP_FREQ (map, i);
-		if (freq < gmin) gmin = freq;
-		if (freq > gmax) gmax = freq;
+	for (i = 0; i < inst->slist_inst.num_words; i++) {
+	        gt4_word_sarray_get_word (impl, inst, i);
+		if (inst->slist_inst.count < gmin) gmin = inst->slist_inst.count;
+		if (inst->slist_inst.count > gmax) gmax = inst->slist_inst.count;
 	}
 	if (debug > 0) fprintf (stderr, "done (%u %u)\n", gmin, gmax);
 	min = gmin;
@@ -459,12 +449,12 @@ void print_median (GT4WordMap *map)
 	med = (unsigned int) (((unsigned long long) min + max) / 2);
 	while (max > min) {
 		unsigned long long above = 0, below = 0, equal;
-		for (i = 0; i < map->header->nwords; i++) {
-			unsigned int freq = WORDMAP_FREQ (map, i);
-			if (freq > med) above += 1;
-			if (freq < med) below += 1;
+		for (i = 0; i < inst->slist_inst.num_words; i++) {
+		        gt4_word_sarray_get_word (impl, inst, i);
+			if (inst->slist_inst.count > med) above += 1;
+			if (inst->slist_inst.count < med) below += 1;
 		}
-		equal = map->header->nwords - above - below;
+		equal = inst->slist_inst.num_words - above - below;
 		if (debug > 0) fprintf (stderr, "Trying median %u - equal %llu, below %llu, above %llu\n", med, equal, below, above);
 		/* Special case: min == med, max == med + 1 */
 		if (max == (min + 1)) {
@@ -486,11 +476,17 @@ void print_median (GT4WordMap *map)
 		med = (min + max) / 2;
 	}
 	
-	fprintf (stdout, "Statistics of %s <<Built with glistmaker version %d.%d>>\n", map->filename, map->header->version_major, map->header->version_minor);
-	fprintf (stdout, "Wordlength\t%u\n", map->header->wordlength);
-	fprintf (stdout, "NUnique\t%llu\n", map->header->nwords);
-	fprintf (stdout, "NTotal\t%llu\n", map->header->totalfreq);
-	fprintf (stdout, "Min %u Max %u Median %u Average %.2f\n", gmin, gmax, med, (double) map->header->totalfreq / map->header->nwords);
+        if (GT4_IS_WORD_MAP (obj)) {
+                GT4WordMap *map = GT4_WORD_MAP(obj);
+	        fprintf (stdout, "Statistics of list file %s <<Built with glistmaker version %d.%d>>\n", map->filename, map->header->version_major, map->header->version_minor);
+        } else if (GT4_IS_INDEX_MAP (obj)) {
+                GT4IndexMap *imap = GT4_INDEX_MAP(obj);
+                fprintf (stdout, "Statistics of index file %s <<Built with glistmaker version %d.%d>>\n", imap->filename, imap->header->version_major, imap->header->version_minor);
+        }
+	fprintf (stdout, "Wordlength\t%u\n", inst->slist_inst.word_length);
+	fprintf (stdout, "NUnique\t%llu\n", inst->slist_inst.num_words);
+	fprintf (stdout, "NTotal\t%llu\n", inst->slist_inst.sum_counts);
+	fprintf (stdout, "Min %u Max %u Median %u Average %.2f\n", gmin, gmax, med, (double) inst->slist_inst.sum_counts / inst->slist_inst.num_words);
 }
 
 void

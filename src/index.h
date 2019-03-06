@@ -6,6 +6,10 @@
 typedef struct _GT4Index GT4Index;
 
 struct _GT4Index {
+  unsigned int code;
+  unsigned int version_major;
+  unsigned int version_minor;
+  unsigned int filler;
   /* Read layout */
   unsigned int nbits_file;
   unsigned int nbits_npos;
@@ -44,7 +48,8 @@ unsigned long long gt4_index_get_read_info (GT4Index *index, unsigned long long 
  *    : reads
  */
 
-unsigned int gt4_index_init_from_data (GT4Index *index, const unsigned char *cdata, unsigned long long csize, unsigned long long n_kmers);
-unsigned int gt4_index_write (GT4Index *index, FILE *ofs, unsigned long long n_kmers);
+unsigned int gt4_index_init_from_data (GT4Index *index, const unsigned char *cdata, unsigned long long csize, unsigned long long n_kmers, unsigned int compatibility_mode);
+unsigned long long gt4_index_write (GT4Index *index, FILE *ofs, unsigned long long n_kmers);
+unsigned long long gt4_index_write_with_reads_callback (GT4Index *index, FILE *ofs, unsigned long long n_kmers, unsigned long long (*write_reads) (GT4Index *index, FILE *ofs, void *data), void *data);
 
 #endif

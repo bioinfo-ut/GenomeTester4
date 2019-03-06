@@ -23,6 +23,8 @@ struct _Node {
 typedef struct _KMerDB KMerDB;
 
 struct _KMerDB {
+  unsigned int major;
+  unsigned int minor;
   unsigned int wordsize;
   unsigned int node_bits;
   unsigned int kmer_bits;
@@ -55,7 +57,7 @@ struct _Read {
   /* Start of kmer relative to the start of name */
   unsigned int kmer_pos : 18;
   /* File number */
-  unsigned int file_idx : 12;
+  unsigned int source_idx : 12;
   /* Direction */
   unsigned int dir : 1;
 };
@@ -106,9 +108,13 @@ unsigned int read_db_from_text (KMerDB *db, const unsigned char *cdata, unsigned
 
 /* Return number of bytes written */
 unsigned int write_db_to_file (KMerDB *db, FILE *ofs, unsigned int kmers);
+unsigned int write_db_to_file_with_reads_callback (KMerDB *db, FILE *ofs, unsigned int kmers, unsigned long long (*write_reads) (GT4Index *index, FILE *ofs, void *data), void *data);
 
 unsigned int read_database_from_binary (KMerDB *db, const unsigned char *cdata, unsigned long long csize);
 
 void gt4_db_clear_index (KMerDB *db);
+
+/* Debug */
+void gt4_db_dump (KMerDB *db, FILE *ofs);
 
 #endif

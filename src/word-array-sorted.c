@@ -48,17 +48,10 @@ gt4_word_sarray_get_type (void)
 }
 
 unsigned int
-gt4_word_sarray_get_first_word (GT4WordSArrayImplementation *impl, GT4WordSArrayInstance *inst)
+gt4_word_sarray_get_word (GT4WordSArrayImplementation *impl, GT4WordSArrayInstance *inst, unsigned long long idx)
 {
   arikkei_return_val_if_fail (impl != NULL, 0);
   arikkei_return_val_if_fail (inst != NULL, 0);
-  return gt4_word_slist_get_first_word (&impl->slist_impl, &inst->slist_inst);
-}
-
-unsigned int
-gt4_word_sarray_get_next_word (GT4WordSArrayImplementation *impl, GT4WordSArrayInstance *inst)
-{
-  arikkei_return_val_if_fail (impl != NULL, 0);
-  arikkei_return_val_if_fail (inst != NULL, 0);
-  return gt4_word_slist_get_next_word (&impl->slist_impl, &inst->slist_inst);
+  inst->slist_inst.idx = idx;
+  return impl->get_word (impl, inst, idx);
 }

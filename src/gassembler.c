@@ -21,6 +21,8 @@ unsigned int debug_groups = 0;
 
 unsigned int max_regions = 1000000000;
 
+static float coverage = 20;
+
 #define WORDLEN 25
 #define MAX_THREADS 256
 #define MAX_KMERS 1024
@@ -35,6 +37,7 @@ unsigned int max_regions = 1000000000;
 enum { CHR_NONE, CHR_1, CHR_2, CHR_3, CHR_4, CHR_5, CHR_6, CHR_7, CHR_8, CHR_9, CHR_10, CHR_11, CHR_12, CHR_13, CHR_14, CHR_15, CHR_16, CHR_17, CHR_18, CHR_19, CHR_20, CHR_21, CHR_22, CHR_X, CHR_Y };
 static const char *chr_names[] = { "INVALID", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15", "16", "17", "18", "19", "20", "21", "22", "X", "Y" };
 
+typedef struct _GASMQueue GASMQueue;
 typedef struct _GASMRead GASMRead;
 typedef struct _ReadInfo ReadInfo;
 typedef struct _SeqFile SeqFile;
@@ -45,8 +48,8 @@ typedef struct _Call Call;
 
 /* Returns number of aligned positions */
 static int align (AssemblyData *adata, const char *kmers[], unsigned int nkmers);
-static int group (AssemblyData *adata, unsigned int n_groups_req, unsigned int print);
-static int assemble (AssemblyData *adata, const char *kmers[], unsigned int nkmers, unsigned int n_groups_req, unsigned int print);
+static int group (AssemblyData *adata, unsigned int print);
+static int assemble (AssemblyData *adata, const char *kmers[], unsigned int nkmers, unsigned int print);
 static int assemble_recursive (KMerDB *db, SeqFile *files, KMerDB *gdb, SeqFile *g_files, unsigned int ref_chr, unsigned int ref_start, unsigned int ref_end, const char *ref, const char *kmers[], unsigned int nkmers);
 unsigned int align_reads_to_reference (NSeq *ref_seq, GASMRead *reads[], unsigned int nreads, GASMRead *a_reads[], short a[][MAX_REFERENCE_LENGTH], SWCell *sw_matrix);
 unsigned int create_gapped_alignment (NSeq *ref_seq, unsigned int ref_start, GASMRead *a_reads[], unsigned int na, short a[][MAX_REFERENCE_LENGTH], unsigned int aligned_ref[], int ref_pos[], short _p[][MAX_REFERENCE_LENGTH * 2]);
@@ -72,26 +75,6 @@ struct _ReadInfo {
 
 static GASMRead *gasm_read_new (const char *name, const char *seq, unsigned int wlen);
 static void gasm_read_delete (GASMRead *read);
-
-static GASMRead *
-gasm_read_new (const char *name, const char *seq, unsigned int wlen)
-{
-  GASMRead *read = (GASMRead *) malloc (sizeof (GASMRead));
-  memset (read, 0, sizeof (GASMRead));
-  read->name = strdup (name);
-  read->seq = strdup (seq);
-  read->nseq = n_seq_new (seq, wlen);
-  return read;
-}
-
-static void
-gasm_read_delete (GASMRead *read)
-{
-  free (read->name);
-  free (read->seq);
-  n_seq_delete (read->nseq);
-  free (read);
-}
 
 struct _SeqFile {
   const char *name;
@@ -125,6 +108,7 @@ struct _Call {
   unsigned short counts[GAP + 1];
   unsigned short nucl[2];
   unsigned short poly;
+  float p;
   float prob;
   float rprob;
   float hzprob;
@@ -142,7 +126,10 @@ struct _Call {
   unsigned short compat_both;
 };
 
+typedef struct _CallBlock CallBlock;
+
 struct _AssemblyData {
+  GASMQueue *queue;
   KMerDB *db;
   SeqFile *files;
   KMerDB *gdb;
@@ -174,10 +161,105 @@ struct _AssemblyData {
   unsigned char (*is_compat)[MAX_GROUPS];
   unsigned short (*n_common)[MAX_GROUPS];
   /* Calls */
+  CallBlock *cblock;
+};
+
+struct _CallBlock {
+  CallBlock *next;
+  unsigned int chr;
+  unsigned int start;
+  unsigned int end;
+  const char *ref;
+  unsigned int n_aligned;
+  /* Calls */
   Call calls[MAX_REFERENCE_LENGTH * 2];
 };
 
-AssemblyData *assembly_data_new (KMerDB *db, SeqFile *files, KMerDB *gdb, SeqFile *g_files)
+struct _GASMQueue {
+  GT4Queue gt4_queue;
+  /* Source */
+  const unsigned char *cdata;
+  unsigned long long csize;
+  unsigned long long cpos;
+  unsigned int line;
+  unsigned int nrunning;
+  unsigned int finished;
+  AssemblyData *adata[MAX_THREADS];
+  CallBlock *free_blocks;
+  CallBlock *processing_blocks;
+  CallBlock *finished_blocks;
+  /* Last printed position */
+  unsigned int last_chr;
+  unsigned int last_pos;
+};
+
+static void
+queue_setup (GASMQueue *queue, unsigned int nthreads)
+{
+  gt4_queue_setup (&queue->gt4_queue, nthreads);
+  queue->cpos = 0;
+  queue->line = 0;
+  queue->nrunning = 0;
+  queue->finished = 0;
+}
+
+static CallBlock *
+queue_get_call_block (GASMQueue *gq, unsigned int chr, unsigned int start, unsigned int end)
+{
+  CallBlock *cb;
+  if (gq->free_blocks) {
+    cb = gq->free_blocks;
+    gq->free_blocks = cb->next;
+  } else {
+    cb = (CallBlock *) malloc (sizeof (CallBlock));
+  }
+  memset (cb, 0, sizeof (CallBlock));
+  cb->chr = chr;
+  cb->start = start;
+  cb->end = end;
+  cb->next = gq->processing_blocks;
+  gq->processing_blocks = cb;
+  return cb;
+}
+
+static void
+queue_finish_call_block (GASMQueue *gq, CallBlock *cb)
+{
+  CallBlock *prev = NULL;
+  CallBlock *cur = gq->processing_blocks;
+  while (cur != cb) {
+    prev = cur;
+    cur = cur->next;
+  }
+  if (!prev) {
+    gq->processing_blocks = cb->next;
+  } else {
+    prev->next = cb->next;
+  }
+  cb->next = gq->finished_blocks;
+  gq->finished_blocks = cb;
+}
+
+static void
+queue_free_call_block (GASMQueue *gq, CallBlock *cb)
+{
+  CallBlock *prev = NULL;
+  CallBlock *cur = gq->finished_blocks;
+  while (cur != cb) {
+    prev = cur;
+    cur = cur->next;
+  }
+  if (!prev) {
+    gq->finished_blocks = cb->next;
+  } else {
+    prev->next = cb->next;
+  }
+  cb->next = gq->free_blocks;
+  gq->free_blocks = cb;
+}
+
+static AssemblyData *
+assembly_data_new (KMerDB *db, SeqFile *files, KMerDB *gdb, SeqFile *g_files)
 {
   AssemblyData *adata = (AssemblyData *) malloc (sizeof (AssemblyData));
   memset (adata, 0, sizeof (AssemblyData));
@@ -204,62 +286,203 @@ assembly_data_clear (AssemblyData *adata)
     n_seq_delete (adata->ref_seq);
     adata->ref_seq = NULL;
   }
+  adata->cblock = NULL;
 }
 
-typedef struct _GASMQueue GASMQueue;
-
-struct _GASMQueue {
-  GT4Queue gt4_queue;
-  /* Source */
-  const unsigned char *cdata;
-  unsigned long long csize;
-  unsigned long long cpos;
-  unsigned int line;
-  unsigned int nrunning;
-  unsigned int finished;
-  AssemblyData *adata[MAX_THREADS];
-};
-
 static void
-queue_setup (GASMQueue *queue, unsigned int nthreads)
+print_header (FILE *ofs) {
+  fprintf (ofs, "CHR\tPOS      \tREF\tKMERS\tCOVERAGE\tDISCARDED\tA\tC\tG\tT\tN\tGAP\tCALL\tCLASS\tPVALUE\tPROB\tRPROB\tPROB_HI\tPROB_LO\tEDIST\tGRP_ALL\tGRP\tDIV0\tDIV1\tG0\tG1\tG0_COMP\tG1_COMP\tCOMP_2");
+}
+
+#define KMER_COVERAGE (coverage * 0.8)
+
+static double
+pmin (double a, double b) {
+  return (a < b) ? a : b;
+}
+
+static double
+calc_p (Call *call)
 {
-  gt4_queue_setup (&queue->gt4_queue, nthreads);
-  queue->cpos = 0;
-  queue->line = 0;
-  queue->nrunning = 0;
-  queue->finished = 0;
+  // linpred = -1.447 +0.6845*(CALLtype=="homoMUT")
+  int homoMUT = ((call->nucl[0] == call->nucl[1]) && (call->nucl[0] != call->ref));
+  double icept = -1.447;
+  double term0 = 0.6845 * homoMUT;
+  // +0.05935*G0_COMP +0.1621*COMP_2
+  double term1 = 0.05935 * call->compat_0 + 0.1621 * call->compat_both;
+  // -0.8501*(CLASS=="I") +0.4295*(CLASS=="S")
+  double term2 = -0.8501 * (call->ref == GAP) + 0.4295 * ((call->nucl[1] != GAP) && call->poly);
+  // +1.568*(COV>=4 & COV<0.75*k_mer_coverage)
+  double term3 = 1.568 * ((call->cov >= 4) && (call->cov < (0.75 * KMER_COVERAGE)));
+  // +1.778*(COV>=0.75*k_mer_coverage & COV<1.25*k_mer_coverage)
+  double term4 = 1.778 * ((call->cov >= (0.75 * KMER_COVERAGE)) && (call->cov < (1.25 * KMER_COVERAGE)));
+  // +2.340*(COV>=1.25*k_mer_coverage & COV<1.9*k_mer_coverage)
+  double term5 = 2.340 * ((call->cov >= (1.25 * KMER_COVERAGE)) && (call->cov < (1.9 * KMER_COVERAGE)));
+  // +0.1781*(COV>=1.9*k_mer_coverage)
+  double term6 = 0.1781 * (call->cov >= (1.9 * KMER_COVERAGE));
+  // +5.989*pvalue2 -4.546*pvalue2**2
+  // -3.002*pvalue2**3
+  int kokku = call->counts[A] + call->counts[C] + call->counts[G] + call->counts[T] + call->counts[GAP];
+  double p1 = poisson (kokku, KMER_COVERAGE);
+  double pvalue_COV = pow (pmin (p1, 1 - p1), 2);
+  int G1koht = call->counts[call->nucl[1]];
+  double p2 = dbinom(G1koht, kokku, 0.5);
+  double pvalue2 = pow (pmin (p2, 1 - p2), 2);
+  if (call->n_groups_total < 2) pvalue2 = 1;
+  double term7 = 5.989 * pvalue2 - 4.546 * pvalue2 * pvalue2 - 3.002 * pvalue2 * pvalue2 * pvalue2;
+  // +0.06952*G1_COMP +1.040*(G1_COMP > 0.75 * G0_COMP)
+  double term8 = 0.06952 * call->compat_1 + 1.040 * (call->compat_1 > (0.75 * call->compat_0));
+  // -0.1063*(abs(kokku - k_mer_coverage)) +0.6887*pvalue_COV -1.619*pvalue_COV**2
+  double term9 = -0.1063 * abs (kokku - KMER_COVERAGE) + 0.6887 * pvalue_COV - 1.619 * pvalue_COV * pvalue_COV;
+  // +0.1251*EDIST -0.001694*EDIST**2
+  double term10 = 0.1251 * call->end_dist - 0.001694 * call->end_dist * call->end_dist;
+  // +0.06204*G0_COMP*(CALLtype=="homoMUT")
+  double term11 = 0.06204 * call->compat_0 * homoMUT;
+  // -0.02578*(CALLtype=="homoMUT")*COMP_2 -0.002912*G0_COMP*G1_COMP
+  double term12 = -0.02578 * homoMUT * call->compat_both;
+  double term13 = -0.002912 * call->compat_0 * call->compat_1;
+  // +0.06077*(CALLtype=="homoMUT")*(abs(kokku - k_mer_coverage))
+  double term14 = 0.06077 * homoMUT * abs (kokku - KMER_COVERAGE);
+  // +2.158*(CALLtype=="homoMUT")*pvalue_COV-0.001164*EDIST*(abs(kokku - k_mer_coverage))
+  double term15 = 2.158 * homoMUT * pvalue_COV;
+  double term16 = -0.001164 * call->end_dist * abs (kokku - KMER_COVERAGE);
+  double linpred = icept + term0 + term1 + term2 + term3 + term4 + term5 + term6 + term7 + term8 + term9 + term10 + term11 + term12 + term13 + term14 + term15 + term16;
+  return exp (linpred) / (1 + exp (linpred));
 }
 
 static void
 print_position (AssemblyData *adata, unsigned int n_aligned, unsigned int pos)
 {
+  CallBlock *cb = adata->cblock;
+  Call *call = &cb->calls[pos];
   if (!n_aligned) {
     fprintf (stdout, "%s\t%u\t%c\t0\t0\t0\t0\t0\t0\tNC\n", chr_names[adata->chr], adata->start + pos, adata->ref[pos - adata->start]);
   } else {
     /* CHR POS REF COV */
-    fprintf (stdout, "%s\t%u\t%c\t%u", chr_names[adata->chr], adata->calls[pos].pos, n2c[adata->calls[pos].ref], adata->calls[pos].cov);
+    fprintf (stdout, "%s\t%u\t%c\t%u", chr_names[adata->chr], call->pos, n2c[call->ref], call->cov);
     /* A C G T GAP */
-    fprintf (stdout, "\t%u\t%u\t%u\t%u\t%u", adata->calls[pos].counts[A], adata->calls[pos].counts[C], adata->calls[pos].counts[G], adata->calls[pos].counts[T], adata->calls[pos].counts[GAP]);
+    fprintf (stdout, "\t%u\t%u\t%u\t%u\t%u", call->counts[A], call->counts[C], call->counts[G], call->counts[T], call->counts[GAP]);
     /* CALL */
-    if (adata->calls[pos].nucl[0] == NONE) {
+    if (call->nucl[0] == NONE) {
       fprintf (stdout, "\tNC");
     } else {
-      fprintf (stdout, "\t%c%c%c", n2c[adata->calls[pos].nucl[0]], n2c[adata->calls[pos].nucl[1]], (adata->calls[pos].poly) ? '*' : ' ');
+      fprintf (stdout, "\t%c%c%c", n2c[call->nucl[0]], n2c[call->nucl[1]], (call->poly) ? '*' : ' ');
     }
     /* CLASS */
-    if (adata->calls[pos].ref == GAP) {
+    if (call->ref == GAP) {
       fprintf (stdout, "\tI");
-    } else if (adata->calls[pos].nucl[1] == GAP) {
+    } else if (call->nucl[1] == GAP) {
       fprintf (stdout, "\tD");
-    } else if (adata->calls[pos].poly) {
+    } else if (call->poly) {
       fprintf (stdout, "\tS");
     } else {
       fprintf (stdout, "\t0");
     }
-    fprintf (stdout, "\t%.5f\t%.5f\t%.5f\t%.5f\t%.5f", adata->calls[pos].prob, adata->calls[pos].rprob, adata->calls[pos].hzprob, adata->calls[pos].prob_higher, adata->calls[pos].prob_lower);
-    fprintf (stdout, "\t%2u", adata->calls[pos].end_dist);
-    fprintf (stdout, "\t%2u\t%2u\t%2u\t%2u", adata->calls[pos].n_groups_total, adata->calls[pos].n_groups, adata->calls[pos].div_0, adata->calls[pos].div_1);
-    fprintf (stdout, "\t%2u\t%2u\t%2u\t%2u\t%2u", adata->calls[pos].max_cov_0, adata->calls[pos].max_cov_1, adata->calls[pos].compat_0, adata->calls[pos].compat_1, adata->calls[pos].compat_both);
+    /* PVALUE */
+    fprintf (stdout, "\t%g", calc_p (call));
+    fprintf (stdout, "\t%.5f\t%.5f\t%.5f\t%.5f\t%.5f", call->prob, call->rprob, call->hzprob, call->prob_higher, call->prob_lower);
+    fprintf (stdout, "\t%2u", call->end_dist);
+    fprintf (stdout, "\t%2u\t%2u\t%2u\t%2u", call->n_groups_total, call->n_groups, call->div_0, call->div_1);
+    fprintf (stdout, "\t%2u\t%2u\t%2u\t%2u\t%2u", call->max_cov_0, call->max_cov_1, call->compat_0, call->compat_1, call->compat_both);
+  }
+}
+
+static void
+print_call (CallBlock *cb, unsigned int pos)
+{
+  Call *call = &cb->calls[pos];
+  if (!cb->n_aligned) {
+    /* fprintf (stdout, "%s\t%u\t%c\t0\t0\t0\t0\t0\t0\tNC\n", chr_names[cb->chr], cb->start + pos, cb->ref[pos - cb->start]); */
+  } else {
+    /* CHR POS REF COV */
+    fprintf (stdout, "%s\t%u\t%c\t%u", chr_names[cb->chr], call->pos, n2c[call->ref], call->cov);
+    /* A C G T GAP */
+    fprintf (stdout, "\t%u\t%u\t%u\t%u\t%u", call->counts[A], call->counts[C], call->counts[G], call->counts[T], call->counts[GAP]);
+    /* CALL */
+    if (call->nucl[0] == NONE) {
+      fprintf (stdout, "\tNC");
+    } else {
+      fprintf (stdout, "\t%c%c%c", n2c[call->nucl[0]], n2c[call->nucl[1]], (call->poly) ? '*' : ' ');
+    }
+    /* CLASS */
+    if (call->ref == GAP) {
+      fprintf (stdout, "\tI");
+    } else if (call->nucl[1] == GAP) {
+      fprintf (stdout, "\tD");
+    } else if (call->poly) {
+      fprintf (stdout, "\tS");
+    } else {
+      fprintf (stdout, "\t0");
+    }
+    /* PVALUE */
+    fprintf (stdout, "\t%g", calc_p (call));
+    fprintf (stdout, "\t%.5f\t%.5f\t%.5f\t%.5f\t%.5f", call->prob, call->rprob, call->hzprob, call->prob_higher, call->prob_lower);
+    fprintf (stdout, "\t%2u", call->end_dist);
+    fprintf (stdout, "\t%2u\t%2u\t%2u\t%2u", call->n_groups_total, call->n_groups, call->div_0, call->div_1);
+    fprintf (stdout, "\t%2u\t%2u\t%2u\t%2u\t%2u", call->max_cov_0, call->max_cov_1, call->compat_0, call->compat_1, call->compat_both);
+  }
+}
+
+static void
+print_calls (GASMQueue *queue)
+{
+  unsigned int min_chr_p = 0xffffffff;
+  unsigned int min_start_p = 0xffffffff;
+  CallBlock *cb;
+  /* Find smallest processing */
+  for (cb = queue->processing_blocks; cb; cb = cb->next) {
+    if ((cb->chr < min_chr_p) || ((cb->chr == min_chr_p) && (cb->start < min_start_p))) {
+      min_chr_p = cb->chr;
+      min_start_p = cb->start;
+    }
+  }
+  while (queue->finished_blocks) {
+    CallBlock *cb_f = NULL;
+    unsigned int min_chr_f = 0xffffffff;
+    unsigned int min_start_f = 0xffffffff;
+    unsigned int i;
+    /* Find block with smallest start address */
+    for (cb = queue->finished_blocks; cb; cb = cb->next) {
+      if ((cb->chr < min_chr_f) || ((cb->chr == min_chr_f) && (cb->start < min_start_f))) {
+        min_chr_f = cb->chr;
+        min_start_f = cb->start;
+        cb_f = cb;
+      }
+    }
+    if (!cb_f) return;
+    if (cb_f->chr > min_chr_p) return;
+    if ((cb_f->chr == min_chr_p) && (cb_f->end > min_start_p)) return;
+    /* fprintf (stdout, "Printing Block %u %u-%u\n", cb_f->chr, cb_f->start, cb_f->end); */
+    for (i = 0; i < cb_f->n_aligned; i++) {
+      unsigned int pos = cb_f->calls[i].pos;
+      CallBlock *best_cb = cb_f;
+      float best_p = cb_f->calls[i].p;
+      CallBlock *ccb;
+      unsigned int j;
+      if ((cb_f->chr == queue->last_chr) && (pos <= queue->last_pos)) continue;
+      for (ccb = queue->finished_blocks; ccb; ccb = ccb->next) {
+        if (ccb->chr > cb_f->chr) continue;
+        if (ccb->start > pos) continue;
+        for (j = 0; j < ccb->n_aligned; j++) {
+          if (ccb->calls[j].pos != pos) continue;
+          if (ccb->calls[j].p < best_p) continue;
+          best_cb = ccb;
+          best_p = ccb->calls[j].p;
+        }
+      }
+      /* fprintf (stdout, "  global start %u %u, printing %u %u\n", queue->last_chr, queue->last_pos, best_cb->chr, pos); */
+      for (j = 0; j < best_cb->n_aligned; j++) {
+        if (best_cb->calls[j].pos == pos) {
+          print_call (best_cb, j);
+          fprintf (stdout, "\n");
+        } else if (best_cb->calls[j].pos > pos) {
+          break;
+        }
+      }
+      queue->last_chr = cb_f->chr;
+      queue->last_pos = pos;
+    }
+    queue_free_call_block (queue, cb_f);
   }
 }
 
@@ -289,7 +512,6 @@ process (GT4Queue *queue, unsigned int idx, void *data)
         int n_aligned;
         char chr[32];
         gasm_queue->nrunning += 1;
-        gt4_queue_unlock (queue);
         if (lengths[0] > 31) lengths[0] = 31;
         memcpy (chr, tokenz[0], lengths[0]);
         chr[lengths[0]] = 0;
@@ -297,35 +519,27 @@ process (GT4Queue *queue, unsigned int idx, void *data)
         for (i = 4; i < ntokenz; i++) {
           kmers[nkmers++] = strndup ((const char *) tokenz[i], lengths[i]);
         }
-        assembly_data_clear (adata);
         adata->chr = chr_from_text (chr);
         adata->start = strtol ((const char *) tokenz[1], NULL, 10);
         adata->end = strtol ((const char *) tokenz[2], NULL, 10);
         adata->ref = (const char *) tokenz[3];
-        n_aligned = assemble (adata, (const char **) kmers, nkmers, 2, 0);
+        adata->cblock = queue_get_call_block (gasm_queue, adata->chr, adata->start, adata->end);
+        /* Now the new block is allocated so it is safe to print all completed blocks */
+        print_calls (gasm_queue);
+        gt4_queue_unlock (queue);
+        n_aligned = assemble (adata, (const char **) kmers, nkmers, 0);
+        gt4_queue_lock (queue);
+        queue_finish_call_block (gasm_queue, adata->cblock);
+#if 0
         if (n_aligned > 0) {
-          gt4_queue_lock (queue);
           for (i = 0; i < n_aligned; i++) {
             print_position (adata, (unsigned int) n_aligned, i);
             fprintf (stdout, "\n");
           }
-          gt4_queue_unlock (queue);
         }
+        queue_free_call_block (gasm_queue, adata->cblock);
+#endif
         assembly_data_clear (adata);
-        adata->chr = chr_from_text (chr);
-        adata->start = strtol ((const char *) tokenz[1], NULL, 10);
-        adata->end = strtol ((const char *) tokenz[2], NULL, 10);
-        adata->ref = (const char *) tokenz[3];
-        n_aligned = assemble (adata, (const char **) kmers, nkmers, 1, 0);
-        gt4_queue_lock (queue);
-        if (n_aligned > 0) {
-          if (n_aligned > 0) {
-            for (i = 0; i < (unsigned int) n_aligned; i++) {
-              print_position (adata, n_aligned, i);
-              fprintf (stdout, "\n");
-            }
-          }
-        }
         for (i = 0; i < nkmers; i++) free (kmers[i]);
         gasm_queue->nrunning -= 1;
       }
@@ -384,7 +598,6 @@ static float min_group_rsize = 0.05f;
 static unsigned int max_group_divergence = 2;
 static unsigned int max_group_rdivergence = 2;
 static unsigned int max_uncovered = 10;
-static float coverage = 20;
 static double min_hzp = 0.05f;
 static double min_p = 0.00001;
 static unsigned int prefetch_db = 1;
@@ -615,6 +828,7 @@ main (int argc, const char *argv[])
     if (!only_pos) {
       GASMQueue queue;
       unsigned int i;
+      print_header (stdout);
       queue.cdata = gt4_mmap (input_name, &queue.csize);
       if (!queue.cdata) {
         fprintf (stderr, "Cannot mmap input file %s\n", input_name);
@@ -623,6 +837,8 @@ main (int argc, const char *argv[])
       queue_setup (&queue, n_threads);
       queue.cpos = 0;
       queue.line = 0;
+      queue.last_chr = 0;
+      queue.last_pos = 0;
       for (i = 0; i < n_threads; i++) {
         queue.adata[i] = assembly_data_new (&db, files, &gdb, g_files);
       }
@@ -632,6 +848,7 @@ main (int argc, const char *argv[])
       while (queue.gt4_queue.nthreads_running > 1) {
         gt4_queue_wait (&queue.gt4_queue);
       }
+      print_calls (&queue);
       gt4_queue_unlock (&queue.gt4_queue);
     } else {
       const unsigned char *cdata;
@@ -663,7 +880,8 @@ main (int argc, const char *argv[])
           chrc[lengths[0]] = 0;
           chr = chr_from_text (chrc);
           start = strtol ((const char *) tokenz[1], NULL, 10);
-          if (seen && (start > only_pos)) break;
+          /* if (seen && (start > only_pos)) break; */
+          if (start > only_pos) continue;
           end = strtol ((const char *) tokenz[2], NULL, 10);
           if (end <= only_pos) continue;
           ref = (const char *) tokenz[3];
@@ -701,10 +919,13 @@ assemble_recursive (KMerDB *db, SeqFile *files, KMerDB *gdb, SeqFile *g_files, u
   dup = (char *) malloc (len + 1);
   strncpy (dup, ref, len);
   adata->ref = dup;
+  adata->cblock = (CallBlock *) malloc (sizeof (CallBlock));
+  adata->cblock->chr = adata->chr;
+  adata->cblock->start = adata->start;
+  adata->cblock->end = adata->end;
   result = align (adata, kmers, nkmers);
   if (result > 0) {
-    result = group (adata, 2, 1);
-    result = group (adata, 1, 1);
+    result = group (adata, 1);
   } else if (result == 0) {
     unsigned int mid;
     mid = (ref_start + ref_end) / 2;
@@ -713,6 +934,7 @@ assemble_recursive (KMerDB *db, SeqFile *files, KMerDB *gdb, SeqFile *g_files, u
     result += assemble_recursive (db, files, gdb, g_files, ref_chr, mid, ref_end, ref + (mid - ref_start), kmers, nkmers);
   }
   assembly_data_clear (adata);
+  free (adata->cblock);
   free (dup);
   return result;
 }
@@ -832,6 +1054,7 @@ align (AssemblyData *adata, const char *kmers[], unsigned int nkmers)
   if (debug == 1) fprintf (stderr, "\n");
   /* Generate gapped alignment */
   adata->p_len = create_gapped_alignment (adata->ref_seq, adata->start, adata->aligned_reads, adata->na, alignment, adata->aligned_ref, adata->ref_pos, adata->alignment);
+  adata->cblock->n_aligned = adata->p_len;
   /* Calculate totals */
   memset (adata->coverage, 0, adata->p_len * 2);
   memset (adata->nucl_counts, 0, adata->p_len * (GAP + 1) * 2);
@@ -905,7 +1128,7 @@ align (AssemblyData *adata, const char *kmers[], unsigned int nkmers)
 }
 
 static int
-group (AssemblyData *adata, unsigned int n_groups_req, unsigned int print)
+group (AssemblyData *adata, unsigned int print)
 {
   Group groups[MAX_ALIGNED_READS];
   unsigned int i, j, k;
@@ -1152,7 +1375,7 @@ group (AssemblyData *adata, unsigned int n_groups_req, unsigned int print)
     if (groups[i].included) good_groups[n_included++] = i;
   }
 
-  if ((n_included < 2) && (n_groups_req == 2)) {
+  if (n_included < 1) {
     free (g_cons);
     return 0;
   }
@@ -1180,11 +1403,6 @@ group (AssemblyData *adata, unsigned int n_groups_req, unsigned int print)
       if ((groups[good_groups[1]].tag & common) != (adata->aligned_reads[j]->tag & common)) continue;
       /* Read is compatible with both groups */
       compat_both += 1;
-    }
-    
-    if (n_groups_req == 1) {
-      groups[good_groups[1]].included = 0;
-      n_included = 1;
     }
   }
     
@@ -1225,28 +1443,30 @@ group (AssemblyData *adata, unsigned int n_groups_req, unsigned int print)
   }
 
   /* Call */
+  CallBlock *cb = adata->cblock;
   for (i = 0; i < adata->p_len; i++) {
-    memset (&adata->calls[i], 0, sizeof (adata->calls[i]));
-    adata->calls[i].pos = adata->ref_pos[i];
-    adata->calls[i].ref = adata->aligned_ref[i];
-    adata->calls[i].cov = adata->coverage[i];
+    Call *call = &cb->calls[i];
+    memset (call, 0, sizeof (Call));
+    call->pos = adata->ref_pos[i];
+    call->ref = adata->aligned_ref[i];
+    call->cov = adata->coverage[i];
     for (j = A; j <= GAP; j++) {
-      adata->calls[i].counts[j] = adata->nucl_counts[i][j];
+      call->counts[j] = adata->nucl_counts[i][j];
     }
-    adata->calls[i].nucl[0] = adata->calls[i].nucl[1] = NONE;
-    adata->calls[i].n_groups_total = n_groups;
-    adata->calls[i].n_groups = n_included;
-    adata->calls[i].div_0 = div_0;
-    adata->calls[i].div_1 = div_1;
-    adata->calls[i].max_cov_0 = max_cov_0;
-    adata->calls[i].max_cov_1 = max_cov_1;
-    adata->calls[i].compat_0 = compat_0;
-    adata->calls[i].compat_1 = compat_1;
-    adata->calls[i].prob_higher = prob_higher;
-    adata->calls[i].prob_lower = prob_lower;
-    adata->calls[i].compat_both = compat_both;
+    call->nucl[0] = call->nucl[1] = NONE;
+    call->n_groups_total = n_groups;
+    call->n_groups = n_included;
+    call->div_0 = div_0;
+    call->div_1 = div_1;
+    call->max_cov_0 = max_cov_0;
+    call->max_cov_1 = max_cov_1;
+    call->compat_0 = compat_0;
+    call->compat_1 = compat_1;
+    call->prob_higher = prob_higher;
+    call->prob_lower = prob_lower;
+    call->compat_both = compat_both;
 
-    adata->calls[i].end_dist = (i < (adata->p_len - 1 - i)) ? i : adata->p_len - 1 - i;
+    call->end_dist = (i < (adata->p_len - 1 - i)) ? i : adata->p_len - 1 - i;
 #if 0
     /* NC if too close to end */
     if ((i < min_end_distance) || (i > (adata->p_len - 1 - min_end_distance))) continue;
@@ -1297,9 +1517,9 @@ group (AssemblyData *adata, unsigned int n_groups_req, unsigned int print)
       /* Heterozygote */
       p = dbinom (adata->nucl_counts[i][best_n2], adata->nucl_counts[i][best_n1] + adata->nucl_counts[i][best_n2], 0.5);
       if (p < min_hzp) {
-        adata->calls[i].nucl[0] = adata->calls[i].nucl[1] = NONE;
-        adata->calls[i].poly = 0;
-        adata->calls[i].hzprob = p;
+        call->nucl[0] = call->nucl[1] = NONE;
+        call->poly = 0;
+        call->hzprob = p;
         continue;
       }
     } else {
@@ -1307,8 +1527,8 @@ group (AssemblyData *adata, unsigned int n_groups_req, unsigned int print)
 #if 0
       /* NC if too close to end */
       if ((i < min_end_distance_homozygote) || (i > (adata->p_len - 1 - min_end_distance_homozygote))) {
-        adata->calls[i].nucl[0] = adata->calls[i].nucl[1] = NONE;
-        adata->calls[i].poly = 0;
+        call->nucl[0] = call->nucl[1] = NONE;
+        call->poly = 0;
         continue;
       }
 #endif
@@ -1317,17 +1537,18 @@ group (AssemblyData *adata, unsigned int n_groups_req, unsigned int print)
       best_prob = 0;
       sum_probs = 1;
     }
-    adata->calls[i].nucl[0] = best_n1;
-    adata->calls[i].nucl[1] = best_n2;
-    adata->calls[i].poly = ((best_n1 != adata->aligned_ref[i]) || (best_n2 != adata->aligned_ref[i]));
-    adata->calls[i].prob = best_prob;
-    adata->calls[i].rprob = best_prob / sum_probs;
-    adata->calls[i].hzprob = p;
+    call->nucl[0] = best_n1;
+    call->nucl[1] = best_n2;
+    call->poly = ((best_n1 != adata->aligned_ref[i]) || (best_n2 != adata->aligned_ref[i]));
+    call->prob = best_prob;
+    call->rprob = best_prob / sum_probs;
+    call->hzprob = p;
+    call->p = calc_p (call);
   }
 
   /* Output alignment */
   if (print) {
-    fprintf (stdout, "CHR\tPOS      \tREF\tKMERS\tCOVERAGE\tDISCARDED\tA\tC\tG\tT\tN\tGAP\tCALL\tCLASS\tPROB\tRPROB\tPROB_HI\tPROB_LO\tEDIST\tGRP_ALL\tGRP\tDIV0\tDIV1\tG0\tG1\tG0_COMP\tG1_COMP\tCOMP_2");
+    print_header (stdout);
     if (debug) {
       fprintf (stdout, "\t ");
       for (i = 0; i < n_included; i++) {
@@ -1360,7 +1581,7 @@ group (AssemblyData *adata, unsigned int n_groups_req, unsigned int print)
 }
 
 static int
-assemble (AssemblyData *adata, const char *kmers[], unsigned int nkmers, unsigned int n_groups_req, unsigned int print)
+assemble (AssemblyData *adata, const char *kmers[], unsigned int nkmers, unsigned int print)
 {
   unsigned int i;
   int result;
@@ -1374,10 +1595,10 @@ assemble (AssemblyData *adata, const char *kmers[], unsigned int nkmers, unsigne
   }
   result = align (adata, kmers, nkmers);
   if (result <= 0) return result;
-  result = group (adata, n_groups_req, print);
+  result = group (adata, print);
   if (result <= 0) return result;
 
-  assembly_data_clear (adata);
+  /* assembly_data_clear (adata); */
   
   return adata->p_len;
 }
@@ -1998,7 +2219,7 @@ get_seq_name (const char *in_name, const char *seq_dir)
     for (i = 0; i < len; i++) {
       if (in_name[len - 1 - i] == '/') break;
     }
-    if (in_name[len - 1 - i] != '/') {
+    if (i >= len) {
       char *c = (char *) malloc (dir_len + 1 + len + 1);
       memcpy (c, seq_dir, dir_len);
       c[dir_len] = '/';
@@ -2283,5 +2504,25 @@ chr_from_text (const char *name)
   if (*e) return CHR_NONE;
   if (val > CHR_22) return CHR_NONE;
   return val;
+}
+
+static GASMRead *
+gasm_read_new (const char *name, const char *seq, unsigned int wlen)
+{
+  GASMRead *read = (GASMRead *) malloc (sizeof (GASMRead));
+  memset (read, 0, sizeof (GASMRead));
+  read->name = strdup (name);
+  read->seq = strdup (seq);
+  read->nseq = n_seq_new (seq, wlen);
+  return read;
+}
+
+static void
+gasm_read_delete (GASMRead *read)
+{
+  free (read->name);
+  free (read->seq);
+  n_seq_delete (read->nseq);
+  free (read);
 }
 

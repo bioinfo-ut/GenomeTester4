@@ -45,6 +45,8 @@ static void word_map_shutdown (AZObject *object);
 /* GT4WordSList implementation */
 unsigned int word_map_get_first_word (GT4WordSListImplementation *impl, GT4WordSListInstance *inst);
 unsigned int word_map_get_next_word (GT4WordSListImplementation *impl, GT4WordSListInstance *inst);
+/* GT4WordArray implementation */
+unsigned int word_map_get_word (GT4WordSArrayImplementation *impl, GT4WordSArrayInstance *inst, unsigned long long idx);
 /* GT4WordDict implementation */
 unsigned int word_map_lookup (GT4WordDictImplementation *impl, GT4WordDictInstance *inst, unsigned long long word);
 
@@ -73,6 +75,7 @@ word_map_class_init (GT4WordMapClass *klass)
   /* GT4WordSList implementation */
   klass->sarray_impl.slist_impl.get_first_word = word_map_get_first_word;
   klass->sarray_impl.slist_impl.get_next_word = word_map_get_next_word;
+  klass->sarray_impl.get_word = word_map_get_word;
   /* GT4WordDict implementation */
   klass->dict_impl.lookup = word_map_lookup;
 }
@@ -111,6 +114,15 @@ word_map_get_next_word (GT4WordSListImplementation *impl, GT4WordSListInstance *
   inst->word = WORDMAP_WORD(wmap,inst->idx);
   inst->count = WORDMAP_FREQ(wmap,inst->idx);
   __builtin_prefetch (&WORDMAP_WORD(wmap,inst->idx + 4), 0, 0);
+  return 1;
+}
+
+unsigned int
+word_map_get_word (GT4WordSArrayImplementation *impl, GT4WordSArrayInstance *inst, unsigned long long idx)
+{
+  GT4WordMap *wmap = GT4_WORD_MAP_FROM_SARRAY_INST(inst);
+  inst->slist_inst.word = WORDMAP_WORD(wmap,inst->slist_inst.idx);
+  inst->slist_inst.count = WORDMAP_FREQ(wmap,inst->slist_inst.idx);
   return 1;
 }
 
@@ -217,8 +229,11 @@ word_map_search_query (GT4WordMap *map, unsigned long long query, parameters *p,
     return gt4_word_map_lookup (map, query);
   }
 
-  mm_table.wordlength = p->wordlength;
+  if (!mm_table.data_size) {
+    gt4_word_table_setup (&mm_table, p->wordlength, 256, 4);
+  }
 
+#if 0
   /* find and set table size */
   if (!mm_table.n_words) {
     nwords = generate_mismatches (NULL, query, p->wordlength, 0, p->nmm, p->pm3, 0, 1, 0);
@@ -227,6 +242,7 @@ word_map_search_query (GT4WordMap *map, unsigned long long query, parameters *p,
       fprintf (stderr, "MM Table size %llu, num mismatches %llu\n", mm_table.n_words, nwords);
     }
   }
+#endif
   generate_mismatches (&mm_table, query, p->wordlength, 0, p->nmm, p->pm3, 0, 0, equalmmonly);
   if (debug_wordmap > 1) {
     fprintf (stderr, "MM Table size %llu\n", mm_table.n_words);
@@ -252,8 +268,7 @@ word_map_search_query (GT4WordMap *map, unsigned long long query, parameters *p,
       }
     }
   }
-  
-  mm_table.n_words = 0;
+  gt4_word_table_clear (&mm_table);
   return count;
 }
 
@@ -273,7 +288,3 @@ gt4_word_map_lookup (GT4WordMap *map, unsigned long long query)
   if (rev < query) query = rev;
   return gt4_word_map_lookup_canonical (map, query);
 }
-
-
-
-
