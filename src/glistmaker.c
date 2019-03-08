@@ -82,7 +82,7 @@ static void process (GT4Queue *queue, unsigned int thread_idx, void *arg);
 static unsigned long long merge_tables_to_file (GT4WordTable *t[], unsigned int ntables, int ofile);
 static unsigned long long merge_tables_to_file_index (GT4WordTable *tables[], unsigned int ntables_in, int ofile);
 static unsigned long long collate_files_index (const char *files[], unsigned int n_files, int ofile);
-static unsigned int write_index (const char *name, const char *loc_files[], unsigned int n_loc_files, GT4ListMakerQueue *mq, const char *files[], unsigned int n_files);
+static unsigned int write_index (FILE *ofs, const char *loc_files[], unsigned int n_loc_files, GT4ListMakerQueue *mq, const char *files[], unsigned int n_files);
 /* Reading callback */
 static int start_sequence_index (GT4FastaReader *reader, void *data);
 static int end_sequence_index (GT4FastaReader *reader, void *data);
@@ -138,6 +138,8 @@ main (int argc, const char *argv[])
   unsigned long long tablesize = DEFAULT_TABLE_SIZE;
   unsigned int ntables = DEFAULT_NUM_TABLES;
   unsigned int stream = 0;
+  char c[1024];
+  FILE *ofs;
 
   GT4ListMakerQueue mq;
 
@@ -241,6 +243,17 @@ main (int argc, const char *argv[])
     fprintf (stderr, "Table size is %lld\n", tablesize);
   }
 
+  if (create_index) {
+    snprintf (c, 1024, "%s_%u.index", outputname, wordlength);
+  } else {
+    snprintf (c, 1024, "%s_%u.list", outputname, wordlength);
+  }
+  ofs = fopen (c, "w");
+  if (ofs == NULL) {
+    fprintf (stderr, "Cannot create output file %s\n", c);
+    exit (1);
+  }
+
   /* Set up queue */
   maker_queue_setup (&mq, nthreads, wordlength, ntables, tablesize, (create_index) ? sizeof (Location) : 0);
   for (i = 0; i < n_files; i++) maker_queue_add_file (&mq, files[i], stream, i);
@@ -265,34 +278,8 @@ main (int argc, const char *argv[])
   }
 
   if (mq.n_final_files > 0) {
-    char c[1024];
     if (create_index) {
-#if 1
-      snprintf (c, 1024, "%s_%u.index", outputname, wordlength);
-      write_index (c, (const char **) mq.final_files, mq.n_final_files, &mq, files, n_files);
-#else
-      const char *final_name;
-      /* Get single final file */
-      if (mq.n_final_files > 1) {
-        int ofile;
-        char *tmpname = (char *) malloc (strlen (tmpdir) + 256);
-        sprintf (tmpname, "%s/GLM4_F_XXXXXX.loc", tmpdir);
-        ofile = mkstemps (tmpname, 4);
-        if (debug) fprintf (stderr, "Final: Collating %u files to %s\n", mq.n_final_files, tmpname);
-        collate_files_index ((const char **) mq.final_files, mq.n_final_files, ofile);
-        close (ofile);
-        for (i = 0; i < mq.n_final_files; i++) {
-          unlink (mq.final_files[i]);
-        }
-        final_name = tmpname;
-      } else {
-        final_name = mq.final_files[0];
-      }
-      if (debug) fprintf (stderr, "Final name: %s\n", final_name);
-      /* Build index */
-      snprintf (c, 1024, "%s_%u.index", outputname, wordlength);
-      write_index (c, &final_name, 1, &mq, files, n_files);
-#endif
+      write_index (ofs, (const char **) mq.final_files, mq.n_final_files, &mq, files, n_files);
     } else {
       AZObject *objs[4096];
       unsigned int i;
@@ -301,15 +288,19 @@ main (int argc, const char *argv[])
       for (i = 0; i < mq.n_final_files; i++) {
         objs[i] = (AZObject *) gt4_word_list_stream_new (mq.final_files[i], VERSION_MAJOR);
       }
+#if 0
       snprintf (c, 1024, "%s_%u.list", outputname, wordlength);
       ofile = creat (c, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
+#endif
+      ofile = fileno (ofs);
       gt4_write_union (objs, mq.n_final_files, 1, ofile, &header);
-      close (ofile);
+      /* close (ofile); */
       for (i = 0; i < mq.n_final_files; i++) {
         gt4_word_list_stream_delete (GT4_WORD_LIST_STREAM (objs[i]));
         unlink (mq.final_files[i]);
       }
     }
+    fclose (ofs);
   }
 
   if (debug) {
@@ -515,13 +506,12 @@ write_locations (FILE *ofs, const char *loc_files[], unsigned int n_loc_files, G
 }
 
 static unsigned int
-write_index (const char *name, const char *loc_files[], unsigned int n_loc_files, GT4ListMakerQueue *mq, const char *files[], unsigned int n_files)
+write_index (FILE *ofs, const char *loc_files[], unsigned int n_loc_files, GT4ListMakerQueue *mq, const char *files[], unsigned int n_files)
 {
   unsigned int src_first_subseq[1024];
   unsigned int max_subseq = 0;
   unsigned int n_file_bits, n_subseq_bits, n_pos_bits, n_lpos_bits;
   unsigned int i;
-  FILE *ofs;
   unsigned long long pos = 0;
   unsigned int version;
   unsigned long long n_words_loc, n_words, n_locations_loc, n_locs, file_block_loc, file_block_pos, kmer_list_loc, kmer_list_pos, locations_loc, locations_pos;
@@ -559,7 +549,6 @@ write_index (const char *name, const char *loc_files[], unsigned int n_loc_files
   if (debug) {
     fprintf (stderr, "Bitsizes: file %u (%u) subseq %u (%u) pos %u (max %llu) lpos %u (max %u)\n", n_file_bits, n_files, n_subseq_bits, max_subseq + 1, n_pos_bits, max_pos, n_lpos_bits, max_lpos);
   }
-  ofs = fopen (name, "w");
 
   /* GT4I */
   write_entry (index_block, 4, 1, ofs, &pos);
@@ -617,7 +606,6 @@ write_index (const char *name, const char *loc_files[], unsigned int n_loc_files
   fseek (ofs, locations_loc, SEEK_SET);
   fwrite (&locations_pos, 8, 1, ofs);
 
-  fclose (ofs);
   return 0;
 }
 
@@ -1161,6 +1149,7 @@ print_help (int exitvalue)
   fprintf (stderr, "    -w, --wordlength NUMBER - specify index wordsize (1-32)\n");
   fprintf (stderr, "    -c, --cutoff NUMBER     - specify frequency cut-off (default %u)\n", DEFAULT_CUTOFF);
   fprintf (stderr, "    -o, --outputname STRING - specify output name (default \"out\")\n");
+  fprintf (stderr, "    --index                 - create index instead of list\n");
   fprintf (stderr, "    --num_threads           - number of threads (default %u)\n", DEFAULT_NUM_THREADS);
   fprintf (stderr, "    --max_tables            - maximum number of temporary tables (default %u)\n", DEFAULT_NUM_TABLES);
   fprintf (stderr, "    --table_size            - maximum size of the temporary table (default %llu)\n", DEFAULT_TABLE_SIZE);

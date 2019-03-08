@@ -221,7 +221,7 @@ unsigned int
 word_map_search_query (GT4WordMap *map, unsigned long long query, parameters *p, int printall, unsigned int equalmmonly, unsigned int dosubtraction, GT4WordMap *querymap)
 {
   static GT4WordTable mm_table = {0};
-  unsigned long long i, nwords = 0L;
+  unsigned long long i;
   unsigned int count = 0L, currentcount = 0L, querycount = 0L;
 
   /* if no mismatches */
