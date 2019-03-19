@@ -53,7 +53,7 @@ typedef struct _CallExtra CallExtra;
 static int align (AssemblyData *adata, const char *kmers[], unsigned int nkmers);
 static int group (AssemblyData *adata, unsigned int print);
 static int assemble (AssemblyData *adata, const char *kmers[], unsigned int nkmers, unsigned int print);
-static int assemble_recursive (KMerDB *db, SeqFile *files, KMerDB *gdb, SeqFile *g_files, unsigned int ref_chr, unsigned int ref_start, unsigned int ref_end, const char *ref, const char *kmers[], unsigned int nkmers);
+static int assemble_recursive (KMerDB *db, SeqFile *files, KMerDB *gdb, unsigned int ref_chr, unsigned int ref_start, unsigned int ref_end, const char *ref, const char *kmers[], unsigned int nkmers);
 unsigned int align_reads_to_reference (NSeq *ref_seq, GASMRead *reads[], unsigned int nreads, GASMRead *a_reads[], short a[][MAX_REFERENCE_LENGTH], SWCell *sw_matrix);
 unsigned int create_gapped_alignment (NSeq *ref_seq, unsigned int ref_start, GASMRead *a_reads[], unsigned int na, short a[][MAX_REFERENCE_LENGTH], unsigned int aligned_ref[], int ref_pos[], short _p[][MAX_REFERENCE_LENGTH * 2]);
 static unsigned int chr_from_text (const char *name);
@@ -125,7 +125,8 @@ struct _CallExtra {
 
 struct _Call {
   unsigned int pos;
-  unsigned short ref;
+  unsigned char sub;
+  unsigned char ref;
   unsigned short cov;
   unsigned short counts[GAP + 1];
   unsigned short nucl[2];
@@ -142,7 +143,6 @@ struct _AssemblyData {
   KMerDB *db;
   SeqFile *files;
   KMerDB *gdb;
-  SeqFile *g_files;
   /* Reference data */
   unsigned int chr;
   unsigned int start;
@@ -268,14 +268,13 @@ queue_free_call_block (GASMQueue *gq, CallBlock *cb)
 }
 
 static AssemblyData *
-assembly_data_new (KMerDB *db, SeqFile *files, KMerDB *gdb, SeqFile *g_files)
+assembly_data_new (KMerDB *db, SeqFile *files, KMerDB *gdb)
 {
   AssemblyData *adata = (AssemblyData *) malloc (sizeof (AssemblyData));
   memset (adata, 0, sizeof (AssemblyData));
   adata->db = db;
   adata->files = files;
   adata->gdb = gdb;
-  adata->g_files = g_files;
   adata->sw_matrix = (SWCell *) malloc ((MAX_REFERENCE_LENGTH + 1) * (MAX_READ_LENGTH + 1) * sizeof (SWCell));
   adata->alignment = (short (*)[MAX_REFERENCE_LENGTH * 2]) malloc (MAX_ALIGNED_READS * MAX_REFERENCE_LENGTH * 2 * 2);
   adata->coverage = (short *) malloc (MAX_REFERENCE_LENGTH * 2 * 2);
@@ -420,7 +419,7 @@ print_calls (GASMQueue *queue, unsigned int print_counts, unsigned int print_all
       min_start_p = cb->start;
     }
   }
-  fprintf (stderr, "Smallest processing: %u %u\n", min_chr_p, min_start_p);
+  /* fprintf (stderr, "Smallest processing: %u %u\n", min_chr_p, min_start_p); */
   while (queue->finished_blocks) {
     CallBlock *cb_f = NULL;
     unsigned int min_chr_f = 0xffffffff;
@@ -455,16 +454,18 @@ print_calls (GASMQueue *queue, unsigned int print_counts, unsigned int print_all
           best_p = ccb->calls[j].p;
         }
       }
-      for (j = 0; j < best_cb->n_calls; j++) {
-        if (best_cb->calls[j].pos == pos) {
-          if (best_p == 0) break;
-          if (!best_cb->calls[j].poly) break;
-          if (best_cb->calls[j].prev_ref == '!') break;
-          print_call (best_cb, j, print_counts, print_all);
-          fprintf (stdout, "\n");
-          break;
-        } else if (best_cb->calls[j].pos > pos) {
-          break;
+      if (best_p > 0.5f) {
+        /* Iterate over best call block & print all calls for this position */
+        for (j = 0; j < best_cb->n_calls; j++) {
+          if (best_cb->calls[j].pos == pos) {
+            if (best_p == 0) break;
+            if (!best_cb->calls[j].poly) continue;
+            if (best_cb->calls[j].prev_ref == '!') break;
+            print_call (best_cb, j, print_counts, print_all);
+            fprintf (stdout, "\n");
+          } else if (best_cb->calls[j].pos > pos) {
+            break;
+          }
         }
       }
       queue->last_chr = cb_f->chr;
@@ -636,7 +637,7 @@ main (int argc, const char *argv[])
   unsigned int only_pos = 0;
 
   KMerDB db, gdb;
-  SeqFile *files, *g_files;
+  SeqFile *files;
     
   for (i = 1; i < argc; i++) {
     if (!strcmp (argv[i], "-v") || !strcmp (argv[i], "--version")) {
@@ -803,10 +804,8 @@ main (int argc, const char *argv[])
   /* Set up file lists */
   fprintf (stderr, "Loading read sequences\n");
   files = map_sequences (&db, seq_dir);
-  fprintf (stderr, "Loading genome sequence\n");
-  g_files = map_sequences (&gdb, genome_dir);
-  if (!files || !g_files) {
-    fprintf (stderr, "Terminating\n");
+  if (!files) {
+    fprintf (stderr, "Cannot read sequences: terminating\n");
     exit (1);
   }
 
@@ -832,7 +831,7 @@ main (int argc, const char *argv[])
       queue.last_chr = 0;
       queue.last_pos = 0;
       for (i = 0; i < n_threads; i++) {
-        queue.adata[i] = assembly_data_new (&db, files, &gdb, g_files);
+        queue.adata[i] = assembly_data_new (&db, files, &gdb);
       }
       gt4_queue_create_threads (&queue.gt4_queue, process, NULL);
       process (&queue.gt4_queue, 0, NULL);
@@ -880,12 +879,12 @@ main (int argc, const char *argv[])
           for (i = 4; i < ntokenz; i++) {
             kmers[nkmers++] = strndup ((const char *) tokenz[i], lengths[i]);
           }
-          assemble_recursive (&db, files, &gdb, g_files, chr, start, end, ref, kmers, nkmers);
+          assemble_recursive (&db, files, &gdb, chr, start, end, ref, kmers, nkmers);
         }
       }
     }
   } else {
-    assemble_recursive (&db, files, &gdb, g_files, ref_chr, ref_start, ref_end, ref, kmers, nkmers);
+    assemble_recursive (&db, files, &gdb, ref_chr, ref_start, ref_end, ref, kmers, nkmers);
   }
 
   if (prefetch_db || prefetch_seq) {
@@ -896,9 +895,9 @@ main (int argc, const char *argv[])
 }
 
 static int
-assemble_recursive (KMerDB *db, SeqFile *files, KMerDB *gdb, SeqFile *g_files, unsigned int ref_chr, unsigned int ref_start, unsigned int ref_end, const char *ref, const char *kmers[], unsigned int nkmers)
+assemble_recursive (KMerDB *db, SeqFile *files, KMerDB *gdb, unsigned int ref_chr, unsigned int ref_start, unsigned int ref_end, const char *ref, const char *kmers[], unsigned int nkmers)
 {
-  AssemblyData *adata = assembly_data_new (db, files, gdb, g_files);
+  AssemblyData *adata = assembly_data_new (db, files, gdb);
   int result;
   unsigned int len;
   char *dup;
@@ -920,8 +919,8 @@ assemble_recursive (KMerDB *db, SeqFile *files, KMerDB *gdb, SeqFile *g_files, u
     unsigned int mid;
     mid = (ref_start + ref_end) / 2;
     result = 0;
-    result += assemble_recursive (db, files, gdb, g_files, ref_chr, ref_start, mid, ref, kmers, nkmers);
-    result += assemble_recursive (db, files, gdb, g_files, ref_chr, mid, ref_end, ref + (mid - ref_start), kmers, nkmers);
+    result += assemble_recursive (db, files, gdb, ref_chr, ref_start, mid, ref, kmers, nkmers);
+    result += assemble_recursive (db, files, gdb, ref_chr, mid, ref_end, ref + (mid - ref_start), kmers, nkmers);
   }
   assembly_data_clear (adata);
   free (adata->cblock);
@@ -1432,6 +1431,8 @@ group (AssemblyData *adata, unsigned int print)
   }
 
   /* Call */
+  unsigned int last_call_pos = 0;
+  unsigned int sub = 0;
   unsigned int call_alignment[1024];
   CallBlock *cb = adata->cblock;
   cb->n_calls = 0;
@@ -1442,6 +1443,14 @@ group (AssemblyData *adata, unsigned int print)
     memset (call, 0, sizeof (Call));
     call->pos = adata->ref_pos[i];
 
+    if (call->pos == last_call_pos) {
+      sub += 1;
+    } else {
+      sub = 0;
+    }
+    call->sub = sub;
+    last_call_pos = call->pos;
+    
     call->ref = adata->aligned_ref[i];
     if (call->ref == GAP) {
       /* Insertion, prev is reference nucleotide */
