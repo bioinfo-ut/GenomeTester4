@@ -16,12 +16,14 @@
 #include <utils.h>
 #include <version.h>
 
+#define OUTPUT_FULL_STATS
+
 unsigned int debug = 0;
 unsigned int debug_groups = 0;
 
 unsigned int max_regions = 1000000000;
 
-static float coverage = 20;
+static float coverage = 0;
 
 #define WORDLEN 25
 #define MAX_THREADS 256
@@ -45,6 +47,7 @@ typedef struct _SNV SNV;
 typedef struct _SWCell SWCell;
 typedef struct _AssemblyData AssemblyData;
 typedef struct _Call Call;
+typedef struct _CallExtra CallExtra;
 
 /* Returns number of aligned positions */
 static int align (AssemblyData *adata, const char *kmers[], unsigned int nkmers);
@@ -55,6 +58,7 @@ unsigned int align_reads_to_reference (NSeq *ref_seq, GASMRead *reads[], unsigne
 unsigned int create_gapped_alignment (NSeq *ref_seq, unsigned int ref_start, GASMRead *a_reads[], unsigned int na, short a[][MAX_REFERENCE_LENGTH], unsigned int aligned_ref[], int ref_pos[], short _p[][MAX_REFERENCE_LENGTH * 2]);
 static unsigned int chr_from_text (const char *name);
 static void test_alignment (const char *a, const char *b);
+static float find_coverage (GT4Index *index);
 
 struct _GASMRead {
   char *name;
@@ -101,14 +105,7 @@ struct _SWCell {
   int8_t top_gap_len;
 };
 
-struct _Call {
-  unsigned int pos;
-  unsigned short ref;
-  unsigned short cov;
-  unsigned short counts[GAP + 1];
-  unsigned short nucl[2];
-  unsigned short poly;
-  float p;
+struct _CallExtra {
   float prob;
   float rprob;
   float hzprob;
@@ -124,6 +121,18 @@ struct _Call {
   unsigned short compat_0;
   unsigned short compat_1;
   unsigned short compat_both;
+};
+
+struct _Call {
+  unsigned int pos;
+  unsigned short ref;
+  unsigned short cov;
+  unsigned short counts[GAP + 1];
+  unsigned short nucl[2];
+  unsigned short poly;
+  unsigned short prev_ref;
+  float p;
+  CallExtra extra;
 };
 
 typedef struct _CallBlock CallBlock;
@@ -170,7 +179,7 @@ struct _CallBlock {
   unsigned int start;
   unsigned int end;
   const char *ref;
-  unsigned int n_aligned;
+  unsigned int n_calls;
   /* Calls */
   Call calls[MAX_REFERENCE_LENGTH * 2];
 };
@@ -289,12 +298,21 @@ assembly_data_clear (AssemblyData *adata)
   adata->cblock = NULL;
 }
 
+static unsigned int print_counts = 0;
+static unsigned int print_all = 0;
+
 static void
 print_header (FILE *ofs) {
-  fprintf (ofs, "CHR\tPOS      \tREF\tKMERS\tCOVERAGE\tDISCARDED\tA\tC\tG\tT\tN\tGAP\tCALL\tCLASS\tPVALUE\tPROB\tRPROB\tPROB_HI\tPROB_LO\tEDIST\tGRP_ALL\tGRP\tDIV0\tDIV1\tG0\tG1\tG0_COMP\tG1_COMP\tCOMP_2");
+  fprintf (ofs, "CHR\tPOS\tREF\tCOVERAGE\tCALL\tCLASS\tP\tPREV");
+  if (print_counts) {
+    fprintf (ofs, "\tA\tC\tG\tT\tN\tGAP");
+  }
+  if (print_all) {
+    fprintf (ofs, "\tPROB\tRPROB\tPROB_HI\tPROB_LO\tEDIST\tGRP_ALL\tGRP\tDIV0\tDIV1\tG0\tG1\tG0_COMP\tG1_COMP\tCOMP_2");
+  }
 }
 
-#define KMER_COVERAGE (coverage * 0.8)
+#define KMER_COVERAGE coverage
 
 static double
 pmin (double a, double b) {
@@ -302,14 +320,14 @@ pmin (double a, double b) {
 }
 
 static double
-calc_p (Call *call)
+calc_p (Call *call, CallExtra *extra)
 {
   // linpred = -1.447 +0.6845*(CALLtype=="homoMUT")
   int homoMUT = ((call->nucl[0] == call->nucl[1]) && (call->nucl[0] != call->ref));
   double icept = -1.447;
   double term0 = 0.6845 * homoMUT;
   // +0.05935*G0_COMP +0.1621*COMP_2
-  double term1 = 0.05935 * call->compat_0 + 0.1621 * call->compat_both;
+  double term1 = 0.05935 * extra->compat_0 + 0.1621 * extra->compat_both;
   // -0.8501*(CLASS=="I") +0.4295*(CLASS=="S")
   double term2 = -0.8501 * (call->ref == GAP) + 0.4295 * ((call->nucl[1] != GAP) && call->poly);
   // +1.568*(COV>=4 & COV<0.75*k_mer_coverage)
@@ -328,103 +346,69 @@ calc_p (Call *call)
   int G1koht = call->counts[call->nucl[1]];
   double p2 = dbinom(G1koht, kokku, 0.5);
   double pvalue2 = pow (pmin (p2, 1 - p2), 2);
-  if (call->n_groups_total < 2) pvalue2 = 1;
+  if (extra->n_groups_total < 2) pvalue2 = 1;
   double term7 = 5.989 * pvalue2 - 4.546 * pvalue2 * pvalue2 - 3.002 * pvalue2 * pvalue2 * pvalue2;
   // +0.06952*G1_COMP +1.040*(G1_COMP > 0.75 * G0_COMP)
-  double term8 = 0.06952 * call->compat_1 + 1.040 * (call->compat_1 > (0.75 * call->compat_0));
+  double term8 = 0.06952 * extra->compat_1 + 1.040 * (extra->compat_1 > (0.75 * extra->compat_0));
   // -0.1063*(abs(kokku - k_mer_coverage)) +0.6887*pvalue_COV -1.619*pvalue_COV**2
   double term9 = -0.1063 * abs (kokku - KMER_COVERAGE) + 0.6887 * pvalue_COV - 1.619 * pvalue_COV * pvalue_COV;
   // +0.1251*EDIST -0.001694*EDIST**2
-  double term10 = 0.1251 * call->end_dist - 0.001694 * call->end_dist * call->end_dist;
+  double term10 = 0.1251 * extra->end_dist - 0.001694 * extra->end_dist * extra->end_dist;
   // +0.06204*G0_COMP*(CALLtype=="homoMUT")
-  double term11 = 0.06204 * call->compat_0 * homoMUT;
+  double term11 = 0.06204 * extra->compat_0 * homoMUT;
   // -0.02578*(CALLtype=="homoMUT")*COMP_2 -0.002912*G0_COMP*G1_COMP
-  double term12 = -0.02578 * homoMUT * call->compat_both;
-  double term13 = -0.002912 * call->compat_0 * call->compat_1;
+  double term12 = -0.02578 * homoMUT * extra->compat_both;
+  double term13 = -0.002912 * extra->compat_0 * extra->compat_1;
   // +0.06077*(CALLtype=="homoMUT")*(abs(kokku - k_mer_coverage))
   double term14 = 0.06077 * homoMUT * abs (kokku - KMER_COVERAGE);
   // +2.158*(CALLtype=="homoMUT")*pvalue_COV-0.001164*EDIST*(abs(kokku - k_mer_coverage))
   double term15 = 2.158 * homoMUT * pvalue_COV;
-  double term16 = -0.001164 * call->end_dist * abs (kokku - KMER_COVERAGE);
+  double term16 = -0.001164 * extra->end_dist * abs (kokku - KMER_COVERAGE);
   double linpred = icept + term0 + term1 + term2 + term3 + term4 + term5 + term6 + term7 + term8 + term9 + term10 + term11 + term12 + term13 + term14 + term15 + term16;
   return exp (linpred) / (1 + exp (linpred));
 }
 
 static void
-print_position (AssemblyData *adata, unsigned int n_aligned, unsigned int pos)
+print_call (CallBlock *cb, unsigned int pos, unsigned int print_counts, unsigned int print_all)
 {
-  CallBlock *cb = adata->cblock;
   Call *call = &cb->calls[pos];
-  if (!n_aligned) {
-    fprintf (stdout, "%s\t%u\t%c\t0\t0\t0\t0\t0\t0\tNC\n", chr_names[adata->chr], adata->start + pos, adata->ref[pos - adata->start]);
+  /* CHR POS REF COV */
+  fprintf (stdout, "%s\t%u\t%c\t%u", chr_names[cb->chr], call->pos, n2c[call->ref], call->cov);
+  /* CALL */
+  if (call->nucl[0] == NONE) {
+    fprintf (stdout, "\tNC");
   } else {
-    /* CHR POS REF COV */
-    fprintf (stdout, "%s\t%u\t%c\t%u", chr_names[adata->chr], call->pos, n2c[call->ref], call->cov);
+    fprintf (stdout, "\t%c%c", n2c[call->nucl[0]], n2c[call->nucl[1]]);
+  }
+  /* CLASS */
+  if (call->ref == GAP) {
+    fprintf (stdout, "\tI");
+  } else if (call->nucl[1] == GAP) {
+    fprintf (stdout, "\tD");
+  } else if (call->poly) {
+    fprintf (stdout, "\tS");
+  } else {
+    fprintf (stdout, "\t0");
+  }
+  /* PVALUE */
+  fprintf (stdout, "\t%.3f", call->p);
+  fprintf (stdout, "\t%c", call->prev_ref);
+  if (print_counts) {
     /* A C G T GAP */
     fprintf (stdout, "\t%u\t%u\t%u\t%u\t%u", call->counts[A], call->counts[C], call->counts[G], call->counts[T], call->counts[GAP]);
-    /* CALL */
-    if (call->nucl[0] == NONE) {
-      fprintf (stdout, "\tNC");
-    } else {
-      fprintf (stdout, "\t%c%c%c", n2c[call->nucl[0]], n2c[call->nucl[1]], (call->poly) ? '*' : ' ');
-    }
-    /* CLASS */
-    if (call->ref == GAP) {
-      fprintf (stdout, "\tI");
-    } else if (call->nucl[1] == GAP) {
-      fprintf (stdout, "\tD");
-    } else if (call->poly) {
-      fprintf (stdout, "\tS");
-    } else {
-      fprintf (stdout, "\t0");
-    }
-    /* PVALUE */
-    fprintf (stdout, "\t%g", calc_p (call));
-    fprintf (stdout, "\t%.5f\t%.5f\t%.5f\t%.5f\t%.5f", call->prob, call->rprob, call->hzprob, call->prob_higher, call->prob_lower);
-    fprintf (stdout, "\t%2u", call->end_dist);
-    fprintf (stdout, "\t%2u\t%2u\t%2u\t%2u", call->n_groups_total, call->n_groups, call->div_0, call->div_1);
-    fprintf (stdout, "\t%2u\t%2u\t%2u\t%2u\t%2u", call->max_cov_0, call->max_cov_1, call->compat_0, call->compat_1, call->compat_both);
   }
+#ifdef OUTPUT_FULL_STATS
+  if (print_all) {
+    fprintf (stdout, "\t%.5f\t%.5f\t%.5f\t%.5f\t%.5f", call->extra.prob, call->extra.rprob, call->extra.hzprob, call->extra.prob_higher, call->extra.prob_lower);
+    fprintf (stdout, "\t%2u", call->extra.end_dist);
+    fprintf (stdout, "\t%2u\t%2u\t%2u\t%2u", call->extra.n_groups_total, call->extra.n_groups, call->extra.div_0, call->extra.div_1);
+    fprintf (stdout, "\t%2u\t%2u\t%2u\t%2u\t%2u", call->extra.max_cov_0, call->extra.max_cov_1, call->extra.compat_0, call->extra.compat_1, call->extra.compat_both);
+  }
+#endif
 }
 
 static void
-print_call (CallBlock *cb, unsigned int pos)
-{
-  Call *call = &cb->calls[pos];
-  if (!cb->n_aligned) {
-    /* fprintf (stdout, "%s\t%u\t%c\t0\t0\t0\t0\t0\t0\tNC\n", chr_names[cb->chr], cb->start + pos, cb->ref[pos - cb->start]); */
-  } else {
-    /* CHR POS REF COV */
-    fprintf (stdout, "%s\t%u\t%c\t%u", chr_names[cb->chr], call->pos, n2c[call->ref], call->cov);
-    /* A C G T GAP */
-    fprintf (stdout, "\t%u\t%u\t%u\t%u\t%u", call->counts[A], call->counts[C], call->counts[G], call->counts[T], call->counts[GAP]);
-    /* CALL */
-    if (call->nucl[0] == NONE) {
-      fprintf (stdout, "\tNC");
-    } else {
-      fprintf (stdout, "\t%c%c%c", n2c[call->nucl[0]], n2c[call->nucl[1]], (call->poly) ? '*' : ' ');
-    }
-    /* CLASS */
-    if (call->ref == GAP) {
-      fprintf (stdout, "\tI");
-    } else if (call->nucl[1] == GAP) {
-      fprintf (stdout, "\tD");
-    } else if (call->poly) {
-      fprintf (stdout, "\tS");
-    } else {
-      fprintf (stdout, "\t0");
-    }
-    /* PVALUE */
-    fprintf (stdout, "\t%g", calc_p (call));
-    fprintf (stdout, "\t%.5f\t%.5f\t%.5f\t%.5f\t%.5f", call->prob, call->rprob, call->hzprob, call->prob_higher, call->prob_lower);
-    fprintf (stdout, "\t%2u", call->end_dist);
-    fprintf (stdout, "\t%2u\t%2u\t%2u\t%2u", call->n_groups_total, call->n_groups, call->div_0, call->div_1);
-    fprintf (stdout, "\t%2u\t%2u\t%2u\t%2u\t%2u", call->max_cov_0, call->max_cov_1, call->compat_0, call->compat_1, call->compat_both);
-  }
-}
-
-static void
-print_calls (GASMQueue *queue)
+print_calls (GASMQueue *queue, unsigned int print_counts, unsigned int print_all)
 {
   unsigned int min_chr_p = 0xffffffff;
   unsigned int min_start_p = 0xffffffff;
@@ -436,6 +420,7 @@ print_calls (GASMQueue *queue)
       min_start_p = cb->start;
     }
   }
+  fprintf (stderr, "Smallest processing: %u %u\n", min_chr_p, min_start_p);
   while (queue->finished_blocks) {
     CallBlock *cb_f = NULL;
     unsigned int min_chr_f = 0xffffffff;
@@ -452,29 +437,32 @@ print_calls (GASMQueue *queue)
     if (!cb_f) return;
     if (cb_f->chr > min_chr_p) return;
     if ((cb_f->chr == min_chr_p) && (cb_f->end > min_start_p)) return;
-    /* fprintf (stdout, "Printing Block %u %u-%u\n", cb_f->chr, cb_f->start, cb_f->end); */
-    for (i = 0; i < cb_f->n_aligned; i++) {
-      unsigned int pos = cb_f->calls[i].pos;
+    /* fprintf (stderr, "Printing Block %u %u-%u\n", cb_f->chr, cb_f->start, cb_f->end); */
+    for (i = cb_f->start; i < cb_f->end; i++) {
+      unsigned int pos = i;
       CallBlock *best_cb = cb_f;
-      float best_p = cb_f->calls[i].p;
+      float best_p = 0;
       CallBlock *ccb;
       unsigned int j;
       if ((cb_f->chr == queue->last_chr) && (pos <= queue->last_pos)) continue;
       for (ccb = queue->finished_blocks; ccb; ccb = ccb->next) {
         if (ccb->chr > cb_f->chr) continue;
         if (ccb->start > pos) continue;
-        for (j = 0; j < ccb->n_aligned; j++) {
+        for (j = 0; j < ccb->n_calls; j++) {
           if (ccb->calls[j].pos != pos) continue;
           if (ccb->calls[j].p < best_p) continue;
           best_cb = ccb;
           best_p = ccb->calls[j].p;
         }
       }
-      /* fprintf (stdout, "  global start %u %u, printing %u %u\n", queue->last_chr, queue->last_pos, best_cb->chr, pos); */
-      for (j = 0; j < best_cb->n_aligned; j++) {
+      for (j = 0; j < best_cb->n_calls; j++) {
         if (best_cb->calls[j].pos == pos) {
-          print_call (best_cb, j);
+          if (best_p == 0) break;
+          if (!best_cb->calls[j].poly) break;
+          if (best_cb->calls[j].prev_ref == '!') break;
+          print_call (best_cb, j, print_counts, print_all);
           fprintf (stdout, "\n");
+          break;
         } else if (best_cb->calls[j].pos > pos) {
           break;
         }
@@ -509,7 +497,6 @@ process (GT4Queue *queue, unsigned int idx, void *data)
         char *kmers[MAX_KMERS];
         unsigned int nkmers;
         unsigned int i;
-        int n_aligned;
         char chr[32];
         gasm_queue->nrunning += 1;
         if (lengths[0] > 31) lengths[0] = 31;
@@ -525,20 +512,11 @@ process (GT4Queue *queue, unsigned int idx, void *data)
         adata->ref = (const char *) tokenz[3];
         adata->cblock = queue_get_call_block (gasm_queue, adata->chr, adata->start, adata->end);
         /* Now the new block is allocated so it is safe to print all completed blocks */
-        print_calls (gasm_queue);
+        print_calls (gasm_queue, 0, 0);
         gt4_queue_unlock (queue);
-        n_aligned = assemble (adata, (const char **) kmers, nkmers, 0);
+        assemble (adata, (const char **) kmers, nkmers, 0);
         gt4_queue_lock (queue);
         queue_finish_call_block (gasm_queue, adata->cblock);
-#if 0
-        if (n_aligned > 0) {
-          for (i = 0; i < n_aligned; i++) {
-            print_position (adata, (unsigned int) n_aligned, i);
-            fprintf (stdout, "\n");
-          }
-        }
-        queue_free_call_block (gasm_queue, adata->cblock);
-#endif
         assembly_data_clear (adata);
         for (i = 0; i < nkmers; i++) free (kmers[i]);
         gasm_queue->nrunning -= 1;
@@ -584,6 +562,7 @@ const char *gdb_name = NULL;
 const char *snv_db_name = NULL;
 const char *fp_db_name = NULL;
 const char *seq_dir = NULL;
+const char *genome_dir = NULL;
 static unsigned int print_chains = 0;
 static unsigned int print_reads = 0, print_kmers = 0, analyze_kmers = 0;
 static unsigned int min_coverage = 8;
@@ -591,14 +570,14 @@ static unsigned int min_end_distance = 0;
 static unsigned int min_end_distance_homozygote = 10;
 static unsigned int min_confirming = 2;
 static unsigned int min_group_coverage = 0;
-static unsigned int max_divergent = 3;
+static unsigned int max_divergent = 4;
 static unsigned int min_align_len = 25;
 static unsigned int min_group_size = 2;
 static float min_group_rsize = 0.05f;
-static unsigned int max_group_divergence = 2;
-static unsigned int max_group_rdivergence = 2;
+static unsigned int max_group_divergence = 3;
+static unsigned int max_group_rdivergence = 3;
 static unsigned int max_uncovered = 10;
-static double min_hzp = 0.05f;
+static double min_hzp = 0.01f;
 static double min_p = 0.00001;
 static unsigned int prefetch_db = 1;
 static unsigned int prefetch_seq = 1;
@@ -619,6 +598,8 @@ print_usage (int exit_value)
   fprintf (stderr, "    -h, --help                  - print this usage screen and exit\n");
   fprintf (stderr, "    -dbb, -db FILENAME          - name of read index file\n");
   fprintf (stderr, "    -gdb FILENAME               - name of genome index file\n");
+  fprintf (stderr, "    --seq_dir DIRECTORY          - directory of fastq files (overrides index location)\n");
+  fprintf (stderr, "    --genome_dir DIRECTORY       - directory of genome files (overrides index location)\n");
   fprintf (stderr, "    --reference CHR START END SEQ - reference position and sequence\n");
   fprintf (stderr, "    --snvs FILENAME             - gmer_caller called SNVs\n");
   fprintf (stderr, "    --fp FILENAME               - List of known false positives\n");
@@ -774,6 +755,10 @@ main (int argc, const char *argv[])
       i += 1;
       if (i >= argc) exit (1);
       seq_dir = argv[i];
+    } else if (!strcmp (argv[i], "--genome_dir")) {
+      i += 1;
+      if (i >= argc) exit (1);
+      genome_dir = argv[i];
     } else if (!strcmp (argv[i], "-D")) {
       debug += 1;
     } else if (!strcmp (argv[i], "-DG")) {
@@ -793,14 +778,15 @@ main (int argc, const char *argv[])
     print_usage (1);
   }
 
+  /* Read databases */
+  load_db_or_die (&db, db_name, seq_dir, "reads");
+  load_db_or_die (&gdb, gdb_name, genome_dir, "genome");
+
+  if (coverage == 0) coverage = find_coverage (&db.index);
   /* Calculate Poisson */
   for (i = 0; i < 256; i++) {
     c_poisson[i] = (i > 0) ? c_poisson[i - 1] + poisson (i, coverage) : poisson (i, coverage);
   }
-
-  /* Read databases */
-  load_db_or_die (&db, db_name, seq_dir, "reads");
-  load_db_or_die (&gdb, gdb_name, NULL, "genome");
 
   if (snv_db_name) {
     fprintf (stderr, "Loading SNV database\n");
@@ -818,7 +804,7 @@ main (int argc, const char *argv[])
   fprintf (stderr, "Loading read sequences\n");
   files = map_sequences (&db, seq_dir);
   fprintf (stderr, "Loading genome sequence\n");
-  g_files = map_sequences (&gdb, NULL);
+  g_files = map_sequences (&gdb, genome_dir);
   if (!files || !g_files) {
     fprintf (stderr, "Terminating\n");
     exit (1);
@@ -828,12 +814,18 @@ main (int argc, const char *argv[])
     if (!only_pos) {
       GASMQueue queue;
       unsigned int i;
-      print_header (stdout);
       queue.cdata = gt4_mmap (input_name, &queue.csize);
       if (!queue.cdata) {
         fprintf (stderr, "Cannot mmap input file %s\n", input_name);
         exit (1);
       }
+      /* Print info */
+      fprintf (stdout, "#KATK version %u.%u.%u\n", VERSION_MAJOR, VERSION_MINOR, VERSION_MICRO);
+      fprintf (stdout, "#KMer Database %s\n", db_name);
+      fprintf (stdout, "#Genome Database %s\n", gdb_name);
+      fprintf (stdout, "#Coverage %.2f\n", coverage);
+      print_header (stdout);
+      fprintf (stdout, "\n");
       queue_setup (&queue, n_threads);
       queue.cpos = 0;
       queue.line = 0;
@@ -848,12 +840,11 @@ main (int argc, const char *argv[])
       while (queue.gt4_queue.nthreads_running > 1) {
         gt4_queue_wait (&queue.gt4_queue);
       }
-      print_calls (&queue);
+      print_calls (&queue, 0, 0);
       gt4_queue_unlock (&queue.gt4_queue);
     } else {
       const unsigned char *cdata;
       unsigned long long csize, cpos;
-      unsigned int seen = 0;
       cdata = gt4_mmap (input_name, &csize);
       if (!cdata) {
         fprintf (stderr, "Cannot mmap input file %s\n", input_name);
@@ -890,7 +881,6 @@ main (int argc, const char *argv[])
             kmers[nkmers++] = strndup ((const char *) tokenz[i], lengths[i]);
           }
           assemble_recursive (&db, files, &gdb, g_files, chr, start, end, ref, kmers, nkmers);
-          seen = 1;
         }
       }
     }
@@ -1054,7 +1044,6 @@ align (AssemblyData *adata, const char *kmers[], unsigned int nkmers)
   if (debug == 1) fprintf (stderr, "\n");
   /* Generate gapped alignment */
   adata->p_len = create_gapped_alignment (adata->ref_seq, adata->start, adata->aligned_reads, adata->na, alignment, adata->aligned_ref, adata->ref_pos, adata->alignment);
-  adata->cblock->n_aligned = adata->p_len;
   /* Calculate totals */
   memset (adata->coverage, 0, adata->p_len * 2);
   memset (adata->nucl_counts, 0, adata->p_len * (GAP + 1) * 2);
@@ -1443,30 +1432,45 @@ group (AssemblyData *adata, unsigned int print)
   }
 
   /* Call */
+  unsigned int call_alignment[1024];
   CallBlock *cb = adata->cblock;
+  cb->n_calls = 0;
   for (i = 0; i < adata->p_len; i++) {
-    Call *call = &cb->calls[i];
+    Call *call = &cb->calls[cb->n_calls];
+    CallExtra extra;
+
     memset (call, 0, sizeof (Call));
     call->pos = adata->ref_pos[i];
+
     call->ref = adata->aligned_ref[i];
+    if (call->ref == GAP) {
+      /* Insertion, prev is reference nucleotide */
+      call->prev_ref = adata->ref[call->pos - adata->start];
+    } else {
+      if (call->pos > adata->start) {
+        call->prev_ref = adata->ref[call->pos - adata->start - 1];
+      } else {
+        call->prev_ref = '!';
+      }
+    }
     call->cov = adata->coverage[i];
     for (j = A; j <= GAP; j++) {
       call->counts[j] = adata->nucl_counts[i][j];
     }
     call->nucl[0] = call->nucl[1] = NONE;
-    call->n_groups_total = n_groups;
-    call->n_groups = n_included;
-    call->div_0 = div_0;
-    call->div_1 = div_1;
-    call->max_cov_0 = max_cov_0;
-    call->max_cov_1 = max_cov_1;
-    call->compat_0 = compat_0;
-    call->compat_1 = compat_1;
-    call->prob_higher = prob_higher;
-    call->prob_lower = prob_lower;
-    call->compat_both = compat_both;
 
-    call->end_dist = (i < (adata->p_len - 1 - i)) ? i : adata->p_len - 1 - i;
+    extra.n_groups_total = n_groups;
+    extra.n_groups = n_included;
+    extra.div_0 = div_0;
+    extra.div_1 = div_1;
+    extra.max_cov_0 = max_cov_0;
+    extra.max_cov_1 = max_cov_1;
+    extra.compat_0 = compat_0;
+    extra.compat_1 = compat_1;
+    extra.prob_higher = prob_higher;
+    extra.prob_lower = prob_lower;
+    extra.compat_both = compat_both;
+    extra.end_dist = (i < (adata->p_len - 1 - i)) ? i : adata->p_len - 1 - i;
 #if 0
     /* NC if too close to end */
     if ((i < min_end_distance) || (i > (adata->p_len - 1 - min_end_distance))) continue;
@@ -1482,11 +1486,8 @@ group (AssemblyData *adata, unsigned int print)
     if ((fp < n_fps) && (fps[fp].chr == adata->chr) && (fps[fp].pos == (adata->start + i))) continue;
 
     for (n = A; n <= GAP; n++) if (adata->nucl_counts[i][n] > best) best = adata->nucl_counts[i][n];
-#if 0
     /* NC if too small coverage of most numerous allele */
     if (best < min_confirming) continue;
-#endif
-
     unsigned int n1, n2, best_n1 = A, best_n2 = A;
     float best_prob = 0;
     float sum_probs = 0;
@@ -1519,7 +1520,7 @@ group (AssemblyData *adata, unsigned int print)
       if (p < min_hzp) {
         call->nucl[0] = call->nucl[1] = NONE;
         call->poly = 0;
-        call->hzprob = p;
+        extra.hzprob = p;
         continue;
       }
     } else {
@@ -1540,11 +1541,17 @@ group (AssemblyData *adata, unsigned int print)
     call->nucl[0] = best_n1;
     call->nucl[1] = best_n2;
     call->poly = ((best_n1 != adata->aligned_ref[i]) || (best_n2 != adata->aligned_ref[i]));
-    call->prob = best_prob;
-    call->rprob = best_prob / sum_probs;
-    call->hzprob = p;
-    call->p = calc_p (call);
+
+    extra.prob = best_prob;
+    extra.rprob = best_prob / sum_probs;
+    extra.hzprob = p;
+
+    call->p = calc_p (call, &extra);
+    call->extra = extra;
+    call_alignment[cb->n_calls] = i;
+    cb->n_calls += 1;
   }
+  /*cb->n_calls = adata->p_len;*/
 
   /* Output alignment */
   if (print) {
@@ -1560,15 +1567,16 @@ group (AssemblyData *adata, unsigned int print)
       }
     }
     fprintf (stdout, "\n");
-    for (i = 0; i < adata->p_len; i++) {
-      print_position (adata, adata->p_len, i);
+    for (i = 0; i < cb->n_calls; i++) {
+      print_call (cb, i, 1, 0);
       if (debug_groups) {
         /* Aligned reads */
-        fprintf (stdout, "\t%c", n2c[adata->aligned_ref[i]]);
+        unsigned int a_i = call_alignment[i];
+        fprintf (stdout, "\t%c", n2c[adata->aligned_ref[a_i]]);
         for (j = 0; j < n_groups; j++) {
-          fprintf (stdout, "  [%c%c] ", n2c[groups[j].consensus[i]], (groups[j].consensus[i] == adata->aligned_ref[i]) ? ' ' : '*');
+          fprintf (stdout, "  [%c%c] ", n2c[groups[j].consensus[a_i]], (groups[j].consensus[a_i] == adata->aligned_ref[a_i]) ? ' ' : '*');
           for (k = 0; k < adata->na; k++) {
-            if (adata->aligned_reads[k]->group == j) fprintf (stdout, "%c", n2c[adata->alignment[k][i]]);
+            if (adata->aligned_reads[k]->group == j) fprintf (stdout, "%c", n2c[adata->alignment[k][a_i]]);
           }
         }
       }
@@ -2491,6 +2499,62 @@ print_db_reads (GT4Index *index, SeqFile *files, unsigned long long kmer_idx, un
     fprintf (ofs, "%s", c);
     fprintf (ofs, "\n");
   }
+}
+
+static float
+find_coverage (GT4Index *index)
+{
+  /* Find coverage */
+  unsigned int MEDIAN_KMERS = 10000;
+  unsigned int *counts = (unsigned int *) malloc (MEDIAN_KMERS * 4);
+  unsigned int max = 0;
+  unsigned int min = 0xffffffff;
+  unsigned int i, ci = 0;
+  while(ci < MEDIAN_KMERS) {
+    unsigned int kmer_idx = rand () % index->n_kmers;
+    gt4_index_get_kmer_info (index, kmer_idx, &counts[ci]);
+    if (!counts[ci]) continue;
+    if (counts[ci] < min) min = counts[ci];
+    if (counts[ci] > max) max = counts[ci];
+    ci += 1;
+  }
+  if (debug) fprintf (stderr, "Sample min %u max %u\n", min, max);
+  unsigned int med = (min + max) / 2;
+  while (max > min) {
+    unsigned int above = 0, below = 0, equal;
+    med = (min + max) / 2;
+    for (i = 0; i < MEDIAN_KMERS; i++) {
+      if (counts[i] < med) below += 1;
+      if (counts[i] > med) above += 1;
+    }
+    equal = MEDIAN_KMERS - above - below;
+    if (max == (min + 1)) {
+      if (above > (below + equal)) {
+        /* Max is true median */
+        med = max;
+      }
+      break;
+    }
+    if (above > below) {
+      if ((above - below) < equal) break;
+      min = med;
+    } else if (below > above) {
+      if ((below - above) < equal) break;
+      max = med;
+    } else {
+      break;
+    }
+  }
+  if (debug) fprintf (stderr, "Sample median %u\n", med);
+  if (debug > 1) {
+    int bins[100] = { 0 };
+    for (i = 0; i < MEDIAN_KMERS; i++) {
+      bins[(counts[i] < 100) ? counts[i] : 99] += 1;
+    }
+    for (i = 0; i < 2 * med; i++) fprintf (stderr, "%u\t%u\n", i, bins[i]);
+  }
+  free (counts);
+  return med;
 }
 
 static unsigned int
