@@ -23,6 +23,12 @@ unsigned int debug_groups = 0;
 
 unsigned int max_regions = 1000000000;
 
+/*
+ * <0 - dynamic
+ *  0  - median
+ * >0  - value
+ */
+
 static float coverage = 0;
 
 #define WORDLEN 25
@@ -109,8 +115,6 @@ struct _CallExtra {
   float prob;
   float rprob;
   float hzprob;
-  float prob_higher;
-  float prob_lower;
   unsigned short end_dist;
   unsigned short n_groups_total;
   unsigned short n_groups;
@@ -307,11 +311,9 @@ print_header (FILE *ofs) {
     fprintf (ofs, "\tA\tC\tG\tT\tN\tGAP");
   }
   if (print_all) {
-    fprintf (ofs, "\tPROB\tRPROB\tPROB_HI\tPROB_LO\tEDIST\tGRP_ALL\tGRP\tDIV0\tDIV1\tG0\tG1\tG0_COMP\tG1_COMP\tCOMP_2");
+    fprintf (ofs, "\tPROB\tRPROB\tEDIST\tGRP_ALL\tGRP\tDIV0\tDIV1\tG0\tG1\tG0_COMP\tG1_COMP\tCOMP_2");
   }
 }
-
-#define KMER_COVERAGE coverage
 
 static double
 pmin (double a, double b) {
@@ -319,7 +321,7 @@ pmin (double a, double b) {
 }
 
 static double
-calc_p (Call *call, CallExtra *extra)
+calc_p (Call *call, CallExtra *extra, unsigned int KMER_COVERAGE)
 {
   // linpred = -1.447 +0.6845*(CALLtype=="homoMUT")
   int homoMUT = ((call->nucl[0] == call->nucl[1]) && (call->nucl[0] != call->ref));
@@ -398,7 +400,7 @@ print_call (CallBlock *cb, unsigned int pos, unsigned int print_counts, unsigned
   }
 #ifdef OUTPUT_FULL_STATS
   if (print_all) {
-    fprintf (stdout, "\t%.5f\t%.5f\t%.5f\t%.5f\t%.5f", call->extra.prob, call->extra.rprob, call->extra.hzprob, call->extra.prob_higher, call->extra.prob_lower);
+    fprintf (stdout, "\t%.5f\t%.5f\t%.5f", call->extra.prob, call->extra.rprob, call->extra.hzprob);
     fprintf (stdout, "\t%2u", call->extra.end_dist);
     fprintf (stdout, "\t%2u\t%2u\t%2u\t%2u", call->extra.n_groups_total, call->extra.n_groups, call->extra.div_0, call->extra.div_1);
     fprintf (stdout, "\t%2u\t%2u\t%2u\t%2u\t%2u", call->extra.max_cov_0, call->extra.max_cov_1, call->extra.compat_0, call->extra.compat_1, call->extra.compat_both);
@@ -566,7 +568,7 @@ const char *seq_dir = NULL;
 const char *genome_dir = NULL;
 static unsigned int print_chains = 0;
 static unsigned int print_reads = 0, print_kmers = 0, analyze_kmers = 0;
-static unsigned int min_coverage = 8;
+static unsigned int min_coverage = 6;
 static unsigned int min_end_distance = 0;
 static unsigned int min_end_distance_homozygote = 10;
 static unsigned int min_confirming = 2;
@@ -586,8 +588,6 @@ SNV *snvs = NULL;
 SNV *fps = NULL;
 unsigned int n_snvs = 0;
 unsigned int n_fps = 0;
-
-static double c_poisson[256];
 
 static void
 print_usage (int exit_value)
@@ -617,7 +617,7 @@ print_usage (int exit_value)
   fprintf (stderr, "    --max_group_divergence INTEGER - maximum divergence in group (default %u)\n", max_group_divergence);
   fprintf (stderr, "    --max_group_rdivergence INTEGER - maximum relative divergence in group (default %u)\n", max_group_rdivergence);
   fprintf (stderr, "    --max_uncovered INTEGER     - maximum length of sequence end not covered by group (default %u)\n", max_uncovered);
-  fprintf (stderr, "    --coverage REAL             - average sequencing depth (default %.1f)\n", coverage);
+  fprintf (stderr, "    --coverage REAL | local     - average sequencing depth (default %.1f, local - use local number of reads)\n", coverage);
   fprintf (stderr, "    --min_hzp REAL              - minimum binomial probability fro calling heterozygote (default %g)\n", min_hzp);
   fprintf (stderr, "    -D                          - increase debug level\n");
   exit (exit_value);
@@ -731,7 +731,11 @@ main (int argc, const char *argv[])
     } else if (!strcmp (argv[i], "--coverage")) {
       i += 1;
       if (i >= argc) exit (1);
-      coverage = (float) atof (argv[i]);
+      if (!strcmp (argv[i], "local")) {
+        coverage = -1;
+      } else {
+        coverage = (float) atof (argv[i]);
+      }
     } else if (!strcmp (argv[i], "--min_hzp")) {
       i += 1;
       if (i >= argc) exit (1);
@@ -784,10 +788,6 @@ main (int argc, const char *argv[])
   load_db_or_die (&gdb, gdb_name, genome_dir, "genome");
 
   if (coverage == 0) coverage = find_coverage (&db.index);
-  /* Calculate Poisson */
-  for (i = 0; i < 256; i++) {
-    c_poisson[i] = (i > 0) ? c_poisson[i - 1] + poisson (i, coverage) : poisson (i, coverage);
-  }
 
   if (snv_db_name) {
     fprintf (stderr, "Loading SNV database\n");
@@ -819,10 +819,14 @@ main (int argc, const char *argv[])
         exit (1);
       }
       /* Print info */
-      fprintf (stdout, "#KATK version %u.%u.%u\n", VERSION_MAJOR, VERSION_MINOR, VERSION_MICRO);
-      fprintf (stdout, "#KMer Database %s\n", db_name);
-      fprintf (stdout, "#Genome Database %s\n", gdb_name);
-      fprintf (stdout, "#Coverage %.2f\n", coverage);
+      fprintf (stdout, "#KATK version: %u.%u.%u\n", VERSION_MAJOR, VERSION_MINOR, VERSION_MICRO);
+      fprintf (stdout, "#KMer Database: %s\n", db_name);
+      fprintf (stdout, "#Genome Database: %s\n", gdb_name);
+      if (coverage >= 0) {
+        fprintf (stdout, "#Coverage: %.2f\n", coverage);
+      } else {
+        fprintf (stdout, "#Coverage: local\n");
+      }
       print_header (stdout);
       fprintf (stdout, "\n");
       queue_setup (&queue, n_threads);
@@ -1371,18 +1375,14 @@ group (AssemblyData *adata, unsigned int print)
   unsigned int max_cov_0 = groups[good_groups[0]].max_cov;
   unsigned int div_0 = groups[good_groups[0]].divergent;
   unsigned int compat_0 = groups[good_groups[0]].compat;
-  float prob_higher = 1 - c_poisson[max_cov_0];
   unsigned int max_cov_1 = 0;
   unsigned int div_1 = 0;
   unsigned int compat_1 = 0;
-  float prob_lower = 1;
   unsigned int compat_both = 0;
   if (n_included > 1) {
     max_cov_1 = groups[good_groups[1]].max_cov;
     div_1 = groups[good_groups[1]].divergent;
     compat_1 = groups[good_groups[1]].compat;
-    prob_lower = c_poisson[max_cov_0 + max_cov_1];
-    if (debug_groups > 0) fprintf (stderr, "Cumulative probabilities: higher %g (%u), lower %g (%u) ", prob_higher, max_cov_0, prob_lower, max_cov_0 + max_cov_1);
     /* Calculate compatible common */
     for (j = 0; j < adata->na; j++) {
       unsigned long long common = groups[good_groups[0]].mask & adata->aligned_reads[j]->mask;
@@ -1411,6 +1411,7 @@ group (AssemblyData *adata, unsigned int print)
   }
 
   /* Recalculate totals */
+  unsigned int max_coverage = 0;
   memset (adata->coverage, 0, adata->p_len * 2);
   memset (adata->nucl_counts, 0, adata->p_len * (GAP + 1) * 2);
   for (i = 0; i < adata->p_len; i++) {
@@ -1428,6 +1429,7 @@ group (AssemblyData *adata, unsigned int print)
         adata->coverage[i] += 1;
       }
     }
+    if (adata->coverage[i] > max_coverage) max_coverage = adata->coverage[i];
   }
 
   /* Call */
@@ -1439,6 +1441,9 @@ group (AssemblyData *adata, unsigned int print)
   for (i = 0; i < adata->p_len; i++) {
     Call *call = &cb->calls[cb->n_calls];
     CallExtra extra;
+
+    /* NC if too small coverage */
+    if (adata->coverage[i] < min_coverage) continue;
 
     memset (call, 0, sizeof (Call));
     call->pos = adata->ref_pos[i];
@@ -1476,15 +1481,11 @@ group (AssemblyData *adata, unsigned int print)
     extra.max_cov_1 = max_cov_1;
     extra.compat_0 = compat_0;
     extra.compat_1 = compat_1;
-    extra.prob_higher = prob_higher;
-    extra.prob_lower = prob_lower;
     extra.compat_both = compat_both;
     extra.end_dist = (i < (adata->p_len - 1 - i)) ? i : adata->p_len - 1 - i;
 #if 0
     /* NC if too close to end */
     if ((i < min_end_distance) || (i > (adata->p_len - 1 - min_end_distance))) continue;
-    /* NC if too small coverage */
-    if (adata->coverage[i] < min_coverage) continue;
 #endif
 
     unsigned int best = 0, n;
@@ -1555,7 +1556,7 @@ group (AssemblyData *adata, unsigned int print)
     extra.rprob = best_prob / sum_probs;
     extra.hzprob = p;
 
-    call->p = calc_p (call, &extra);
+    call->p = calc_p (call, &extra, (coverage >= 0) ? coverage : max_coverage);
     call->extra = extra;
     call_alignment[cb->n_calls] = i;
     cb->n_calls += 1;

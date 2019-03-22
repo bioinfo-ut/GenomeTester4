@@ -89,7 +89,7 @@ trie_foreach (Trie *trie, int (*callback) (Trie *trie, unsigned long long word, 
   unsigned int cbits = trie->nbits - trie->nbits_root;
   unsigned int i;
   for (i = 0; i < (1U << trie->nbits_root); i++) {
-    unsigned int result = trie_node_foreach (trie, trie->roots[i], cbits, &idx, callback, data);
+    if(trie_node_foreach (trie, trie->roots[i], cbits, &idx, callback, data)) return 1;
   }
   return 0;
 }
