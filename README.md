@@ -9,15 +9,15 @@ Change into subdirectory 'src' and type:
 make clean
 make
 ```
-# FastGT 
+# FastGT
 An alignment-free genotype caller.  
 Copyright (C) University of Tartu 2015-2017  
-Please cite: Pajuste F-D, Kalpinski L, Möls M, Puurand T, Lepamets M, Remm M. (2017). FastGT: an alignment-free method for calling common SNVs directly from raw sequencing reads. Scientific Reports, 7:2537  
+Please cite: Pajuste F-D, Kaplinski L, Möls M, Puurand T, Lepamets M, Remm M. (2017). FastGT: an alignment-free method for calling common SNVs directly from raw sequencing reads. Scientific Reports, 7:2537  
 
 FastGT is implemented as a sub-project of GenomeTester4, sharing some source files.  
 Source files are inside the GenomeTester4 distribution.  
 FastGT has two binaries - gmer_counter and gmer_caller.  
-  
+
 Building FastGT binaries:  
 Change into subdirectory 'src\' and type:  
 ```
