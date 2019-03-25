@@ -22,6 +22,8 @@ unsigned int debug = 0;
 unsigned int debug_groups = 0;
 
 unsigned int max_regions = 1000000000;
+unsigned int n_threads = 4;
+static double min_p = 0.5;
 
 /*
  * <0 - dynamic
@@ -456,7 +458,7 @@ print_calls (GASMQueue *queue, unsigned int print_counts, unsigned int print_all
           best_p = ccb->calls[j].p;
         }
       }
-      if (best_p > 0.5f) {
+      if (best_p >= min_p) {
         /* Iterate over best call block & print all calls for this position */
         for (j = 0; j < best_cb->n_calls; j++) {
           if (best_cb->calls[j].pos == pos) {
@@ -560,19 +562,24 @@ unsigned int smith_waterman_seq (unsigned int a_pos[], unsigned int b_pos[], con
 static void print_alignment (FILE *ofs, unsigned int a_pos[], unsigned int b_pos[], unsigned int len, NSeq *a, NSeq *b);
 
 
+/* Basic parameters */
 const char *db_name = NULL;
 const char *gdb_name = NULL;
 const char *snv_db_name = NULL;
 const char *fp_db_name = NULL;
 const char *seq_dir = NULL;
-const char *genome_dir = NULL;
-static unsigned int print_chains = 0;
-static unsigned int print_reads = 0, print_kmers = 0, analyze_kmers = 0;
+static unsigned int print_reads = 0;
 static unsigned int min_coverage = 6;
+static unsigned int prefetch_db = 1;
+static unsigned int prefetch_seq = 1;
+/* Advanced parameters */
+SNV *snvs = NULL;
+SNV *fps = NULL;
+unsigned int n_snvs = 0;
+unsigned int n_fps = 0;
 static unsigned int min_end_distance = 0;
-static unsigned int min_end_distance_homozygote = 10;
 static unsigned int min_confirming = 2;
-static unsigned int min_group_coverage = 0;
+static unsigned int min_group_coverage = 1;
 static unsigned int max_divergent = 4;
 static unsigned int min_align_len = 25;
 static unsigned int min_group_size = 2;
@@ -580,46 +587,42 @@ static float min_group_rsize = 0.05f;
 static unsigned int max_group_divergence = 3;
 static unsigned int max_group_rdivergence = 3;
 static unsigned int max_uncovered = 10;
-static double min_hzp = 0.01f;
-static double min_p = 0.00001;
-static unsigned int prefetch_db = 1;
-static unsigned int prefetch_seq = 1;
-SNV *snvs = NULL;
-SNV *fps = NULL;
-unsigned int n_snvs = 0;
-unsigned int n_fps = 0;
 
 static void
-print_usage (int exit_value)
+print_usage (FILE *ofs, unsigned int advanced, int exit_value)
 {
-  fprintf (stderr, "gassembler version %u.%u.%u (%s)\n", VERSION_MAJOR, VERSION_MINOR, VERSION_MICRO, VERSION_QUALIFIER);
-  fprintf (stderr, "Usage: gassembler [OPTIONS] [KMERS...]\n");
-  fprintf (stderr, "Options:\n");
-  fprintf (stderr, "    -v, --version               - print version information and exit\n");
-  fprintf (stderr, "    -h, --help                  - print this usage screen and exit\n");
-  fprintf (stderr, "    -dbb, -db FILENAME          - name of read index file\n");
-  fprintf (stderr, "    -gdb FILENAME               - name of genome index file\n");
-  fprintf (stderr, "    --seq_dir DIRECTORY          - directory of fastq files (overrides index location)\n");
-  fprintf (stderr, "    --genome_dir DIRECTORY       - directory of genome files (overrides index location)\n");
-  fprintf (stderr, "    --reference CHR START END SEQ - reference position and sequence\n");
-  fprintf (stderr, "    --snvs FILENAME             - gmer_caller called SNVs\n");
-  fprintf (stderr, "    --fp FILENAME               - List of known false positives\n");
-  fprintf (stderr, "    --file FILENAME             - read reference and kmers from file (one line at time)\n");
-  fprintf (stderr, "    --min_coverage INTEGER      - minimum coverage for a call (default %u)\n", min_coverage);
-  fprintf (stderr, "    --min_end_distance INTEGER  - minimum distance from segment end to (default %u)\n", min_end_distance);
-  fprintf (stderr, "    --min_end_distance_homozygote INTEGER - minimum distance from segment end to call homozygote (default %u)\n", min_end_distance_homozygote);
-  fprintf (stderr, "    --min_confirming INTEGER    - minimum confirming nucleotide count for a call (default %u)\n", min_confirming);
-  fprintf (stderr, "    --min_group_coverage INTEGER - minimum coverage of group (default %u)\n", min_group_coverage);
-  fprintf (stderr, "    --max_divergent INTEGER     - maximum number of mismatches per read (default %u)\n", max_divergent);
-  fprintf (stderr, "    --min_align_len INTEGER     - minimum alignment length (default %u)\n", min_align_len);
-  fprintf (stderr, "    --min_group_size INTEGER    - minimum group size (default %u)\n", min_group_size);
-  fprintf (stderr, "    --min_group_rsize FLOAT     - minimum relative group size (default %.2f)\n", min_group_rsize);
-  fprintf (stderr, "    --max_group_divergence INTEGER - maximum divergence in group (default %u)\n", max_group_divergence);
-  fprintf (stderr, "    --max_group_rdivergence INTEGER - maximum relative divergence in group (default %u)\n", max_group_rdivergence);
-  fprintf (stderr, "    --max_uncovered INTEGER     - maximum length of sequence end not covered by group (default %u)\n", max_uncovered);
-  fprintf (stderr, "    --coverage REAL | local     - average sequencing depth (default %.1f, local - use local number of reads)\n", coverage);
-  fprintf (stderr, "    --min_hzp REAL              - minimum binomial probability fro calling heterozygote (default %g)\n", min_hzp);
-  fprintf (stderr, "    -D                          - increase debug level\n");
+  fprintf (ofs, "gassembler version %u.%u.%u (%s)\n", VERSION_MAJOR, VERSION_MINOR, VERSION_MICRO, VERSION_QUALIFIER);
+  fprintf (ofs, "Usage: gassembler [OPTIONS] [KMERS...]\n");
+  fprintf (ofs, "Options:\n");
+  fprintf (ofs, "    -v, --version               - print version information and exit\n");
+  fprintf (ofs, "    -h, --help                  - print this usage screen and exit\n");
+  fprintf (ofs, "    -dbb, -db FILENAME          - name of read index file\n");
+  fprintf (ofs, "    -gdb FILENAME               - name of genome index file\n");
+  fprintf (ofs, "    --seq_dir DIRECTORY          - directory of fastq files (overrides index location)\n");
+  fprintf (ofs, "    --reference CHR START END SEQ - reference position and sequence\n");
+  fprintf (ofs, "    --file FILENAME             - read reference and kmers from file (one line at time)\n");
+  fprintf (ofs, "    --min_coverage INTEGER      - minimum coverage for a call (default %u)\n", min_coverage);
+  fprintf (ofs, "    --coverage FLOAT | local    - average sequencing depth (default - median, local - use local number of reads)\n");
+  fprintf (ofs, "    --num_threads               - number of threads to use (default %u)\n", n_threads);
+  fprintf (ofs, "    --advanced                  - print advanced usage options\n");
+  if (advanced) {
+    fprintf (ofs, "Advanced options:\n");
+    fprintf (ofs, "    --snvs FILENAME             - gmer_caller called SNVs\n");
+    fprintf (ofs, "    --fp FILENAME               - List of known false positives\n");
+    fprintf (ofs, "    --min_end_distance INTEGER  - minimum distance from segment end to call (default %u)\n", min_end_distance);
+    fprintf (ofs, "    --min_confirming INTEGER    - minimum confirming nucleotide count for a call (default %u)\n", min_confirming);
+    fprintf (ofs, "    --min_group_coverage INTEGER - minimum coverage of group (default %u)\n", min_group_coverage);
+    fprintf (ofs, "    --max_divergent INTEGER     - maximum number of mismatches per read (default %u)\n", max_divergent);
+    fprintf (ofs, "    --min_align_len INTEGER     - minimum alignment length (default %u)\n", min_align_len);
+    fprintf (ofs, "    --min_group_size INTEGER    - minimum group size (default %u)\n", min_group_size);
+    fprintf (ofs, "    --min_group_rsize FLOAT     - minimum relative group size (default %.2f)\n", min_group_rsize);
+    fprintf (ofs, "    --max_group_divergence INTEGER - maximum divergence in group (default %u)\n", max_group_divergence);
+    fprintf (ofs, "    --max_group_rdivergence INTEGER - maximum relative divergence in group (default %u)\n", max_group_rdivergence);
+    fprintf (ofs, "    --max_uncovered INTEGER     - maximum length of sequence end not covered by group (default %u)\n", max_uncovered);
+    fprintf (ofs, "    --min_p FLOAT               - minimum call quality (default %.2f)\n", min_p);
+    fprintf (ofs, "    -D                          - increase debug level\n");
+    fprintf (ofs, "    -DG                         - increase group debug level\n");
+  }
   exit (exit_value);
 }
 
@@ -633,7 +636,6 @@ main (int argc, const char *argv[])
   unsigned int ref_chr = CHR_NONE;
   unsigned int ref_start = 0, ref_end = 0;
   const char *ref = NULL;
-  unsigned int n_threads = 1;
   unsigned int only_pos = 0;
 
   KMerDB db, gdb;
@@ -643,127 +645,111 @@ main (int argc, const char *argv[])
     if (!strcmp (argv[i], "-v") || !strcmp (argv[i], "--version")) {
       fprintf (stdout, "gassembler version %u.%u.%u (%s)\n", VERSION_MAJOR, VERSION_MINOR, VERSION_MICRO, VERSION_QUALIFIER);
     } else if (!strcmp (argv[i], "-h") || !strcmp (argv[i], "--help")) {
-      print_usage (0);
+      print_usage (stdout, 0, 0);
+    } else if (!strcmp (argv[i], "--advanced")) {
+      print_usage (stdout, 1, 0);
     } else if (!strcmp (argv[i], "-dbb") || !strcmp (argv[i], "-db")) {
       i += 1;
-      if (i >= argc) exit (1);
+      if (i >= argc) print_usage (stderr, 0, 1);
       db_name = argv[i];
     } else if (!strcmp (argv[i], "-gdb")) {
       i += 1;
-      if (i >= argc) exit (1);
+      if (i >= argc) print_usage (stderr, 0, 1);
       gdb_name = argv[i];
     } else if (!strcmp (argv[i], "--reference")) {
-      if ((i + 4) >= argc) exit (1);
+      if ((i + 4) >= argc) print_usage (stderr, 0, 1);
       ref_chr = chr_from_text (argv[i + 1]);
-      if (!ref_chr) exit (1);
+      if (!ref_chr) print_usage (stderr, 0, 1);
       ref_start = atoi (argv[i + 2]);
       ref_end = atoi (argv[i + 3]);
       ref = (const char *) argv[i + 4];
       i += 4;
     } else if (!strcmp (argv[i], "--snvs")) {
       i += 1;
-      if (i >= argc) exit (1);
+      if (i >= argc) print_usage (stderr, 0, 1);
       snv_db_name = argv[i];
     } else if (!strcmp (argv[i], "--fp")) {
       i += 1;
-      if (i >= argc) exit (1);
+      if (i >= argc) print_usage (stderr, 0, 1);
       fp_db_name = argv[i];
     } else if (!strcmp (argv[i], "--file")) {
       i += 1;
-      if (i >= argc) exit (1);
+      if (i >= argc) print_usage (stderr, 0, 1);
       input_name = argv[i];
     } else if (!strcmp (argv[i], "--pos")) {
       i += 1;
-      if (i >= argc) exit (1);
+      if (i >= argc) print_usage (stderr, 0, 1);
       only_pos = strtol (argv[i], NULL, 10);
     } else if (!strcmp (argv[i], "--max_regions")) {
       i += 1;
-      if (i >= argc) exit (1);
+      if (i >= argc) print_usage (stderr, 0, 1);
       max_regions = strtol (argv[i], NULL, 10);
     } else if (!strcmp (argv[i], "--min_coverage")) {
       i += 1;
-      if (i >= argc) exit (1);
+      if (i >= argc) print_usage (stderr, 0, 1);
       min_coverage = strtol (argv[i], NULL, 10);
     } else if (!strcmp (argv[i], "--min_end_distance")) {
       i += 1;
-      if (i >= argc) exit (1);
+      if (i >= argc) print_usage (stderr, 0, 1);
       min_end_distance = strtol (argv[i], NULL, 10);
-    } else if (!strcmp (argv[i], "--min_end_distance_homozygote")) {
-      i += 1;
-      if (i >= argc) exit (1);
-      min_end_distance_homozygote = strtol (argv[i], NULL, 10);
     } else if (!strcmp (argv[i], "--min_confirming")) {
       i += 1;
-      if (i >= argc) exit (1);
+      if (i >= argc) print_usage (stderr, 0, 1);
       min_confirming = strtol (argv[i], NULL, 10);
     } else if (!strcmp (argv[i], "--min_group_coverage")) {
       i += 1;
-      if (i >= argc) exit (1);
+      if (i >= argc) print_usage (stderr, 0, 1);
       min_group_coverage = strtol (argv[i], NULL, 10);
     } else if (!strcmp (argv[i], "--max_divergent")) {
       i += 1;
-      if (i >= argc) exit (1);
+      if (i >= argc) print_usage (stderr, 0, 1);
       max_divergent = strtol (argv[i], NULL, 10);
     } else if (!strcmp (argv[i], "--min_align_len")) {
       i += 1;
-      if (i >= argc) exit (1);
+      if (i >= argc) print_usage (stderr, 0, 1);
       min_align_len = strtol (argv[i], NULL, 10);
     } else if (!strcmp (argv[i], "--min_group_size")) {
       i += 1;
-      if (i >= argc) exit (1);
+      if (i >= argc) print_usage (stderr, 0, 1);
       min_group_size = strtol (argv[i], NULL, 10);
     } else if (!strcmp (argv[i], "--min_group_rsize")) {
       i += 1;
-      if (i >= argc) exit (1);
+      if (i >= argc) print_usage (stderr, 0, 1);
       min_group_rsize = atof (argv[i]);
     } else if (!strcmp (argv[i], "--max_group_divergence")) {
       i += 1;
-      if (i >= argc) exit (1);
+      if (i >= argc) print_usage (stderr, 0, 1);
       max_group_divergence = strtol (argv[i], NULL, 10);
     } else if (!strcmp (argv[i], "--max_group_rdivergence")) {
       i += 1;
-      if (i >= argc) exit (1);
+      if (i >= argc) print_usage (stderr, 0, 1);
       max_group_rdivergence = strtol (argv[i], NULL, 10);
     } else if (!strcmp (argv[i], "--max_uncovered")) {
       i += 1;
-      if (i >= argc) exit (1);
+      if (i >= argc) print_usage (stderr, 0, 1);
       max_uncovered = strtol (argv[i], NULL, 10);
     } else if (!strcmp (argv[i], "--coverage")) {
       i += 1;
-      if (i >= argc) exit (1);
+      if (i >= argc) print_usage (stderr, 0, 1);
       if (!strcmp (argv[i], "local")) {
         coverage = -1;
       } else {
         coverage = (float) atof (argv[i]);
       }
-    } else if (!strcmp (argv[i], "--min_hzp")) {
-      i += 1;
-      if (i >= argc) exit (1);
-      min_hzp = (float) atof (argv[i]);
     } else if (!strcmp (argv[i], "--min_p")) {
       i += 1;
-      if (i >= argc) exit (1);
+      if (i >= argc) print_usage (stderr, 0, 1);
       min_p = (float) atof (argv[i]);
     } else if (!strcmp (argv[i], "--num_threads")) {
       i += 1;
-      if (i >= argc) exit (1);
+      if (i >= argc) print_usage (stderr, 0, 1);
       n_threads = strtol (argv[i], NULL, 10);
     } else if (!strcmp (argv[i], "--print_reads")) {
       print_reads = 1;
-    } else if (!strcmp (argv[i], "--print_kmers")) {
-      print_kmers = 1;
-    } else if (!strcmp (argv[i], "--print_chains")) {
-      print_chains = 1;
-    } else if (!strcmp (argv[i], "--analyze_kmers")) {
-      analyze_kmers = 1;
     } else if (!strcmp (argv[i], "--seq_dir")) {
       i += 1;
-      if (i >= argc) exit (1);
+      if (i >= argc) print_usage (stderr, 0, 1);
       seq_dir = argv[i];
-    } else if (!strcmp (argv[i], "--genome_dir")) {
-      i += 1;
-      if (i >= argc) exit (1);
-      genome_dir = argv[i];
     } else if (!strcmp (argv[i], "-D")) {
       debug += 1;
     } else if (!strcmp (argv[i], "-DG")) {
@@ -780,12 +766,12 @@ main (int argc, const char *argv[])
 
   /* Check arguments */
   if (!db_name || !gdb_name) {
-    print_usage (1);
+    print_usage (stderr, 0, 1);
   }
 
   /* Read databases */
   load_db_or_die (&db, db_name, seq_dir, "reads");
-  load_db_or_die (&gdb, gdb_name, genome_dir, "genome");
+  load_db_or_die (&gdb, gdb_name, NULL, "genome");
 
   if (coverage == 0) coverage = find_coverage (&db.index);
 
@@ -1527,22 +1513,6 @@ group (AssemblyData *adata, unsigned int print)
     if (best_n1 != best_n2) {
       /* Heterozygote */
       p = dbinom (adata->nucl_counts[i][best_n2], adata->nucl_counts[i][best_n1] + adata->nucl_counts[i][best_n2], 0.5);
-      if (p < min_hzp) {
-        call->nucl[0] = call->nucl[1] = NONE;
-        call->poly = 0;
-        extra.hzprob = p;
-        continue;
-      }
-    } else {
-      /* Homozygote */
-#if 0
-      /* NC if too close to end */
-      if ((i < min_end_distance_homozygote) || (i > (adata->p_len - 1 - min_end_distance_homozygote))) {
-        call->nucl[0] = call->nucl[1] = NONE;
-        call->poly = 0;
-        continue;
-      }
-#endif
     }
     if (!sum_probs) {
       best_prob = 0;
