@@ -587,33 +587,33 @@ print_usage (FILE *ofs, unsigned int advanced, int exit_value)
   fprintf (ofs, "gassembler version %u.%u.%u (%s)\n", VERSION_MAJOR, VERSION_MINOR, VERSION_MICRO, VERSION_QUALIFIER);
   fprintf (ofs, "Usage: gassembler [OPTIONS] [KMERS...]\n");
   fprintf (ofs, "Options:\n");
-  fprintf (ofs, "    -v, --version               - print version information and exit\n");
-  fprintf (ofs, "    -h, --help                  - print this usage screen and exit\n");
-  fprintf (ofs, "    -dbb, -db FILENAME          - name of read index file\n");
-  fprintf (ofs, "    --seq_dir DIRECTORY         - directory of fastq files (overrides index location)\n");
-  fprintf (ofs, "    --reference CHR START END SEQ - reference position and sequence\n");
-  fprintf (ofs, "    --file FILENAME             - read reference and kmers from file (one line at time)\n");
-  fprintf (ofs, "    --min_coverage INTEGER      - minimum coverage for a call (default %u)\n", min_coverage);
-  fprintf (ofs, "    --coverage FLOAT | local    - average sequencing depth (default - median, local - use local number of reads)\n");
-  fprintf (ofs, "    --num_threads               - number of threads to use (default %u)\n", n_threads);
-  fprintf (ofs, "    --advanced                  - print advanced usage options\n");
+  fprintf (ofs, "    -v, --version                      - print version information and exit\n");
+  fprintf (ofs, "    -h, --help                         - print this usage screen and exit\n");
+  fprintf (ofs, "    -dbb, -db FILENAME                 - read index file\n");
+  fprintf (ofs, "    --seq_dir DIRECTORY                - directory of fastq files (overrides index location)\n");
+  fprintf (ofs, "    --reference CHR START END SEQ      - reference position and sequence\n");
+  fprintf (ofs, "    --file FILENAME                    - read reference and kmers from file (one line at time)\n");
+  fprintf (ofs, "    --min_coverage INTEGER             - minimum coverage for a call (default %u)\n", min_coverage);
+  fprintf (ofs, "    --coverage FLOAT | median | local  - average sequencing depth (default - median, local - use local number of reads)\n");
+  fprintf (ofs, "    --num_threads                      - number of threads to use (default %u)\n", n_threads);
+  fprintf (ofs, "    --advanced                         - print advanced usage options\n");
   if (advanced) {
     fprintf (ofs, "Advanced options:\n");
-    fprintf (ofs, "    --snvs FILENAME             - gmer_caller called SNVs\n");
-    fprintf (ofs, "    --fp FILENAME               - List of known false positives\n");
-    fprintf (ofs, "    --min_end_distance INTEGER  - minimum distance from segment end to call (default %u)\n", min_end_distance);
-    fprintf (ofs, "    --min_confirming INTEGER    - minimum confirming nucleotide count for a call (default %u)\n", min_confirming);
-    fprintf (ofs, "    --min_group_coverage INTEGER - minimum coverage of group (default %u)\n", min_group_coverage);
-    fprintf (ofs, "    --max_divergent INTEGER     - maximum number of mismatches per read (default %u)\n", max_divergent);
-    fprintf (ofs, "    --min_align_len INTEGER     - minimum alignment length (default %u)\n", min_align_len);
-    fprintf (ofs, "    --min_group_size INTEGER    - minimum group size (default %u)\n", min_group_size);
-    fprintf (ofs, "    --min_group_rsize FLOAT     - minimum relative group size (default %.2f)\n", min_group_rsize);
-    fprintf (ofs, "    --max_group_divergence INTEGER - maximum divergence in group (default %u)\n", max_group_divergence);
-    fprintf (ofs, "    --max_group_rdivergence INTEGER - maximum relative divergence in group (default %u)\n", max_group_rdivergence);
-    fprintf (ofs, "    --max_uncovered INTEGER     - maximum length of sequence end not covered by group (default %u)\n", max_uncovered);
-    fprintf (ofs, "    --min_p FLOAT               - minimum call quality (default %.2f)\n", min_p);
-    fprintf (ofs, "    -D                          - increase debug level\n");
-    fprintf (ofs, "    -DG                         - increase group debug level\n");
+    fprintf (ofs, "    --snvs FILENAME                  - gmer_caller called SNVs\n");
+    fprintf (ofs, "    --fp FILENAME                    - List of known false positives\n");
+    fprintf (ofs, "    --min_end_distance INTEGER       - minimum distance from segment end to call (default %u)\n", min_end_distance);
+    fprintf (ofs, "    --min_confirming INTEGER         - minimum confirming nucleotide count for a call (default %u)\n", min_confirming);
+    fprintf (ofs, "    --min_group_coverage INTEGER     - minimum coverage of group (default %u)\n", min_group_coverage);
+    fprintf (ofs, "    --max_divergent INTEGER          - maximum number of mismatches per read (default %u)\n", max_divergent);
+    fprintf (ofs, "    --min_align_len INTEGER          - minimum alignment length (default %u)\n", min_align_len);
+    fprintf (ofs, "    --min_group_size INTEGER         - minimum group size (default %u)\n", min_group_size);
+    fprintf (ofs, "    --min_group_rsize FLOAT          - minimum relative group size (default %.2f)\n", min_group_rsize);
+    fprintf (ofs, "    --max_group_divergence INTEGER   - maximum divergence in group (default %u)\n", max_group_divergence);
+    fprintf (ofs, "    --max_group_rdivergence INTEGER  - maximum relative divergence in group (default %u)\n", max_group_rdivergence);
+    fprintf (ofs, "    --max_uncovered INTEGER          - maximum length of sequence end not covered by group (default %u)\n", max_uncovered);
+    fprintf (ofs, "    --min_p FLOAT                    - minimum call quality (default %.2f)\n", min_p);
+    fprintf (ofs, "    -D                               - increase debug level\n");
+    fprintf (ofs, "    -DG                              - increase group debug level\n");
   }
   exit (exit_value);
 }
@@ -721,8 +721,14 @@ main (int argc, const char *argv[])
       if (i >= argc) print_usage (stderr, 0, 1);
       if (!strcmp (argv[i], "local")) {
         coverage = -1;
+      } else if (!strcmp (argv[i], "median")) {
+        coverage = 0;
       } else {
         coverage = (float) atof (argv[i]);
+        if (!coverage) {
+          fprintf (stderr, "Coverage has to be positive real value\n");
+          exit (1);
+        }
       }
     } else if (!strcmp (argv[i], "--min_p")) {
       i += 1;
