@@ -61,7 +61,7 @@ typedef struct _CallExtra CallExtra;
 static int align (AssemblyData *adata, const char *kmers[], unsigned int nkmers);
 static int group (AssemblyData *adata, unsigned int print);
 static int assemble (AssemblyData *adata, const char *kmers[], unsigned int nkmers, unsigned int print);
-static int assemble_recursive (KMerDB *db, SeqFile *files, KMerDB *gdb, unsigned int ref_chr, unsigned int ref_start, unsigned int ref_end, const char *ref, const char *kmers[], unsigned int nkmers);
+static int assemble_recursive (KMerDB *db, SeqFile *files, unsigned int ref_chr, unsigned int ref_start, unsigned int ref_end, const char *ref, const char *kmers[], unsigned int nkmers);
 unsigned int align_reads_to_reference (NSeq *ref_seq, GASMRead *reads[], unsigned int nreads, GASMRead *a_reads[], short a[][MAX_REFERENCE_LENGTH], SWCell *sw_matrix);
 unsigned int create_gapped_alignment (NSeq *ref_seq, unsigned int ref_start, GASMRead *a_reads[], unsigned int na, short a[][MAX_REFERENCE_LENGTH], unsigned int aligned_ref[], int ref_pos[], short _p[][MAX_REFERENCE_LENGTH * 2]);
 static unsigned int chr_from_text (const char *name);
@@ -148,7 +148,6 @@ struct _AssemblyData {
   GASMQueue *queue;
   KMerDB *db;
   SeqFile *files;
-  KMerDB *gdb;
   /* Reference data */
   unsigned int chr;
   unsigned int start;
@@ -274,13 +273,12 @@ queue_free_call_block (GASMQueue *gq, CallBlock *cb)
 }
 
 static AssemblyData *
-assembly_data_new (KMerDB *db, SeqFile *files, KMerDB *gdb)
+assembly_data_new (KMerDB *db, SeqFile *files)
 {
   AssemblyData *adata = (AssemblyData *) malloc (sizeof (AssemblyData));
   memset (adata, 0, sizeof (AssemblyData));
   adata->db = db;
   adata->files = files;
-  adata->gdb = gdb;
   adata->sw_matrix = (SWCell *) malloc ((MAX_REFERENCE_LENGTH + 1) * (MAX_READ_LENGTH + 1) * sizeof (SWCell));
   adata->alignment = (short (*)[MAX_REFERENCE_LENGTH * 2]) malloc (MAX_ALIGNED_READS * MAX_REFERENCE_LENGTH * 2 * 2);
   adata->coverage = (short *) malloc (MAX_REFERENCE_LENGTH * 2 * 2);
@@ -552,10 +550,6 @@ static SeqFile *map_sequences (KMerDB *db, const char *seq_dir);
 static unsigned int get_unique_reads (ReadInfo reads[], unsigned int nreads, KMerDB *db, SeqFile files[], const char *kmers[], unsigned int nkmers);
 /* Get proper read sequences (forward direction) */
 static unsigned int get_read_sequences (GASMRead *reads[], const ReadInfo read_info[], unsigned int nreads, SeqFile files[]);
-/* Remove reads that have multiple instances of same k-mer, too long gaps or too comon k-mers */
-/* fixme: Use seq idx */
-unsigned int remove_bad_reads (GASMRead *reads[], unsigned int nseqs, KMerDB *gdb, unsigned int start, unsigned int end);
-static unsigned long long get_kmer_location (KMerDB *gdb, unsigned long long word, unsigned int *num_seqs, unsigned int *file_idx, unsigned int *dir);
 static void print_db_reads (GT4Index *index, SeqFile *files, unsigned long long kmer_idx, unsigned int kmer_dir, FILE *ofs);
 
 unsigned int smith_waterman_seq (unsigned int a_pos[], unsigned int b_pos[], const NSeq *a, const NSeq *b, SWCell *t, unsigned int debug);
@@ -564,7 +558,6 @@ static void print_alignment (FILE *ofs, unsigned int a_pos[], unsigned int b_pos
 
 /* Basic parameters */
 const char *db_name = NULL;
-const char *gdb_name = NULL;
 const char *snv_db_name = NULL;
 const char *fp_db_name = NULL;
 const char *seq_dir = NULL;
@@ -597,8 +590,7 @@ print_usage (FILE *ofs, unsigned int advanced, int exit_value)
   fprintf (ofs, "    -v, --version               - print version information and exit\n");
   fprintf (ofs, "    -h, --help                  - print this usage screen and exit\n");
   fprintf (ofs, "    -dbb, -db FILENAME          - name of read index file\n");
-  fprintf (ofs, "    -gdb FILENAME               - name of genome index file\n");
-  fprintf (ofs, "    --seq_dir DIRECTORY          - directory of fastq files (overrides index location)\n");
+  fprintf (ofs, "    --seq_dir DIRECTORY         - directory of fastq files (overrides index location)\n");
   fprintf (ofs, "    --reference CHR START END SEQ - reference position and sequence\n");
   fprintf (ofs, "    --file FILENAME             - read reference and kmers from file (one line at time)\n");
   fprintf (ofs, "    --min_coverage INTEGER      - minimum coverage for a call (default %u)\n", min_coverage);
@@ -638,7 +630,7 @@ main (int argc, const char *argv[])
   const char *ref = NULL;
   unsigned int only_pos = 0;
 
-  KMerDB db, gdb;
+  KMerDB db;
   SeqFile *files;
     
   for (i = 1; i < argc; i++) {
@@ -652,10 +644,6 @@ main (int argc, const char *argv[])
       i += 1;
       if (i >= argc) print_usage (stderr, 0, 1);
       db_name = argv[i];
-    } else if (!strcmp (argv[i], "-gdb")) {
-      i += 1;
-      if (i >= argc) print_usage (stderr, 0, 1);
-      gdb_name = argv[i];
     } else if (!strcmp (argv[i], "--reference")) {
       if ((i + 4) >= argc) print_usage (stderr, 0, 1);
       ref_chr = chr_from_text (argv[i + 1]);
@@ -765,13 +753,12 @@ main (int argc, const char *argv[])
   if (debug > debug_groups) debug_groups = debug;
 
   /* Check arguments */
-  if (!db_name || !gdb_name) {
+  if (!db_name) {
     print_usage (stderr, 0, 1);
   }
 
   /* Read databases */
   load_db_or_die (&db, db_name, seq_dir, "reads");
-  load_db_or_die (&gdb, gdb_name, NULL, "genome");
 
   if (coverage == 0) coverage = find_coverage (&db.index);
 
@@ -807,7 +794,6 @@ main (int argc, const char *argv[])
       /* Print info */
       fprintf (stdout, "#KATK version: %u.%u.%u\n", VERSION_MAJOR, VERSION_MINOR, VERSION_MICRO);
       fprintf (stdout, "#KMer Database: %s\n", db_name);
-      fprintf (stdout, "#Genome Database: %s\n", gdb_name);
       if (coverage >= 0) {
         fprintf (stdout, "#Coverage: %.2f\n", coverage);
       } else {
@@ -821,7 +807,7 @@ main (int argc, const char *argv[])
       queue.last_chr = 0;
       queue.last_pos = 0;
       for (i = 0; i < n_threads; i++) {
-        queue.adata[i] = assembly_data_new (&db, files, &gdb);
+        queue.adata[i] = assembly_data_new (&db, files);
       }
       gt4_queue_create_threads (&queue.gt4_queue, process, NULL);
       process (&queue.gt4_queue, 0, NULL);
@@ -869,12 +855,12 @@ main (int argc, const char *argv[])
           for (i = 4; i < ntokenz; i++) {
             kmers[nkmers++] = strndup ((const char *) tokenz[i], lengths[i]);
           }
-          assemble_recursive (&db, files, &gdb, chr, start, end, ref, kmers, nkmers);
+          assemble_recursive (&db, files, chr, start, end, ref, kmers, nkmers);
         }
       }
     }
   } else {
-    assemble_recursive (&db, files, &gdb, ref_chr, ref_start, ref_end, ref, kmers, nkmers);
+    assemble_recursive (&db, files, ref_chr, ref_start, ref_end, ref, kmers, nkmers);
   }
 
   if (prefetch_db || prefetch_seq) {
@@ -885,9 +871,9 @@ main (int argc, const char *argv[])
 }
 
 static int
-assemble_recursive (KMerDB *db, SeqFile *files, KMerDB *gdb, unsigned int ref_chr, unsigned int ref_start, unsigned int ref_end, const char *ref, const char *kmers[], unsigned int nkmers)
+assemble_recursive (KMerDB *db, SeqFile *files, unsigned int ref_chr, unsigned int ref_start, unsigned int ref_end, const char *ref, const char *kmers[], unsigned int nkmers)
 {
-  AssemblyData *adata = assembly_data_new (db, files, gdb);
+  AssemblyData *adata = assembly_data_new (db, files);
   int result;
   unsigned int len;
   char *dup;
@@ -909,8 +895,8 @@ assemble_recursive (KMerDB *db, SeqFile *files, KMerDB *gdb, unsigned int ref_ch
     unsigned int mid;
     mid = (ref_start + ref_end) / 2;
     result = 0;
-    result += assemble_recursive (db, files, gdb, ref_chr, ref_start, mid, ref, kmers, nkmers);
-    result += assemble_recursive (db, files, gdb, ref_chr, mid, ref_end, ref + (mid - ref_start), kmers, nkmers);
+    result += assemble_recursive (db, files, ref_chr, ref_start, mid, ref, kmers, nkmers);
+    result += assemble_recursive (db, files, ref_chr, mid, ref_end, ref + (mid - ref_start), kmers, nkmers);
   }
   assembly_data_clear (adata);
   free (adata->cblock);
@@ -1013,7 +999,6 @@ align (AssemblyData *adata, const char *kmers[], unsigned int nkmers)
     }
   }
   /* Sanitize */
-  adata->nreads = remove_bad_reads (adata->reads, adata->nreads, adata->gdb, adata->start, adata->end);
   if (debug) fprintf (stderr, "Number of usable reads: %u\n", adata->nreads);
   if (print_reads) {
     for (i = 0; i < adata->nreads; i++) {
@@ -1576,7 +1561,7 @@ assemble (AssemblyData *adata, const char *kmers[], unsigned int nkmers, unsigne
 
   /* Print virtual command line to simplify debugging */
   if (debug) {
-    fprintf (stderr, "Arguments: -db %s -gdb %s --reference %s %u %u ", db_name, gdb_name, chr_names[adata->chr], adata->start, adata->end);
+    fprintf (stderr, "Arguments: -db %s --reference %s %u %u ", db_name, chr_names[adata->chr], adata->start, adata->end);
     for (i = adata->start; i < adata->end; i++) fprintf (stderr, "%c", adata->ref[i - adata->start]);
     for (i = 0; i < nkmers; i++) fprintf (stderr, " %s", kmers[i]);
     fprintf (stderr, "\n");
@@ -2342,85 +2327,6 @@ get_read_sequences (GASMRead *seqs[], const ReadInfo reads[], unsigned int nread
     if (debug > 1) fprintf (stderr, "Read %2u(%u): >%s\n%s\n", i, reads[i].dir, seqs[i]->name, seqs[i]->seq);
   }
   return 1;
-}
-
-unsigned int
-remove_bad_reads (GASMRead *seqs[], unsigned int nseqs, KMerDB *gdb, unsigned int start, unsigned int end)
-{
-  unsigned int i;
-  /* Sanitize */
-  unsigned int idx = 0;
-  i = 0;
-  while (i < nseqs) {
-    unsigned int j, invalid = 0;
-    NSeq *seq = seqs[i]->nseq;
-    unsigned int dist[40] = { 0 };
-    unsigned int n_unique_in_place = 0;
-    for (j = 0; j < seq->len; j++) {
-      if (seq->pos[j].has_kmer) {
-        unsigned int num_seqs = 0, file_idx = 0, dir = 0;
-        unsigned long long kmer_pos = get_kmer_location (gdb, seq->pos[j].kmer, &num_seqs, &file_idx, &dir);
-        if (num_seqs > 39) num_seqs = 39;
-        dist[num_seqs] += 1;
-        if ((num_seqs == 1) && (kmer_pos >= start) && (kmer_pos < end)) {
-          n_unique_in_place += 1;
-        }
-#if 0
-        if (num_seqs > 10) {
-          fprintf (stderr, "Invalid read %u: pos %u k-mer has %u reference locations\n", idx, j, num_seqs);
-          invalid = 1;
-          break;
-        }
-#endif
-      }
-    }
-    if (debug > 3) {
-      if (n_unique_in_place < 10) {
-        unsigned int j;
-        fprintf (stderr, "remove_bad_reads: Read %u has < 10 unique kmers in region\n", idx);
-        fprintf (stderr, "Distribution:");
-        for (j = 0; j < 40; j++) fprintf (stderr, " %u", dist[j]);
-        fprintf (stderr, "\n");
-      }
-      if (dist[1] < 25) {
-        unsigned int j;
-        fprintf (stderr, "remove_bad_reads: Read %u has < 10 unique kmers\n", idx);
-        fprintf (stderr, "Distribution:");
-        for (j = 0; j < 40; j++) fprintf (stderr, " %u", dist[j]);
-        fprintf (stderr, "\n");
-      }
-    }
-    if (invalid) {
-      gasm_read_delete (seqs[i]);
-      nseqs -= 1;
-      seqs[i] = seqs[nseqs];
-    } else {
-      i += 1;
-    }
-    idx += 1;
-  }
-  return nseqs;
-}
-
-static unsigned long long
-get_kmer_location (KMerDB *gdb, unsigned long long word, unsigned int *num_seqs, unsigned int *file_idx, unsigned int *dir)
-{
-  unsigned long long kmer_pos = 0;
-  unsigned int code = trie_lookup (&gdb->trie, word);
-  if (code) {
-    *dir = ((code & 0x8000000) != 0);
-    code &= 0x7fffffff;
-    unsigned int node = (code >> gdb->kmer_bits) - 1;
-    unsigned int kmer = code & ((1 << gdb->kmer_bits) - 1);
-    unsigned int kmer_idx = gdb->nodes[node].kmers + kmer;
-    unsigned long long first_read;
-    first_read = gt4_index_get_kmer_info (&gdb->index, kmer_idx, num_seqs);
-    if (*num_seqs == 1) {
-      unsigned long long name_pos;
-      kmer_pos = gt4_index_get_read_info (&gdb->index, first_read, file_idx, &name_pos, dir);
-    }
-  }
-  return kmer_pos;
 }
 
 static void
