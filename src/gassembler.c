@@ -23,6 +23,7 @@ unsigned int debug_groups = 0;
 
 unsigned int max_regions = 1000000000;
 unsigned int n_threads = 4;
+static unsigned int min_coverage = 6;
 static double min_p = 0.5;
 
 /*
@@ -183,7 +184,6 @@ struct _CallBlock {
   unsigned int chr;
   unsigned int start;
   unsigned int end;
-  const char *ref;
   unsigned int n_calls;
   /* Calls */
   Call calls[MAX_REFERENCE_LENGTH * 2];
@@ -376,24 +376,28 @@ print_call (CallBlock *cb, unsigned int pos, unsigned int print_counts, unsigned
   /* CHR POS REF COV */
   fprintf (stdout, "%s\t%u\t%c\t%u", chr_names[cb->chr], call->pos, n2c[call->ref], call->cov);
   /* CALL */
-  if (call->nucl[0] == NONE) {
-    fprintf (stdout, "\tNC");
+  if ((call->cov >= min_coverage) && (call->p >= min_p)) {
+    if (call->nucl[0] == NONE) {
+      fprintf (stdout, "\tNC");
+    } else {
+      fprintf (stdout, "\t%c%c", n2c[call->nucl[0]], n2c[call->nucl[1]]);
+    }
+    /* CLASS */
+    if (call->ref == GAP) {
+      fprintf (stdout, "\tI");
+    } else if (call->nucl[1] == GAP) {
+      fprintf (stdout, "\tD");
+    } else if (call->poly) {
+      fprintf (stdout, "\tS");
+    } else {
+      fprintf (stdout, "\t0");
+    }
+    /* PVALUE */
+    fprintf (stdout, "\t%.3f", call->p);
+    fprintf (stdout, "\t%c", call->prev_ref);
   } else {
-    fprintf (stdout, "\t%c%c", n2c[call->nucl[0]], n2c[call->nucl[1]]);
+    fprintf (stdout, "\tNC\t\t0\t");
   }
-  /* CLASS */
-  if (call->ref == GAP) {
-    fprintf (stdout, "\tI");
-  } else if (call->nucl[1] == GAP) {
-    fprintf (stdout, "\tD");
-  } else if (call->poly) {
-    fprintf (stdout, "\tS");
-  } else {
-    fprintf (stdout, "\t0");
-  }
-  /* PVALUE */
-  fprintf (stdout, "\t%.3f", call->p);
-  fprintf (stdout, "\t%c", call->prev_ref);
   if (print_counts) {
     /* A C G T GAP */
     fprintf (stdout, "\t%u\t%u\t%u\t%u\t%u", call->counts[A], call->counts[C], call->counts[G], call->counts[T], call->counts[GAP]);
@@ -438,33 +442,48 @@ print_calls (GASMQueue *queue, unsigned int print_counts, unsigned int print_all
     if (!cb_f) return;
     if (cb_f->chr > min_chr_p) return;
     if ((cb_f->chr == min_chr_p) && (cb_f->end > min_start_p)) return;
-    /* fprintf (stderr, "Printing Block %u %u-%u\n", cb_f->chr, cb_f->start, cb_f->end); */
+
+    /* Print all relevant positions */
     for (i = cb_f->start; i < cb_f->end; i++) {
+      if ((cb_f->chr == queue->last_chr) && (i <= queue->last_pos)) continue;
       unsigned int pos = i;
+      /* Find call for given position with best aggregate value */
       CallBlock *best_cb = cb_f;
       float best_p = 0;
+      int best_cov = 0;
       CallBlock *ccb;
       unsigned int j;
-      if ((cb_f->chr == queue->last_chr) && (pos <= queue->last_pos)) continue;
+      unsigned int has_poly = 0;
       for (ccb = queue->finished_blocks; ccb; ccb = ccb->next) {
         if (ccb->chr > cb_f->chr) continue;
         if (ccb->start > pos) continue;
         for (j = 0; j < ccb->n_calls; j++) {
           if (ccb->calls[j].pos != pos) continue;
           if (ccb->calls[j].p < best_p) continue;
+          if (ccb->calls[j].cov < best_cov) continue;
           best_cb = ccb;
           best_p = ccb->calls[j].p;
+          best_cov = ccb->calls[j].cov;
+          if (ccb->calls[j].poly) has_poly = 1;
         }
       }
-      if (best_p >= min_p) {
+      if (has_poly || (best_cov == 0)) {
         /* Iterate over best call block & print all calls for this position */
         for (j = 0; j < best_cb->n_calls; j++) {
           if (best_cb->calls[j].pos == pos) {
-            if (best_p == 0) break;
-            if (!best_cb->calls[j].poly) continue;
-            if (best_cb->calls[j].prev_ref == '!') break;
-            print_call (best_cb, j, print_counts, print_all);
-            fprintf (stdout, "\n");
+            if (best_p >= min_p) {
+              if (best_cb->calls[j].poly) {
+                /* Polymorphism with p >= cutoff */
+                print_call (best_cb, j, print_counts, print_all);
+                fprintf (stdout, "\n");
+              }
+            } else {
+              /* p < cutoff but there was polymorphism in some block */
+              print_call (best_cb, j, print_counts, print_all);
+              fprintf (stdout, "\n");
+            }
+            /* if (best_p == 0) break; */
+            /* if (best_cb->calls[j].prev_ref == '!') break; */
           } else if (best_cb->calls[j].pos > pos) {
             break;
           }
@@ -562,7 +581,6 @@ const char *snv_db_name = NULL;
 const char *fp_db_name = NULL;
 const char *seq_dir = NULL;
 static unsigned int print_reads = 0;
-static unsigned int min_coverage = 6;
 static unsigned int prefetch_db = 1;
 static unsigned int prefetch_seq = 1;
 /* Advanced parameters */
@@ -589,13 +607,14 @@ print_usage (FILE *ofs, unsigned int advanced, int exit_value)
   fprintf (ofs, "Options:\n");
   fprintf (ofs, "    -v, --version                      - print version information and exit\n");
   fprintf (ofs, "    -h, --help                         - print this usage screen and exit\n");
-  fprintf (ofs, "    -dbb, -db FILENAME                 - read index file\n");
+  fprintf (ofs, "    -dbi FILENAME                      - read index file\n");
   fprintf (ofs, "    --seq_dir DIRECTORY                - directory of fastq files (overrides index location)\n");
-  fprintf (ofs, "    --reference CHR START END SEQ      - reference position and sequence\n");
-  fprintf (ofs, "    --file FILENAME                    - read reference and kmers from file (one line at time)\n");
+  fprintf (ofs, "    --reference CHR START END SEQ      - reference region to be called\n");
+  fprintf (ofs, "    --file FILENAME                    - read reference region and kmers from file (one line at time)\n");
   fprintf (ofs, "    --min_coverage INTEGER             - minimum coverage for a call (default %u)\n", min_coverage);
   fprintf (ofs, "    --coverage FLOAT | median | local  - average sequencing depth (default - median, local - use local number of reads)\n");
   fprintf (ofs, "    --num_threads                      - number of threads to use (default %u)\n", n_threads);
+  fprintf (ofs, "    --min_p FLOAT                      - minimum call quality (default %.2f)\n", min_p);
   fprintf (ofs, "    --advanced                         - print advanced usage options\n");
   if (advanced) {
     fprintf (ofs, "Advanced options:\n");
@@ -611,7 +630,6 @@ print_usage (FILE *ofs, unsigned int advanced, int exit_value)
     fprintf (ofs, "    --max_group_divergence INTEGER   - maximum divergence in group (default %u)\n", max_group_divergence);
     fprintf (ofs, "    --max_group_rdivergence INTEGER  - maximum relative divergence in group (default %u)\n", max_group_rdivergence);
     fprintf (ofs, "    --max_uncovered INTEGER          - maximum length of sequence end not covered by group (default %u)\n", max_uncovered);
-    fprintf (ofs, "    --min_p FLOAT                    - minimum call quality (default %.2f)\n", min_p);
     fprintf (ofs, "    -D                               - increase debug level\n");
     fprintf (ofs, "    -DG                              - increase group debug level\n");
   }
@@ -640,7 +658,7 @@ main (int argc, const char *argv[])
       print_usage (stdout, 0, 0);
     } else if (!strcmp (argv[i], "--advanced")) {
       print_usage (stdout, 1, 0);
-    } else if (!strcmp (argv[i], "-dbb") || !strcmp (argv[i], "-db")) {
+    } else if (!strcmp (argv[i], "-dbi") || !strcmp (argv[i], "-dbb") || !strcmp (argv[i], "-db")) {
       i += 1;
       if (i >= argc) print_usage (stderr, 0, 1);
       db_name = argv[i];
@@ -988,6 +1006,7 @@ align (AssemblyData *adata, const char *kmers[], unsigned int nkmers)
   ReadInfo read_info[MAX_READS];
   short (*alignment)[MAX_REFERENCE_LENGTH];
   unsigned int i;
+  adata->ref_seq = n_seq_new_length (adata->ref, adata->end - adata->start, WORDLEN);
   /* Check reference length */
   if ((adata->end - adata->start) > MAX_REFERENCE_LENGTH) {
     fprintf (stderr, "align: reference length (%u) too big (max %u)\n", adata->end - adata->start, MAX_REFERENCE_LENGTH);
@@ -1018,7 +1037,6 @@ align (AssemblyData *adata, const char *kmers[], unsigned int nkmers)
   }
   /* Align all reads to reference */
   if (debug) fprintf (stderr, "Aligning reads to reference...");
-  adata->ref_seq = n_seq_new_length (adata->ref, adata->end - adata->start, WORDLEN);
   alignment = (short (*)[MAX_REFERENCE_LENGTH]) malloc (MAX_ALIGNED_READS * MAX_REFERENCE_LENGTH * 2);
   adata->na = align_reads_to_reference (adata->ref_seq, adata->reads, adata->nreads, adata->aligned_reads, alignment, adata->sw_matrix);
   if (debug == 1) fprintf (stderr, "\n");
@@ -1420,7 +1438,7 @@ group (AssemblyData *adata, unsigned int print)
     CallExtra extra;
 
     /* NC if too small coverage */
-    if (adata->coverage[i] < min_coverage) continue;
+    /* if (adata->coverage[i] < min_coverage) continue; */
 
     memset (call, 0, sizeof (Call));
     call->pos = adata->ref_pos[i];
@@ -1573,13 +1591,21 @@ assemble (AssemblyData *adata, const char *kmers[], unsigned int nkmers, unsigne
     fprintf (stderr, "\n");
   }
   result = align (adata, kmers, nkmers);
-  if (result <= 0) return result;
-  result = group (adata, print);
-  if (result <= 0) return result;
-
-  /* assembly_data_clear (adata); */
+  if (result > 0) {
+    result = group (adata, print);
+  }
+  if (result <= 0) {
+    /* Fill call block with NC-s */
+    CallBlock *cb = adata->cblock;
+    cb->n_calls = adata->end - adata->start;
+    for (i = 0; i < cb->n_calls; i++) {
+      memset (&cb->calls[i], 0, sizeof (Call));
+      cb->calls[i].pos = adata->start + i;
+      cb->calls[i].ref = adata->ref_seq->pos[i].nucl;
+    }
+  }
   
-  return adata->p_len;
+  return result;
 }
 
 /*
