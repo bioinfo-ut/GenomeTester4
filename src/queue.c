@@ -75,6 +75,7 @@ queue_finalize (GT4QueueClass *klass, GT4Queue *queue)
 void
 gt4_queue_setup (GT4Queue *queue, unsigned int nthreads)
 {
+  az_instance_init (queue, GT4_TYPE_QUEUE);
   queue->nthreads_total = nthreads;
   queue->nthreads_running = 1;
   queue->threads = (pthread_t *) malloc (nthreads * sizeof (pthread_t));

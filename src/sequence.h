@@ -26,9 +26,15 @@
 
 #ifndef __SEQUENCE_CPP__
 extern const char *alphabet;
+extern const char *chr_names[];
 #endif
 
 #include "word-table.h"
+
+enum {
+  CHR_NONE, CHR_1, CHR_2, CHR_3, CHR_4, CHR_5, CHR_6, CHR_7, CHR_8, CHR_9, CHR_10, CHR_11, CHR_12, CHR_13, CHR_14, CHR_15, CHR_16, CHR_17, CHR_18, CHR_19, CHR_20, CHR_21, CHR_22,
+  CHR_X, CHR_Y, CHR_MT
+};
 
 unsigned long long get_nucl_value (char nucl);
 
@@ -52,5 +58,6 @@ void gt4_string_revcomp_inplace (char *s, unsigned int length);
 
 void word_to_bitstring (unsigned long long word);
 
+unsigned int gt4_chr_from_string (const char *str);
 
 #endif /* SEQUENCE_H_ */

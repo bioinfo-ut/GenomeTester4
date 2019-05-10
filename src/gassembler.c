@@ -20,11 +20,22 @@
 
 unsigned int debug = 0;
 unsigned int debug_groups = 0;
+unsigned int flush = 1;
 
 unsigned int max_regions = 1000000000;
 unsigned int n_threads = 4;
 static unsigned int min_coverage = 6;
 static double min_p = 0.5;
+#define SEX_AUTO 0
+#define SEX_MALE 1
+#define SEX_FEMALE 2
+static unsigned int sex = 0;
+#define OUTPUT_POLY_BEST 0
+#define OUTPUT_ALL_BEST 1
+#define OUTPUT_ALL 2
+static unsigned int output = OUTPUT_POLY_BEST;
+static unsigned int print_extra = 0;
+
 
 /*
  * <0 - dynamic
@@ -37,16 +48,13 @@ static float coverage = 0;
 #define WORDLEN 25
 #define MAX_THREADS 256
 #define MAX_KMERS 1024
-#define MAX_READS_PER_KMER 100
+#define MAX_READS_PER_KMER 200
 #define MAX_READS 4096
 #define MIN_READS 10
 #define MAX_ALIGNED_READS 1024
 #define MAX_READ_LENGTH 128
 #define MAX_REFERENCE_LENGTH 256
 #define MAX_GROUPS MAX_ALIGNED_READS
-
-enum { CHR_NONE, CHR_1, CHR_2, CHR_3, CHR_4, CHR_5, CHR_6, CHR_7, CHR_8, CHR_9, CHR_10, CHR_11, CHR_12, CHR_13, CHR_14, CHR_15, CHR_16, CHR_17, CHR_18, CHR_19, CHR_20, CHR_21, CHR_22, CHR_X, CHR_Y };
-static const char *chr_names[] = { "INVALID", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15", "16", "17", "18", "19", "20", "21", "22", "X", "Y" };
 
 typedef struct _GASMQueue GASMQueue;
 typedef struct _GASMRead GASMRead;
@@ -60,12 +68,11 @@ typedef struct _CallExtra CallExtra;
 
 /* Returns number of aligned positions */
 static int align (AssemblyData *adata, const char *kmers[], unsigned int nkmers);
-static int group (AssemblyData *adata, unsigned int print);
-static int assemble (AssemblyData *adata, const char *kmers[], unsigned int nkmers, unsigned int print);
+static int group (AssemblyData *adata, unsigned int max_groups, unsigned int print);
+static int assemble (AssemblyData *adata, const char *kmers[], unsigned int nkmers, unsigned int max_groups, unsigned int print);
 static int assemble_recursive (KMerDB *db, SeqFile *files, unsigned int ref_chr, unsigned int ref_start, unsigned int ref_end, const char *ref, const char *kmers[], unsigned int nkmers);
 unsigned int align_reads_to_reference (NSeq *ref_seq, GASMRead *reads[], unsigned int nreads, GASMRead *a_reads[], short a[][MAX_REFERENCE_LENGTH], SWCell *sw_matrix);
 unsigned int create_gapped_alignment (NSeq *ref_seq, unsigned int ref_start, GASMRead *a_reads[], unsigned int na, short a[][MAX_REFERENCE_LENGTH], unsigned int aligned_ref[], int ref_pos[], short _p[][MAX_REFERENCE_LENGTH * 2]);
-static unsigned int chr_from_text (const char *name);
 static void test_alignment (const char *a, const char *b);
 static float find_coverage (GT4Index *index);
 
@@ -301,17 +308,14 @@ assembly_data_clear (AssemblyData *adata)
   adata->cblock = NULL;
 }
 
-static unsigned int print_counts = 0;
-static unsigned int print_all = 0;
-
 static void
 print_header (FILE *ofs) {
-  fprintf (ofs, "CHR\tPOS\tREF\tCOVERAGE\tCALL\tCLASS\tP\tPREV");
-  if (print_counts) {
-    fprintf (ofs, "\tA\tC\tG\tT\tN\tGAP");
+  fprintf (ofs, "CHR\tPOS\tSUB\tREF\tCOV\tCALL\tCLASS\tP\tPREV");
+  if (print_extra > 0) {
+    fprintf (ofs, "\tA\tC\tG\tT\tGAP");
   }
-  if (print_all) {
-    fprintf (ofs, "\tPROB\tRPROB\tEDIST\tGRP_ALL\tGRP\tDIV0\tDIV1\tG0\tG1\tG0_COMP\tG1_COMP\tCOMP_2");
+  if (print_extra > 1) {
+    fprintf (ofs, "\tPROB\tRPROB\tHZPROB\tEDIST\tGRP_ALL\tGRP\tDIV0\tDIV1\tG0\tG1\tG0_COMP\tG1_COMP\tCOMP_2");
   }
 }
 
@@ -370,11 +374,11 @@ calc_p (Call *call, CallExtra *extra, unsigned int KMER_COVERAGE)
 }
 
 static void
-print_call (CallBlock *cb, unsigned int pos, unsigned int print_counts, unsigned int print_all)
+print_call (CallBlock *cb, unsigned int pos)
 {
   Call *call = &cb->calls[pos];
   /* CHR POS REF COV */
-  fprintf (stdout, "%s\t%u\t%c\t%u", chr_names[cb->chr], call->pos, n2c[call->ref], call->cov);
+  fprintf (stdout, "%s\t%u\t%u\t%c\t%u", chr_names[cb->chr], call->pos, call->sub, n2c[call->ref], call->cov);
   /* CALL */
   if ((call->cov >= min_coverage) && (call->p >= min_p)) {
     if (call->nucl[0] == NONE) {
@@ -398,22 +402,113 @@ print_call (CallBlock *cb, unsigned int pos, unsigned int print_counts, unsigned
   } else {
     fprintf (stdout, "\tNC\t\t0\t");
   }
-  if (print_counts) {
+  if (print_extra > 0) {
     /* A C G T GAP */
     fprintf (stdout, "\t%u\t%u\t%u\t%u\t%u", call->counts[A], call->counts[C], call->counts[G], call->counts[T], call->counts[GAP]);
   }
 #ifdef OUTPUT_FULL_STATS
-  if (print_all) {
+  if (print_extra > 1) {
     fprintf (stdout, "\t%.5f\t%.5f\t%.5f", call->extra.prob, call->extra.rprob, call->extra.hzprob);
     fprintf (stdout, "\t%2u", call->extra.end_dist);
     fprintf (stdout, "\t%2u\t%2u\t%2u\t%2u", call->extra.n_groups_total, call->extra.n_groups, call->extra.div_0, call->extra.div_1);
     fprintf (stdout, "\t%2u\t%2u\t%2u\t%2u\t%2u", call->extra.max_cov_0, call->extra.max_cov_1, call->extra.compat_0, call->extra.compat_1, call->extra.compat_both);
   }
 #endif
+  if (flush) fflush (stdout);
 }
 
 static void
-print_calls (GASMQueue *queue, unsigned int print_counts, unsigned int print_all)
+print_calls_poly_best (CallBlock *cb_f, GASMQueue *queue, unsigned int only_poly)
+{
+  unsigned int pos;
+    /* Print all relevant positions */
+    for (pos = cb_f->start; pos < cb_f->end; pos++) {
+      CallBlock *best_cb, *ccb;
+      float best_p;
+      int best_cov;
+      unsigned int j, has_poly;
+      if ((cb_f->chr == queue->last_chr) && (pos <= queue->last_pos)) continue;
+      /* Find call for given position with best aggregate value */
+      best_cb = cb_f;
+      best_p = 0;
+      best_cov = 0;
+      has_poly = 0;
+      for (ccb = queue->finished_blocks; ccb; ccb = ccb->next) {
+        unsigned int local_poly = 0;
+        if (ccb->chr > cb_f->chr) continue;
+        if (ccb->start > pos) continue;
+        for (j = 0; j < ccb->n_calls; j++) {
+          if (ccb->calls[j].pos > pos) break;
+          if (ccb->calls[j].pos != pos) continue;
+          /* We have the same position (there can be many in ccb) */
+          if (ccb->calls[j].poly) local_poly = 1;
+          if (ccb->calls[j].p < best_p) continue;
+          if (ccb->calls[j].cov < best_cov) continue;
+          best_cb = ccb;
+          best_p = ccb->calls[j].p;
+          best_cov = ccb->calls[j].cov;
+        }
+        if (best_cb == ccb) has_poly = local_poly;
+      }
+      if (only_poly) {
+        if (has_poly || (best_cov == 0)) {
+          /* Iterate over best call block & print all calls for this position */
+          for (j = 0; j < best_cb->n_calls; j++) {
+            if (best_cb->calls[j].pos > pos) break;
+            if (best_cb->calls[j].pos != pos) continue;
+            if (best_p >= min_p) {
+              /* p >= cutoff, print only changed positions */
+              if (best_cb->calls[j].poly) {
+                print_call (best_cb, j);
+                fprintf (stdout, "\n");
+              }
+            } else {
+              /* p < cutoff, print single position */
+              print_call (best_cb, j);
+              fprintf (stdout, "\n");
+              break;
+            }
+          }
+        }
+      } else {
+        for (j = 0; j < best_cb->n_calls; j++) {
+          if (best_cb->calls[j].pos > pos) break;
+          if (best_cb->calls[j].pos != pos) continue;
+          print_call (best_cb, j);
+          fprintf (stdout, "\n");
+        }
+      }
+      queue->last_chr = cb_f->chr;
+      queue->last_pos = pos;
+    }
+}
+
+static void
+print_calls_all (CallBlock *cb_f, GASMQueue *queue)
+{
+  unsigned int pos;
+  /* Print all relevant positions */
+  for (pos = cb_f->start; pos < cb_f->end; pos++) {
+    CallBlock *ccb;
+    if ((cb_f->chr == queue->last_chr) && (pos <= queue->last_pos)) continue;
+    /* Find call for given position with best aggregate value */
+    for (ccb = queue->finished_blocks; ccb; ccb = ccb->next) {
+      unsigned int j;
+      if (ccb->chr != cb_f->chr) continue;
+      for (j = 0; j < ccb->n_calls; j++) {
+        if (ccb->calls[j].pos > pos) break;
+        if (ccb->calls[j].pos != pos) continue;
+        print_call (ccb, j);
+        fprintf (stdout, "\n");
+      }
+    }
+    queue->last_chr = cb_f->chr;
+    queue->last_pos = pos;
+  }
+}
+
+static void
+print_calls (GASMQueue *queue)
 {
   unsigned int min_chr_p = 0xffffffff;
   unsigned int min_start_p = 0xffffffff;
@@ -430,7 +525,6 @@ print_calls (GASMQueue *queue, unsigned int print_counts, unsigned int print_all
     CallBlock *cb_f = NULL;
     unsigned int min_chr_f = 0xffffffff;
     unsigned int min_start_f = 0xffffffff;
-    unsigned int i;
     /* Find block with smallest start address */
     for (cb = queue->finished_blocks; cb; cb = cb->next) {
       if ((cb->chr < min_chr_f) || ((cb->chr == min_chr_f) && (cb->start < min_start_f))) {
@@ -442,55 +536,12 @@ print_calls (GASMQueue *queue, unsigned int print_counts, unsigned int print_all
     if (!cb_f) return;
     if (cb_f->chr > min_chr_p) return;
     if ((cb_f->chr == min_chr_p) && (cb_f->end > min_start_p)) return;
-
-    /* Print all relevant positions */
-    for (i = cb_f->start; i < cb_f->end; i++) {
-      if ((cb_f->chr == queue->last_chr) && (i <= queue->last_pos)) continue;
-      unsigned int pos = i;
-      /* Find call for given position with best aggregate value */
-      CallBlock *best_cb = cb_f;
-      float best_p = 0;
-      int best_cov = 0;
-      CallBlock *ccb;
-      unsigned int j;
-      unsigned int has_poly = 0;
-      for (ccb = queue->finished_blocks; ccb; ccb = ccb->next) {
-        if (ccb->chr > cb_f->chr) continue;
-        if (ccb->start > pos) continue;
-        for (j = 0; j < ccb->n_calls; j++) {
-          if (ccb->calls[j].pos != pos) continue;
-          if (ccb->calls[j].p < best_p) continue;
-          if (ccb->calls[j].cov < best_cov) continue;
-          best_cb = ccb;
-          best_p = ccb->calls[j].p;
-          best_cov = ccb->calls[j].cov;
-          if (ccb->calls[j].poly) has_poly = 1;
-        }
-      }
-      if (has_poly || (best_cov == 0)) {
-        /* Iterate over best call block & print all calls for this position */
-        for (j = 0; j < best_cb->n_calls; j++) {
-          if (best_cb->calls[j].pos == pos) {
-            if (best_p >= min_p) {
-              if (best_cb->calls[j].poly) {
-                /* Polymorphism with p >= cutoff */
-                print_call (best_cb, j, print_counts, print_all);
-                fprintf (stdout, "\n");
-              }
-            } else {
-              /* p < cutoff but there was polymorphism in some block */
-              print_call (best_cb, j, print_counts, print_all);
-              fprintf (stdout, "\n");
-            }
-            /* if (best_p == 0) break; */
-            /* if (best_cb->calls[j].prev_ref == '!') break; */
-          } else if (best_cb->calls[j].pos > pos) {
-            break;
-          }
-        }
-      }
-      queue->last_chr = cb_f->chr;
-      queue->last_pos = pos;
+    if (output == OUTPUT_POLY_BEST) {
+      print_calls_poly_best (cb_f, queue, 1);
+    } else if (output == OUTPUT_ALL_BEST) {
+      print_calls_poly_best (cb_f, queue, 0);
+    } else if (output == OUTPUT_ALL) {
+      print_calls_all (cb_f, queue);
     }
     queue_free_call_block (queue, cb_f);
   }
@@ -528,18 +579,32 @@ process (GT4Queue *queue, unsigned int idx, void *data)
         for (i = 4; i < ntokenz; i++) {
           kmers[nkmers++] = strndup ((const char *) tokenz[i], lengths[i]);
         }
-        adata->chr = chr_from_text (chr);
+        adata->chr = gt4_chr_from_string (chr);
         adata->start = strtol ((const char *) tokenz[1], NULL, 10);
         adata->end = strtol ((const char *) tokenz[2], NULL, 10);
         adata->ref = (const char *) tokenz[3];
         adata->cblock = queue_get_call_block (gasm_queue, adata->chr, adata->start, adata->end);
         /* Now the new block is allocated so it is safe to print all completed blocks */
-        print_calls (gasm_queue, 0, 0);
+        print_calls (gasm_queue);
         gt4_queue_unlock (queue);
-        assemble (adata, (const char **) kmers, nkmers, 0);
+        assemble (adata, (const char **) kmers, nkmers, 2, 0);
         gt4_queue_lock (queue);
         queue_finish_call_block (gasm_queue, adata->cblock);
         assembly_data_clear (adata);
+
+        adata->chr = gt4_chr_from_string (chr);
+        adata->start = strtol ((const char *) tokenz[1], NULL, 10);
+        adata->end = strtol ((const char *) tokenz[2], NULL, 10);
+        adata->ref = (const char *) tokenz[3];
+        adata->cblock = queue_get_call_block (gasm_queue, adata->chr, adata->start, adata->end);
+        /* Now the new block is allocated so it is safe to print all completed blocks */
+        print_calls (gasm_queue);
+        gt4_queue_unlock (queue);
+        assemble (adata, (const char **) kmers, nkmers, 1, 0);
+        gt4_queue_lock (queue);
+        queue_finish_call_block (gasm_queue, adata->cblock);
+        assembly_data_clear (adata);
+
         for (i = 0; i < nkmers; i++) free (kmers[i]);
         gasm_queue->nrunning -= 1;
       }
@@ -566,7 +631,7 @@ static void load_db_or_die (KMerDB *db, const char *db_name, const char *seq_dir
 static SeqFile *map_sequences (KMerDB *db, const char *seq_dir);
 
 /* Get list of unique reads containing at lest one kmer from list */
-static unsigned int get_unique_reads (ReadInfo reads[], unsigned int nreads, KMerDB *db, SeqFile files[], const char *kmers[], unsigned int nkmers);
+static unsigned int get_unique_reads (ReadInfo reads[], unsigned int nreads, KMerDB *db, SeqFile files[], const char *kmers[], unsigned int nkmers, unsigned int max_reads_per_kmer);
 /* Get proper read sequences (forward direction) */
 static unsigned int get_read_sequences (GASMRead *reads[], const ReadInfo read_info[], unsigned int nreads, SeqFile files[]);
 static void print_db_reads (GT4Index *index, SeqFile *files, unsigned long long kmer_idx, unsigned int kmer_dir, FILE *ofs);
@@ -593,11 +658,12 @@ static unsigned int min_confirming = 2;
 static unsigned int min_group_coverage = 1;
 static unsigned int max_divergent = 4;
 static unsigned int min_align_len = 25;
-static unsigned int min_group_size = 2;
-static float min_group_rsize = 0.05f;
+static unsigned int min_group_size = 3;
+static float min_group_rsize = 0.0f;
 static unsigned int max_group_divergence = 3;
 static unsigned int max_group_rdivergence = 3;
 static unsigned int max_uncovered = 10;
+static float min_hzp = 0.01;
 
 static void
 print_usage (FILE *ofs, unsigned int advanced, int exit_value)
@@ -612,6 +678,7 @@ print_usage (FILE *ofs, unsigned int advanced, int exit_value)
   fprintf (ofs, "    --reference CHR START END SEQ      - reference region to be called\n");
   fprintf (ofs, "    --file FILENAME                    - read reference region and kmers from file (one line at time)\n");
   fprintf (ofs, "    --min_coverage INTEGER             - minimum coverage for a call (default %u)\n", min_coverage);
+  fprintf (ofs, "    --sex male|female|auto             - sex of the individual (default auto)\n");
   fprintf (ofs, "    --coverage FLOAT | median | local  - average sequencing depth (default - median, local - use local number of reads)\n");
   fprintf (ofs, "    --num_threads                      - number of threads to use (default %u)\n", n_threads);
   fprintf (ofs, "    --min_p FLOAT                      - minimum call quality (default %.2f)\n", min_p);
@@ -630,6 +697,9 @@ print_usage (FILE *ofs, unsigned int advanced, int exit_value)
     fprintf (ofs, "    --max_group_divergence INTEGER   - maximum divergence in group (default %u)\n", max_group_divergence);
     fprintf (ofs, "    --max_group_rdivergence INTEGER  - maximum relative divergence in group (default %u)\n", max_group_rdivergence);
     fprintf (ofs, "    --max_uncovered INTEGER          - maximum length of sequence end not covered by group (default %u)\n", max_uncovered);
+    fprintf (ofs, "    --output poly | best | all       - output type (only polymorphisms, best calls for positon, all calls) (default all)\n");
+    fprintf (ofs, "    --counts                         - output nucleotide counts\n");
+    fprintf (ofs, "    --extra                           - output extra information about call\n");
     fprintf (ofs, "    -D                               - increase debug level\n");
     fprintf (ofs, "    -DG                              - increase group debug level\n");
   }
@@ -664,7 +734,7 @@ main (int argc, const char *argv[])
       db_name = argv[i];
     } else if (!strcmp (argv[i], "--reference")) {
       if ((i + 4) >= argc) print_usage (stderr, 0, 1);
-      ref_chr = chr_from_text (argv[i + 1]);
+      ref_chr = gt4_chr_from_string (argv[i + 1]);
       if (!ref_chr) print_usage (stderr, 0, 1);
       ref_start = atoi (argv[i + 2]);
       ref_end = atoi (argv[i + 3]);
@@ -694,6 +764,18 @@ main (int argc, const char *argv[])
       i += 1;
       if (i >= argc) print_usage (stderr, 0, 1);
       min_coverage = strtol (argv[i], NULL, 10);
+    } else if (!strcmp (argv[i], "--sex")) {
+      i += 1;
+      if (i >= argc) print_usage (stderr, 0, 1);
+      if (!strcmp (argv[i], "male")) {
+        sex = SEX_MALE;
+      } else if (!strcmp (argv[i], "female")) {
+        sex = SEX_FEMALE;
+      } else if (!strcmp (argv[i], "auto")) {
+        sex = SEX_AUTO;
+      } else {
+        print_usage (stderr, 0, 1);
+      }
     } else if (!strcmp (argv[i], "--min_end_distance")) {
       i += 1;
       if (i >= argc) print_usage (stderr, 0, 1);
@@ -762,6 +844,22 @@ main (int argc, const char *argv[])
       i += 1;
       if (i >= argc) print_usage (stderr, 0, 1);
       seq_dir = argv[i];
+    } else if (!strcmp (argv[i], "--output")) {
+      i += 1;
+      if (i >= argc) print_usage (stderr, 0, 1);
+      if (!strcmp (argv[i], "poly")) {
+        output = OUTPUT_POLY_BEST;
+      } else if (!strcmp (argv[i], "best")) {
+        output = OUTPUT_ALL_BEST;
+      } else if (!strcmp (argv[i], "all")) {
+        output = OUTPUT_ALL;
+      } else {
+        print_usage (stderr, 0, 1);
+      }
+    } else if (!strcmp (argv[i], "--counts")) {
+      print_extra = 1;
+    } else if (!strcmp (argv[i], "--extra")) {
+      print_extra = 2;
     } else if (!strcmp (argv[i], "-D")) {
       debug += 1;
     } else if (!strcmp (argv[i], "-DG")) {
@@ -775,6 +873,7 @@ main (int argc, const char *argv[])
   }
 
   if (debug > debug_groups) debug_groups = debug;
+  if (sex == SEX_AUTO) prefetch_db = 0;
 
   /* Check arguments */
   if (!db_name) {
@@ -804,6 +903,47 @@ main (int argc, const char *argv[])
   if (!files) {
     fprintf (stderr, "Cannot read sequences: terminating\n");
     exit (1);
+  }
+
+  if (sex == SEX_AUTO) {
+    uint64_t j;
+    unsigned long long sum[3] = { 0 };
+    unsigned int count[3] = { 0 };
+    double avg[3];
+    fprintf (stderr, "Determine sex\n");
+    for (j = 0; j < db.n_nodes; j++) {
+      Node *node = &db.nodes[j];
+      const char *name = db.names + node->name;
+      unsigned int first_kmer = node->kmers;
+      unsigned int nkmers = node->nkmers;
+      /* 0 - autosome, 1 - X, 2 - Y */
+      unsigned int klass = 0;
+      if (name[0] == 'X') {
+        klass = 1;
+      } else if (name[0] == 'Y') {
+        klass = 2;
+      }
+      for (i = 0; i < nkmers; i++) {
+        unsigned int kmer_count;
+        gt4_index_get_kmer_info (&db.index, first_kmer + i, &kmer_count);
+        sum[klass] += kmer_count;
+        count[klass] += 1;
+      }
+    }
+    if (!count[1]) {
+      fprintf (stderr, "No X kmers found, cannot determine sex (use --sex)\n");
+      exit (1);
+    }
+    for (i = 0; i < 3; i++) {
+      avg[i] = (double) sum[i] / count[i];
+      fprintf (stderr, "Klass %u kmers %u sum %llu avg %.3f\n", i, count[i], sum[i], avg[i]);
+    }
+    if ((100 * avg[2] / avg[1]) < (avg[1] / avg[0])) {
+      sex = SEX_FEMALE;
+    } else {
+      sex = SEX_MALE;
+    }
+    fprintf (stderr, "Sex: %s\n", (sex == SEX_MALE) ? "Male" : "Female");
   }
 
   if (input_name) {
@@ -839,7 +979,7 @@ main (int argc, const char *argv[])
       while (queue.gt4_queue.nthreads_running > 1) {
         gt4_queue_wait (&queue.gt4_queue);
       }
-      print_calls (&queue, 0, 0);
+      print_calls (&queue);
       gt4_queue_unlock (&queue.gt4_queue);
     } else {
       const unsigned char *cdata;
@@ -868,7 +1008,7 @@ main (int argc, const char *argv[])
           if (lengths[0] > 31) lengths[0] = 31;
           memcpy (chrc, tokenz[0], lengths[0]);
           chrc[lengths[0]] = 0;
-          chr = chr_from_text (chrc);
+          chr = gt4_chr_from_string (chrc);
           start = strtol ((const char *) tokenz[1], NULL, 10);
           /* if (seen && (start > only_pos)) break; */
           if (start > only_pos) continue;
@@ -914,7 +1054,7 @@ assemble_recursive (KMerDB *db, SeqFile *files, unsigned int ref_chr, unsigned i
   adata->cblock->end = adata->end;
   result = align (adata, kmers, nkmers);
   if (result > 0) {
-    result = group (adata, 1);
+    result = group (adata, 2, 1);
   } else if (result == 0) {
     unsigned int mid;
     mid = (ref_start + ref_end) / 2;
@@ -1013,7 +1153,8 @@ align (AssemblyData *adata, const char *kmers[], unsigned int nkmers)
     return 0;
   }
   /* Get all unique reads */
-  adata->nreads = get_unique_reads (read_info, MAX_READS, adata->db, adata->files, kmers, nkmers);
+  unsigned int max_reads_per_kmer = (adata->chr == CHR_MT) ? 2000 : MAX_READS_PER_KMER;
+  adata->nreads = get_unique_reads (read_info, MAX_READS, adata->db, adata->files, kmers, nkmers, max_reads_per_kmer);
   if (debug) fprintf (stderr, "Got %u unique reads\n", adata->nreads);
   /* Create actual sequences in correct direction */
   get_read_sequences (adata->reads, read_info, adata->nreads, adata->files);
@@ -1032,7 +1173,7 @@ align (AssemblyData *adata, const char *kmers[], unsigned int nkmers)
     }
   }
   if (adata->nreads < MIN_READS) {
-    fprintf (stderr, "Final number of reads (%u) too low (min %u)\n", adata->nreads, MIN_READS);
+    if (debug) fprintf (stderr, "Final number of reads (%u) too low (min %u)\n", adata->nreads, MIN_READS);
     return -1;
   }
   /* Align all reads to reference */
@@ -1115,7 +1256,7 @@ align (AssemblyData *adata, const char *kmers[], unsigned int nkmers)
 }
 
 static int
-group (AssemblyData *adata, unsigned int print)
+group (AssemblyData *adata, unsigned int max_groups, unsigned int print)
 {
   Group groups[MAX_ALIGNED_READS];
   unsigned int i, j, k;
@@ -1256,15 +1397,12 @@ group (AssemblyData *adata, unsigned int print)
         if ((adata->nucl_counts[i][k] > 1) && (c[k] > c[best])) best = k;
       }
       g_cons[j * adata->p_len + i] = best;
-      if (adata->ref_pos[i] == 952510) {
-        fprintf (stderr, "Group %u consensus %u counts %u %u %u %u %u nucl counts %u %u %u %u %u\n", j, best, c[0], c[1], c[2], c[3], c[4], adata->nucl_counts[i][0], adata->nucl_counts[i][1], adata->nucl_counts[i][2], adata->nucl_counts[i][3], adata->nucl_counts[i][4]);
-      }
       if (best != adata->aligned_ref[i]) {
         unsigned int snv;
         if (debug > 0) fprintf (stderr, "Divergent position in group %u %u:%u\n", j, adata->chr, adata->ref_pos[i]);
         snv = lookup_snv (snvs, n_snvs, adata->chr, adata->start + i);
         if ((snv < n_snvs) && (snvs[snv].chr == adata->chr) && (snvs[snv].pos == (adata->start + i))) {
-          fprintf (stderr, "Known SNV (%c/%c)\n", n2c[snvs[snv].ref_allele], n2c[snvs[snv].alt_allele]);
+          if (debug) fprintf (stderr, "Known SNV (%c/%c)\n", n2c[snvs[snv].ref_allele], n2c[snvs[snv].alt_allele]);
         } else {
           if (debug > 0) fprintf (stderr, "Potential DeNovo\n");
           if (((last_aligned_ref != GAP) || (adata->aligned_ref[i] != GAP)) && ((last_consensus != GAP) || (best != GAP))) {
@@ -1325,19 +1463,24 @@ group (AssemblyData *adata, unsigned int print)
   }
 
   /* Discard groups with too many divergent positions */
+  if (sex == SEX_MALE) {
+    if ((adata->chr == CHR_X) || (adata->chr == CHR_Y)) {
+      max_groups = 1;
+    }
+  }
   unsigned int min_div = groups[0].divergent;
   for (i = 0; i < n_groups; i++) if (groups[i].divergent < min_div) min_div = groups[i].divergent;
   unsigned int good_groups[2];
   unsigned int n_included = 0;
   for (i = 0; i < n_groups; i++) {
-    groups[i].included = (n_included < 2);
+    groups[i].included = (n_included < max_groups);
     if (!groups[i].has_start) {
       groups[i].included = 0;
-      fprintf (stderr, "Discarded group %u (%u): Start position not covered\n", i, groups[i].size);
+      if (debug_groups > 0) fprintf (stderr, "Discarded group %u (%u): Start position not covered\n", i, groups[i].size);
     }
     if (!groups[i].has_end) {
       groups[i].included = 0;
-      fprintf (stderr, "Discarded group %u (%u): End position not covered\n", i, groups[i].size);
+      if (debug_groups > 0) fprintf (stderr, "Discarded group %u (%u): End position not covered\n", i, groups[i].size);
     }
     if (groups[i].min_cov < min_group_coverage) {
       groups[i].included = 0;
@@ -1412,9 +1555,6 @@ group (AssemblyData *adata, unsigned int print)
   for (i = 0; i < adata->p_len; i++) {
     unsigned int j;
     for (j = 0; j < adata->na; j++) {
-      if (adata->ref_pos[i] == 952510) {
-        fprintf (stderr, "Read %u group %u included %u nucl %u\n", j, adata->aligned_reads[j]->group, groups[adata->aligned_reads[j]->group].included, adata->alignment[j][i]);
-      }
       unsigned int grp = adata->aligned_reads[j]->group;
       if (!groups[grp].included) continue;
       if (adata->alignment[j][i] <= GAP) {
@@ -1425,6 +1565,15 @@ group (AssemblyData *adata, unsigned int print)
       }
     }
     if (adata->coverage[i] > max_coverage) max_coverage = adata->coverage[i];
+  }
+  unsigned int chr_coverage = max_coverage;
+  if ((coverage > 0) && (adata->chr != CHR_MT)) {
+    chr_coverage = coverage;
+    if (sex == SEX_MALE) {
+      if ((adata->chr == CHR_X) || (adata->chr == CHR_Y)) {
+        chr_coverage /= 2;
+      }
+    }
   }
 
   /* Call */
@@ -1535,7 +1684,8 @@ group (AssemblyData *adata, unsigned int print)
     extra.rprob = best_prob / sum_probs;
     extra.hzprob = p;
 
-    call->p = calc_p (call, &extra, (coverage >= 0) ? coverage : max_coverage);
+    call->p = calc_p (call, &extra, chr_coverage);
+    /* if (extra.hzprob < min_hzp) call->nucl[0] = call->nucl[1] = NONE; */
     call->extra = extra;
     call_alignment[cb->n_calls] = i;
     cb->n_calls += 1;
@@ -1543,6 +1693,7 @@ group (AssemblyData *adata, unsigned int print)
   /*cb->n_calls = adata->p_len;*/
 
   /* Output alignment */
+  /* if ((adata->start < 942425) && (adata->end > 942425)) print = 1; else print = 0; */
   if (print) {
     print_header (stdout);
     if (debug) {
@@ -1557,7 +1708,7 @@ group (AssemblyData *adata, unsigned int print)
     }
     fprintf (stdout, "\n");
     for (i = 0; i < cb->n_calls; i++) {
-      print_call (cb, i, 1, 0);
+      print_call (cb, i);
       if (debug_groups) {
         /* Aligned reads */
         unsigned int a_i = call_alignment[i];
@@ -1578,7 +1729,7 @@ group (AssemblyData *adata, unsigned int print)
 }
 
 static int
-assemble (AssemblyData *adata, const char *kmers[], unsigned int nkmers, unsigned int print)
+assemble (AssemblyData *adata, const char *kmers[], unsigned int nkmers, unsigned int max_groups, unsigned int print)
 {
   unsigned int i;
   int result;
@@ -1592,7 +1743,7 @@ assemble (AssemblyData *adata, const char *kmers[], unsigned int nkmers, unsigne
   }
   result = align (adata, kmers, nkmers);
   if (result > 0) {
-    result = group (adata, print);
+    result = group (adata, max_groups, print);
   }
   if (result <= 0) {
     /* Fill call block with NC-s */
@@ -1890,11 +2041,11 @@ print_alignment (FILE *ofs, unsigned int a_pos[], unsigned int b_pos[], unsigned
 
 /* Smith-Waterman algorithm */
 
-#define M_SCORE 1
+#define M_SCORE 2
 #define N_SCORE 0
-#define MM_SCORE -2
-#define GAP_OPEN_SCORE -2
-#define GAP_SCORE -1
+#define MM_SCORE -3
+#define GAP_OPEN_SCORE -4
+#define GAP_SCORE -2
 
 #define NROWS (n + 1)
 #define NCOLS (m + 1)
@@ -2073,7 +2224,7 @@ read_snvs (const char *filename, unsigned int *n_snvs)
         if (slen[0] > 31) slen[0] = 31;
         memcpy (chr, stok[0], slen[0]);
         chr[slen[0]] = 0;
-        snvs[*n_snvs].chr = chr_from_text (chr);
+        snvs[*n_snvs].chr = gt4_chr_from_string (chr);
         if (!snvs[*n_snvs].chr) {
           static unsigned int warned = 0;
           if (!warned) {
@@ -2135,7 +2286,7 @@ read_fps (const char *filename, unsigned int *n_snvs)
         if (slen[0] > 31) slen[0] = 31;
         memcpy (chr, stok[0], slen[0]);
         chr[slen[0]] = 0;
-        snvs[*n_snvs].chr = chr_from_text (chr);
+        snvs[*n_snvs].chr = gt4_chr_from_string (chr);
         if (!snvs[*n_snvs].chr) {
           static unsigned int warned = 0;
           if (!warned) {
@@ -2266,7 +2417,7 @@ map_sequences (KMerDB *db, const char *seq_dir)
 }
 
 static unsigned int
-get_unique_reads (ReadInfo reads[], unsigned int max_reads, KMerDB *db, SeqFile files[], const char *kmers[], unsigned int nkmers)
+get_unique_reads (ReadInfo reads[], unsigned int max_reads, KMerDB *db, SeqFile files[], const char *kmers[], unsigned int nkmers, unsigned int max_reads_per_kmer)
 {
   unsigned int nreads = 0, i;
 
@@ -2293,7 +2444,7 @@ get_unique_reads (ReadInfo reads[], unsigned int max_reads, KMerDB *db, SeqFile 
     if (debug > 1) fprintf (stderr, "Node %u kmer %u idx %u dir %u\n", node_idx, node_kmer, kmer_idx, kmer_dir);
     if (debug > 2) print_db_reads (&db->index, files, kmer_idx, kmer_dir, stderr);
     first_read = gt4_index_get_kmer_info (&db->index, kmer_idx, &n_reads);
-    if (n_reads > MAX_READS_PER_KMER) {
+    if (n_reads > max_reads_per_kmer) {
       if (debug > 1) fprintf (stderr, "Kmer %u has too many reads: %u\n", i, n_reads);
       continue;
     }
@@ -2473,19 +2624,6 @@ find_coverage (GT4Index *index)
   }
   free (counts);
   return med;
-}
-
-static unsigned int
-chr_from_text (const char *name)
-{
-  unsigned int val;
-  char *e;
-  if (!strcmp (name, "X")) return CHR_X;
-  if (!strcmp (name, "Y")) return CHR_Y;
-  val = strtol (name, &e, 10);
-  if (*e) return CHR_NONE;
-  if (val > CHR_22) return CHR_NONE;
-  return val;
 }
 
 static GASMRead *

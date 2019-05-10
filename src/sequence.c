@@ -32,6 +32,11 @@
 /* all possible nucleotides */
 const char *alphabet = "ACGTUacgtu";
 
+const char *chr_names[] = {
+  "INVALID", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15", "16", "17", "18", "19", "20", "21", "22",
+  "X", "Y", "MT"
+};
+
 /* Complementary table */
 static char *ct = NULL;
 
@@ -177,5 +182,17 @@ void word_to_bitstring (unsigned long long word)
 	}
 }
 
-
+unsigned int
+gt4_chr_from_string (const char *str)
+{
+  unsigned int val;
+  char *e;
+  if (!strcmp (str, "X")) return CHR_X;
+  if (!strcmp (str, "Y")) return CHR_Y;
+  if (!strcmp (str, "MT")) return CHR_MT;
+  val = strtol (str, &e, 10);
+  if (*e) return CHR_NONE;
+  if (val > CHR_22) return CHR_NONE;
+  return val;
+}
 
