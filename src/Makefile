@@ -47,11 +47,12 @@ LISTQUERY_SOURCES = \
 	common.c common.h \
 	queue.c queue.h \
 	utils.c utils.h \
-	word-list.c word-list.h \
 	word-array-sorted.c word-array-sorted.h \
 	word-dict.c word-dict.h \
+	word-list.c word-list.h \
 	word-list-sorted.c word-list-sorted.h \
-	word-map.c word-map.h \
+        word-list-stream.c word-list-stream.h \
+        word-map.c word-map.h \
 	word-table.c word-table.h
 
 LISTCOMPARE_SOURCES = \

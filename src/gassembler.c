@@ -2468,12 +2468,16 @@ get_unique_reads (ReadInfo reads[], unsigned int max_reads, KMerDB *db, SeqFile 
         /* fixme: What to do if two kmers have conflicting read directions? */
         reads[nreads].dir = (dir != kmer_dir);
         nreads += 1;
-        if (nreads >= max_reads) break;
+        if (nreads >= max_reads) {
+          fprintf (stderr, "get_unique_reads: Maximum number of reads (%u) reached, ignoring the rest\n", max_reads);
+          break;
+        }
       } else {
         if (debug > 2) fprintf (stderr, "  Already registered as %u\n", k);
       }
     }
     if (debug > 1) fprintf (stderr, "Kmer %u %s reads %u new %u\n", i, kmers[i], n_reads, n_new_reads);
+    if (nreads >= max_reads) break;
   }
   return nreads;
 }
