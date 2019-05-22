@@ -663,7 +663,6 @@ static float min_group_rsize = 0.0f;
 static unsigned int max_group_divergence = 3;
 static unsigned int max_group_rdivergence = 3;
 static unsigned int max_uncovered = 10;
-static float min_hzp = 0.01;
 
 static void
 print_usage (FILE *ofs, unsigned int advanced, int exit_value)
@@ -673,10 +672,10 @@ print_usage (FILE *ofs, unsigned int advanced, int exit_value)
   fprintf (ofs, "Options:\n");
   fprintf (ofs, "    -v, --version                      - print version information and exit\n");
   fprintf (ofs, "    -h, --help                         - print this usage screen and exit\n");
-  fprintf (ofs, "    -dbi FILENAME                      - read index file\n");
-  fprintf (ofs, "    --seq_dir DIRECTORY                - directory of fastq files (overrides index location)\n");
-  fprintf (ofs, "    --reference CHR START END SEQ      - reference region to be called\n");
-  fprintf (ofs, "    --file FILENAME                    - read reference region and kmers from file (one line at time)\n");
+  fprintf (ofs, "    --dbi FILENAME                      - index of sequenced reads\n");
+  fprintf (ofs, "    --seq_dir DIRECTORY                - directory of fastq files (overrides location in index)\n");
+  fprintf (ofs, "    --region CHR START END SEQ         - reference region to be called\n");
+  fprintf (ofs, "    --region_file FILENAME             - read reference region and kmers from file (one line at time)\n");
   fprintf (ofs, "    --min_coverage INTEGER             - minimum coverage for a call (default %u)\n", min_coverage);
   fprintf (ofs, "    --sex male|female|auto             - sex of the individual (default auto)\n");
   fprintf (ofs, "    --coverage FLOAT | median | local  - average sequencing depth (default - median, local - use local number of reads)\n");
@@ -697,9 +696,9 @@ print_usage (FILE *ofs, unsigned int advanced, int exit_value)
     fprintf (ofs, "    --max_group_divergence INTEGER   - maximum divergence in group (default %u)\n", max_group_divergence);
     fprintf (ofs, "    --max_group_rdivergence INTEGER  - maximum relative divergence in group (default %u)\n", max_group_rdivergence);
     fprintf (ofs, "    --max_uncovered INTEGER          - maximum length of sequence end not covered by group (default %u)\n", max_uncovered);
-    fprintf (ofs, "    --output poly | best | all       - output type (only polymorphisms, best calls for positon, all calls) (default all)\n");
+    fprintf (ofs, "    --output poly | best | all       - output type (only polymorphisms, best calls for positon, all calls) (default poly)\n");
     fprintf (ofs, "    --counts                         - output nucleotide counts\n");
-    fprintf (ofs, "    --extra                           - output extra information about call\n");
+    fprintf (ofs, "    --extra                          - output extra information about call\n");
     fprintf (ofs, "    -D                               - increase debug level\n");
     fprintf (ofs, "    -DG                              - increase group debug level\n");
   }
@@ -728,11 +727,11 @@ main (int argc, const char *argv[])
       print_usage (stdout, 0, 0);
     } else if (!strcmp (argv[i], "--advanced")) {
       print_usage (stdout, 1, 0);
-    } else if (!strcmp (argv[i], "-dbi") || !strcmp (argv[i], "-dbb") || !strcmp (argv[i], "-db")) {
+    } else if (!strcmp (argv[i], "-dbi") || !strcmp (argv[i], "-dbb") || !strcmp (argv[i], "-db") || !strcmp (argv[i], "--dbi")) {
       i += 1;
       if (i >= argc) print_usage (stderr, 0, 1);
       db_name = argv[i];
-    } else if (!strcmp (argv[i], "--reference")) {
+    } else if (!strcmp (argv[i], "--reference") || !strcmp (argv[i], "--region")) {
       if ((i + 4) >= argc) print_usage (stderr, 0, 1);
       ref_chr = gt4_chr_from_string (argv[i + 1]);
       if (!ref_chr) print_usage (stderr, 0, 1);
@@ -748,7 +747,7 @@ main (int argc, const char *argv[])
       i += 1;
       if (i >= argc) print_usage (stderr, 0, 1);
       fp_db_name = argv[i];
-    } else if (!strcmp (argv[i], "--file")) {
+    } else if (!strcmp (argv[i], "--region_file") || !strcmp (argv[i], "--file")) {
       i += 1;
       if (i >= argc) print_usage (stderr, 0, 1);
       input_name = argv[i];
@@ -898,7 +897,7 @@ main (int argc, const char *argv[])
   }
 
   /* Set up file lists */
-  fprintf (stderr, "Loading read sequences\n");
+  if (debug) fprintf (stderr, "Loading read sequences\n");
   files = map_sequences (&db, seq_dir);
   if (!files) {
     fprintf (stderr, "Cannot read sequences: terminating\n");
