@@ -57,8 +57,8 @@ int process_word (GT4FastaReader *reader, unsigned long long word, void *data);
 int print_full_map (AZObject *obj);
 void get_statistics (AZObject *obj);
 void print_median (AZObject *obj);
-void print_distro (GT4WordMap *map, unsigned int size);
-void print_gc (GT4WordMap *map);
+void print_distro (AZObject *obj, unsigned int size);
+void print_gc (AZObject *obj);
 static int print_files (AZObject *obj);
 void print_help (int exitvalue);
 
@@ -244,12 +244,12 @@ int main (int argc, const char *argv[])
   }
 
   if (distro) {
-    print_distro (map, distro + 1);
+    print_distro (obj, distro + 1);
     exit (0);
   }
   
   if (gc) {
-    print_gc (map);
+    print_gc (obj);
     exit (0);
   }
 
@@ -462,16 +462,15 @@ int process_word (GT4FastaReader *reader, unsigned long long word, void *data)
 
 void get_statistics (AZObject *obj)
 {
-        GT4WordSListImplementation *impl;
-        GT4WordSListInstance *inst;
-        impl = (GT4WordSListImplementation *) az_object_get_interface (obj, GT4_TYPE_WORD_SLIST, (void **) &inst);
-        if (GT4_IS_WORD_MAP (obj)) {
-                GT4WordMap *map = GT4_WORD_MAP(obj);
-          fprintf (stdout, "Statistics of list file %s <<Built with glistmaker version %d.%d>>\n", map->filename, map->header->version_major, map->header->version_minor);
-        } else if (GT4_IS_INDEX_MAP (obj)) {
-                GT4IndexMap *imap = GT4_INDEX_MAP(obj);
-                fprintf (stdout, "Statistics of index file %s <<Built with glistmaker version %d.%d>>\n", imap->filename, imap->header->version_major, imap->header->version_minor);
-        }
+  GT4WordSListInstance *inst;
+  az_object_get_interface (obj, GT4_TYPE_WORD_SLIST, (void **) &inst);
+  if (GT4_IS_WORD_MAP (obj)) {
+    GT4WordMap *map = GT4_WORD_MAP(obj);
+    fprintf (stdout, "Statistics of list file %s <<Built with glistmaker version %d.%d>>\n", map->filename, map->header->version_major, map->header->version_minor);
+  } else if (GT4_IS_INDEX_MAP (obj)) {
+    GT4IndexMap *imap = GT4_INDEX_MAP(obj);
+    fprintf (stdout, "Statistics of index file %s <<Built with glistmaker version %d.%d>>\n", imap->filename, imap->header->version_major, imap->header->version_minor);
+  }
   fprintf (stdout, "Wordlength\t%u\n", inst->word_length);
   fprintf (stdout, "NUnique\t%llu\n", inst->num_words);
   fprintf (stdout, "NTotal\t%llu\n", inst->sum_counts);
@@ -482,9 +481,9 @@ void print_median (AZObject *obj)
 {
   unsigned int min, max, med, gmin, gmax;
   unsigned long long i;
-        GT4WordSArrayImplementation *impl;
-        GT4WordSArrayInstance *inst;
-        impl = (GT4WordSArrayImplementation *) az_object_get_interface (obj, GT4_TYPE_WORD_SARRAY, (void **) &inst);
+  GT4WordSArrayImplementation *impl;
+  GT4WordSArrayInstance *inst;
+  impl = (GT4WordSArrayImplementation *) az_object_get_interface (obj, GT4_TYPE_WORD_SARRAY, (void **) &inst);
   gmin = 0xffffffff;
   gmax = 0;
   if (debug > 0) fprintf (stderr, "Finding min/max...");
@@ -540,36 +539,43 @@ void print_median (AZObject *obj)
 }
 
 void
-print_distro (GT4WordMap *map, unsigned int max)
+print_distro (AZObject *obj, unsigned int max)
 {
-  unsigned long long i;
-  unsigned long long *d = (unsigned long long *) malloc (max * 8);
+  unsigned long long *d;
+  GT4WordSListImplementation *impl;
+  GT4WordSListInstance *inst;
+  unsigned int i;
+  impl = (GT4WordSListImplementation *) az_object_get_interface (obj, GT4_TYPE_WORD_SLIST, (void **) &inst);
+  d = (unsigned long long *) malloc (max * 8);
   memset (d, 0, max * 8);
-  for (i = 0; i < map->header->nwords; i++) {
-    unsigned int freq = WORDMAP_FREQ (map, i);
-    if (freq < max) d[freq] += 1;
+  gt4_word_slist_get_first_word (impl, inst);
+  while (inst->idx < inst->num_words) {
+    if (inst->count <= max) d[inst->count - 1] += 1;
+    gt4_word_slist_get_next_word (impl, inst);
   }
   for (i = 0; i < max; i++) {
-    fprintf (stdout, "%llu\t%llu\n", i, d[i]);
+    fprintf (stdout, "%u\t%llu\n", i + 1, d[i]);
   }
 }
 
 void
-print_gc (GT4WordMap *map)
+print_gc (AZObject *obj)
 {
-  unsigned long long i;
   unsigned long long count = 0;
-  for (i = 0; i < map->header->nwords; i++) {
-    unsigned long long word = WORDMAP_WORD (map, i);
-    unsigned int freq = WORDMAP_FREQ (map, i);
+  GT4WordSListImplementation *impl;
+  GT4WordSListInstance *inst;
+  impl = (GT4WordSListImplementation *) az_object_get_interface (obj, GT4_TYPE_WORD_SLIST, (void **) &inst);
+  gt4_word_slist_get_first_word (impl, inst);
+  while (inst->idx < inst->num_words) {
+    unsigned long long word = inst->word;
     unsigned int j;
-    for (j = 0; j < map->header->wordlength; j++) {
-      /* if (((word & 3) == 1) || ((word & 3) == 2)) count += freq; */
-      count += freq * ((word ^ (word >> 1)) & 1);
+    for (j = 0; j < inst->word_length; j++) {
+      count += inst->count * ((word ^ (word >> 1)) & 1);
       word = word >> 2;
     }
+    gt4_word_slist_get_next_word (impl, inst);
   }
-  printf ("GC\t%g\n", (double) count / (map->header->totalfreq * map->header->wordlength));
+  printf ("GC\t%g\n", (double) count / (inst->num_words * inst->word_length));
 }
 
 void print_help (int exit_value)
