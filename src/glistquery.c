@@ -68,7 +68,7 @@ unsigned int use_scouts = 1;
 
 int main (int argc, const char *argv[])
 {
-  int argidx, v = 0;
+  int argidx, v = 0, i;
   unsigned int n_lists = 0;
   const char *lists[MAX_LISTS];
   const char *querystring = NULL, *queryfilename = NULL, *seqfilename = NULL, *querylistfilename = NULL;
@@ -78,8 +78,6 @@ int main (int argc, const char *argv[])
   unsigned int minfreq = 0, maxfreq = UINT_MAX;
   unsigned int distro = 0;
   unsigned int gc = 0;
-  AZObject *obj = NULL;
-  GT4WordMap *map = NULL;
   
   for (argidx = 1; argidx < argc; argidx++) {
     if (!strcmp (argv[argidx], "-v") || !strcmp (argv[argidx], "--version")) {
@@ -171,19 +169,19 @@ int main (int argc, const char *argv[])
       argidx += 1;
     } else if (!strcmp(argv[argidx], "-D")) {
       debug += 1;
-    } else if (!strcmp(argv[argidx], "-all")) {
+    } else if (!strcmp(argv[argidx], "--all") || !strcmp(argv[argidx], "-all")) {
       printall = 1;
-    } else if (!strcmp(argv[argidx], "-stat")) {  
+    } else if (!strcmp(argv[argidx], "--stat") || !strcmp(argv[argidx], "-stat")) {  
       getstat = 1;
-    } else if (!strcmp(argv[argidx], "-median")) {
+    } else if (!strcmp(argv[argidx], "--median") || !strcmp(argv[argidx], "-median")) {
       getmed = 1;
-    } else if (!strcmp(argv[argidx], "-distribution")) {
+    } else if (!strcmp(argv[argidx], "--distribution") || !strcmp(argv[argidx], "-distribution")) {
       if ((argidx + 1) >= argc) {
         print_help (1);
       }
       argidx += 1;
       distro = strtol (argv[argidx], &end, 10);;
-    } else if (!strcmp(argv[argidx], "-gc")) {
+    } else if (!strcmp(argv[argidx], "-gc") || !strcmp(argv[argidx], "--gc")) {
       gc = 1;
     } else if (!strcmp(argv[argidx], "--disable_scouts")) {  
       use_scouts = 0;
@@ -223,46 +221,64 @@ int main (int argc, const char *argv[])
     exit (result);
   }
 
-  FILE *ifs;
-  unsigned int code;
-  ifs = fopen (lists[0], "r");
-  fread (&code, 4, 1, ifs);
-  fclose (ifs);
-  if (code == GT4_LIST_CODE) {
-    obj = (AZObject *) gt4_word_map_new (lists[0], VERSION_MAJOR, !getstat && use_scouts);
-    map = GT4_WORD_MAP(obj);
-  } else if (code == GT4_INDEX_CODE) {
-    obj = (AZObject *) gt4_index_map_new (lists[0], VERSION_MAJOR, !getstat && use_scouts);
-    if (debug) print_files (obj);
+  AZObject *maps[MAX_LISTS + 1];
+  for (i = 0; i < n_lists; i++) {
+    FILE *ifs;
+    unsigned int code = 0;
+    ifs = fopen (lists[i], "r");
+    if (!ifs) {
+      fprintf (stderr, "Cannot open list %s\n", lists[i]);
+      exit (1);
+    }
+    fread (&code, 4, 1, ifs);
+    fclose (ifs);
+    if (code == GT4_LIST_CODE) {
+      maps[i] = (AZObject *) gt4_word_map_new (lists[i], VERSION_MAJOR, !getstat && use_scouts);
+    } else if (code == GT4_INDEX_CODE) {
+      maps[i] = (AZObject *) gt4_index_map_new (lists[i], VERSION_MAJOR, !getstat && use_scouts);
+    }
   }
+  /* --stat */
   if (getstat) {
-    get_statistics (obj);
-    exit (0);
-  } else if (getmed) {
-    print_median (obj);
+    for (i = 0; i < n_lists; i++) {
+      get_statistics (maps[i]);
+    }
     exit (0);
   }
-
+  /* --median */
+  if (getmed) {
+    for (i = 0; i < n_lists; i++) {
+      print_median (maps[i]);
+    }
+    exit (0);
+  }
+  /* --distribution */
   if (distro) {
-    print_distro (obj, distro + 1);
+    for (i = 0; i < n_lists; i++) {
+      print_distro (maps[i], distro + 1);
+    }
     exit (0);
   }
-  
+  /* --gc */
   if (gc) {
-    print_gc (obj);
+    for (i = 0; i < n_lists; i++) {
+      print_gc (maps[i]);
+    }
     exit (0);
   }
 
   if (!seqfilename && !querylistfilename && !queryfilename && !querystring) {
-          print_full_map (obj);
-          exit (0);
+    for (i = 0; i < n_lists; i++) {
+      print_full_map (maps[i]);
+    }
+    exit (0);
   }
 
-  if (!map) {
+  if (!GT4_IS_WORD_MAP (maps[0])) {
     fprintf (stderr, "Error: Could not make wordmap from file %s!\n", lists[0]);
     return 1;
   }
-  
+  GT4WordMap *map = (GT4WordMap *) maps[0];
   p.wordlength = map->header->wordlength;
 
   /* glistquery options */
@@ -285,6 +301,11 @@ int main (int argc, const char *argv[])
     }
     search_one_query_string (map, querystring, &p, 0, UINT_MAX, printall);
   }
+
+  for (i = 0; i < n_lists; i++) {
+    az_object_shutdown (maps[i]);
+  }
+
   exit (0);
 }
 

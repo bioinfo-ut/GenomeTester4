@@ -148,6 +148,9 @@ main (int argc, const char *argv[])
     if (!strcmp (argv[i], "-v") || !strcmp (argv[i], "--version")) {
       fprintf (stdout, "gmer_counter version %u.%u.%u (%s)\n", VERSION_MAJOR, VERSION_MINOR, VERSION_MICRO, VERSION_QUALIFIER);
       exit (0);
+    } else if (!strcmp (argv[i], "-h") || !strcmp (argv[i], "--help")) {
+      print_usage (stdout);
+      exit (0);
     } else if (!strcmp (argv[i], "-db")) {
       /* Database */
       i += 1;
@@ -680,11 +683,11 @@ read_file (SNPQueue *snpq, TaskRead *tr)
 {
   unsigned int result;
 
+  /* Read words from file */
   snpq->lmq.n_files_waiting -= 1;
   snpq->lmq.n_files_reading += 1;
-  gt4_queue_unlock (&snpq->lmq.queue);
-  /* Read words from file */
   SNPTable *tbl = snpq->free_tables[--snpq->n_free_tables];
+  gt4_queue_unlock (&snpq->lmq.queue);
   tbl->nwords = 0;
   tbl->n_nucl = 0;
   tbl->n_gc = 0;
@@ -879,8 +882,11 @@ read_word (GT4FastaReader *reader, unsigned long long word, void *data)
 static int
 read_nucleotide (GT4FastaReader *reader, unsigned int nucl, void *data)
 {
-  TaskTable *tt = (TaskTable *) data;
-  SNPTable *tbl = tt->tbl;
+  TaskRead *tt = (TaskRead *) data;
+  GT4ListMakerQueue *mq = (GT4ListMakerQueue *) tt->task.queue;
+  GT4LMQSource *src = &mq->sources[tt->idx];
+  SNPTable *tbl = (SNPTable *) tt->data;
+
   tbl->n_nucl += 1;
   tbl->n_gc += ((nucl ^ (nucl >> 1)) & 1);
   return 0;

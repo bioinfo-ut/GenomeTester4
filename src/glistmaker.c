@@ -288,10 +288,6 @@ main (int argc, const char *argv[])
       for (i = 0; i < mq.n_final_files; i++) {
         objs[i] = (AZObject *) gt4_word_list_stream_new (mq.final_files[i], VERSION_MAJOR);
       }
-#if 0
-      snprintf (c, 1024, "%s_%u.list", outputname, wordlength);
-      ofile = creat (c, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
-#endif
       ofile = fileno (ofs);
       gt4_write_union (objs, mq.n_final_files, 1, ofile, &header);
       /* close (ofile); */
@@ -1155,6 +1151,7 @@ print_help (int exitvalue)
   fprintf (stderr, "    --table_size            - maximum size of the temporary table (default %llu)\n", DEFAULT_TABLE_SIZE);
   fprintf (stderr, "    --tmpdir                - directory for temporary files (may need an order of magnitude more space than the size of the final list)\n");
   fprintf (stderr, "    --stream                - read files as streams instead of memory-mapping (slower but uses less virtual memory)\n");
+  fprintf (stderr, "    --index                 - creates indexed list (larger and slower)\n");
   fprintf (stderr, "    -D                      - increase debug level\n");
   exit (exitvalue);
 }
