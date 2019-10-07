@@ -72,4 +72,6 @@ unsigned long long wordtable_count_unique(GT4WordTable *table);
 
 unsigned int wordtable_write_to_file (GT4WordTable *table, const char *outputname, unsigned int cutoff);
 
+unsigned long long gt4_word_table_generate_mismatches (GT4WordTable *tbl, unsigned long long word, void *data, unsigned int n_mm, unsigned int start, unsigned int canonical, unsigned int count_only, unsigned int equal_mm_only);
+
 #endif

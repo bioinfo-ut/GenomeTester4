@@ -58,5 +58,6 @@ unsigned int gt4_word_dict_get_type (void);
 
 /* All methods return 1 on success, 0 on error */
 unsigned int gt4_word_dict_lookup (GT4WordDictImplementation *impl, GT4WordDictInstance *inst, unsigned long long word);
+unsigned int gt4_word_dict_lookup_mm (GT4WordDictImplementation *impl, GT4WordDictInstance *inst, unsigned long long word, unsigned int n_mm, unsigned int pm_3, int print_all, unsigned int equal_mm_only);
 
 #endif

@@ -67,12 +67,14 @@ fasta_reader_init (GT4FastaReader *reader, unsigned int wordlength, unsigned int
   }
   reader->impl = impl;
   reader->inst = inst;
+  if (!inst->open) gt4_sequence_source_open (impl, inst);
   return 0;
 }
 
 int
 fasta_reader_release (GT4FastaReader *reader)
 {
+  gt4_sequence_source_close (reader->impl, reader->inst);
   az_instance_finalize (reader, GT4_TYPE_FASTA_READER);
   return 0;
 }

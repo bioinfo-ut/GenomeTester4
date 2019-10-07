@@ -57,10 +57,8 @@ extern unsigned int debug_wordmap;
 #define WORDMAP_ELEMENT_SIZE (sizeof (unsigned long long) + sizeof (unsigned int))
 
 typedef struct _parameters {
-	unsigned int wordlength;
 	unsigned int nmm;
 	unsigned int pm3;
-	double coef;
 } parameters;
 
 struct _GT4WordMap {
@@ -96,7 +94,7 @@ GT4WordMap *gt4_word_map_new (const char *listfilename, unsigned int major_versi
 /* Releases word map and frees the structure */
 void gt4_word_map_delete (GT4WordMap *map);
 
-unsigned int word_map_search_query (GT4WordMap *wmap, unsigned long long query, parameters *p, int printall, unsigned int equalmmonly, unsigned int dosubtraction, GT4WordMap *querymap);
+unsigned int word_map_search_query (GT4WordMap *wmap, unsigned long long query, unsigned int n_mm, unsigned int pm_3, int printall, unsigned int equalmmonly, unsigned int dosubtraction, GT4WordMap *querymap);
 
 unsigned int gt4_word_map_lookup_canonical (GT4WordMap *wmap, unsigned long long query);
 unsigned int gt4_word_map_lookup (GT4WordMap *wmap, unsigned long long query);

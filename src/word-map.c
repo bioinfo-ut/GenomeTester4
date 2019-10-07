@@ -218,32 +218,22 @@ gt4_word_map_delete (GT4WordMap *wmap)
 }
 
 unsigned int 
-word_map_search_query (GT4WordMap *map, unsigned long long query, parameters *p, int printall, unsigned int equalmmonly, unsigned int dosubtraction, GT4WordMap *querymap)
+word_map_search_query (GT4WordMap *map, unsigned long long query, unsigned int n_mm, unsigned int pm_3, int printall, unsigned int equalmmonly, unsigned int dosubtraction, GT4WordMap *querymap)
 {
   static GT4WordTable mm_table = {0};
   unsigned long long i;
   unsigned int count = 0L, currentcount = 0L, querycount = 0L;
 
   /* if no mismatches */
-  if (!p->nmm) {
+  if (!n_mm) {
     return gt4_word_map_lookup (map, query);
   }
 
   if (!mm_table.data_size) {
-    gt4_word_table_setup (&mm_table, p->wordlength, 256, 4);
+    gt4_word_table_setup (&mm_table, map->header->wordlength, 256, 0);
   }
 
-#if 0
-  /* find and set table size */
-  if (!mm_table.n_words) {
-    nwords = generate_mismatches (NULL, query, p->wordlength, 0, p->nmm, p->pm3, 0, 1, 0);
-    gt4_word_table_ensure_size (&mm_table, nwords);
-    if (debug_wordmap > 1) {
-      fprintf (stderr, "MM Table size %llu, num mismatches %llu\n", mm_table.n_words, nwords);
-    }
-  }
-#endif
-  generate_mismatches (&mm_table, query, p->wordlength, 0, p->nmm, p->pm3, 0, 0, equalmmonly);
+  gt4_word_table_generate_mismatches (&mm_table, query, NULL, n_mm, pm_3, 0, 0, equalmmonly);
   if (debug_wordmap > 1) {
     fprintf (stderr, "MM Table size %llu\n", mm_table.n_words);
   }

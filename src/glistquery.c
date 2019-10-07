@@ -40,18 +40,20 @@
 #include "word-map.h"
 #include "word-table.h"
 
-typedef struct _querystructure {
-  GT4WordMap *map;
-  parameters *p;
-  unsigned int minfreq;
-  unsigned int maxfreq;
-  int printall;
-} querystructure;
+struct QueryData {
+  GT4WordDictImplementation *impl;
+  GT4WordDictInstance *inst;
+  unsigned int n_mm;
+  unsigned int pm_3;
+  unsigned int min_freq;
+  unsigned int max_freq;
+  int print_all;
+};
 
-void search_one_query_string (GT4WordMap *map, const char *querystring, parameters *p, unsigned int minfreq, unsigned int maxfreq, int printall);
-int search_n_query_strings (GT4WordMap *map, const char *queryfile, parameters *p, unsigned int minfreq, unsigned int maxfreq, int printall);
-int search_fasta (GT4WordMap *map, const char *seqfilename, parameters *p, unsigned int minfreq, unsigned int maxfreq, int printall);
-int search_list (GT4WordMap *map, const char *querylistfilename, parameters *p, unsigned int minfreq, unsigned int maxfreq, int printall);
+static void search_one_query_string (GT4WordDictImplementation *impl, GT4WordDictInstance *inst, const char *querystring, unsigned int n_mm, unsigned int pm_3, unsigned int min_freq, unsigned int max_freq, int print_all);
+static unsigned int search_n_query_strings (GT4WordDictImplementation *impl, GT4WordDictInstance *inst, const char *fname, unsigned int n_mm, unsigned int pm_3, unsigned int minfreq, unsigned int maxfreq, int printall);
+static unsigned int search_fasta (GT4WordDictImplementation *impl, GT4WordDictInstance *inst, const char *fname, unsigned int n_mm, unsigned int pm_3, unsigned int minfreq, unsigned int maxfreq, int printall);
+static unsigned int search_list (GT4WordDictImplementation *impl, GT4WordDictInstance *inst, const char *querylistfilename, unsigned int n_mm, unsigned int pm_3, unsigned int min_freq, unsigned int max_freq, int print_all);
 unsigned int search_lists_multi (const char *list, const char *lists[], unsigned int n_lists);
 int process_word (GT4FastaReader *reader, unsigned long long word, void *data);
 int print_full_map (AZObject *obj);
@@ -279,27 +281,41 @@ int main (int argc, const char *argv[])
     return 1;
   }
   GT4WordMap *map = (GT4WordMap *) maps[0];
-  p.wordlength = map->header->wordlength;
 
   /* glistquery options */
-  if (seqfilename) { /* fasta input */
-    search_fasta (map, seqfilename, &p, minfreq, maxfreq, printall);
+  if (seqfilename) {
+    /* FastA input */
+    GT4WordDictImplementation *impl;
+    GT4WordDictInstance *inst;
+    impl = (GT4WordDictImplementation *) az_object_get_interface (maps[0], GT4_TYPE_WORD_DICT, (void **) &inst);
+    v = search_fasta (impl, inst, seqfilename, p.nmm, p.pm3, minfreq, maxfreq, printall);
+    if (v) return v;
   } else if (querylistfilename) { /* list input */  
-    search_list (map, querylistfilename, &p, minfreq, maxfreq, printall);
+    GT4WordDictImplementation *impl;
+    GT4WordDictInstance *inst;
+    impl = (GT4WordDictImplementation *) az_object_get_interface (maps[0], GT4_TYPE_WORD_DICT, (void **) &inst);
+    v = search_list (impl, inst, querylistfilename, p.nmm, p.pm3, minfreq, maxfreq, printall);
+    if (v) return v;
   } else if (queryfilename) { /* list of queries */
-    v = search_n_query_strings (map, queryfilename, &p, minfreq, maxfreq, printall);
+    GT4WordDictImplementation *impl;
+    GT4WordDictInstance *inst;
+    impl = (GT4WordDictImplementation *) az_object_get_interface (maps[0], GT4_TYPE_WORD_DICT, (void **) &inst);
+    v = search_n_query_strings (impl, inst, queryfilename, p.nmm, p.pm3, minfreq, maxfreq, printall);
     if (v) return v;
   } else if (querystring) { /* one query */
+    GT4WordDictImplementation *impl;
+    GT4WordDictInstance *inst;
     /* checking possible errors */
-    if (p.wordlength != strlen (querystring)) {
-      fprintf (stderr, "Error: Incompatible wordlengths! Wordlength in list: %u, query length: %lu\n", p.wordlength, strlen (querystring));
+    if (map->header->wordlength != strlen (querystring)) {
+      fprintf (stderr, "Error: Incompatible wordlengths! Wordlength in list: %u, query length: %lu\n", map->header->wordlength, strlen (querystring));
       return 1;
     }
-    if (p.wordlength - p.pm3 < p.nmm) {
+    if (map->header->wordlength - p.pm3 < p.nmm) {
       fprintf(stderr, "Error: Number or mismatches specified is too large for %s with %d nucleotides long 3 prime perfect match.\n", querystring, p.pm3);
       return 1;
     }
-    search_one_query_string (map, querystring, &p, 0, UINT_MAX, printall);
+    impl = (GT4WordDictImplementation *) az_object_get_interface (maps[0], GT4_TYPE_WORD_DICT, (void **) &inst);
+    search_one_query_string (impl, inst, querystring, p.nmm, p.pm3, 0, UINT_MAX, printall);
   }
 
   for (i = 0; i < n_lists; i++) {
@@ -340,90 +356,121 @@ print_full_map (AZObject *obj)
   return 0;
 }
 
-/* use one specific query sequence */
-void search_one_query_string (GT4WordMap *map, const char *querystring, parameters *p, unsigned int minfreq, unsigned int maxfreq, int printall)
-{
-  unsigned int freq = 0;
-  unsigned long long query;
+/* Single query */
 
-  query = string_to_word (querystring, p->wordlength);
-  freq = word_map_search_query (map, query, p, printall, 0, 0, NULL);
-  if (!printall && freq >= minfreq && freq <= maxfreq) fprintf (stdout, "%s\t%u\n", querystring, freq);
-  return;
+static void
+search_one_query_string (GT4WordDictImplementation *impl, GT4WordDictInstance *inst, const char *query, unsigned int n_mm, unsigned int pm_3, unsigned int min_freq, unsigned int max_freq, int print_all)
+{
+  unsigned long long word;
+  word = string_to_word (query, inst->word_length);
+  if (gt4_word_dict_lookup_mm (impl, inst, word, n_mm, pm_3, print_all, 0)) {
+    /* Found it */
+    if (!print_all && (inst->value >= min_freq) && (inst->value <= max_freq)) fprintf (stdout, "%s\t%u\n", query, inst->value);
+  }
 }
 
-/* use file which consist of many queries */
-int search_n_query_strings (GT4WordMap *map, const char *queryfile, parameters *p, unsigned int minfreq, unsigned int maxfreq, int printall)
+/* Text file, one query per line */
+
+static unsigned int
+search_n_query_strings (GT4WordDictImplementation *impl, GT4WordDictInstance *inst, const char *queryfile, unsigned int n_mm, unsigned int pm_3, unsigned int min_freq, unsigned int max_freq, int print_all)
 {
-  FILE *f;
+  FILE *ifs;
   char querystring[256];
   int beg = 1;
 
-  f = fopen (queryfile, "r");
-  if (f == NULL) {
+  ifs = fopen (queryfile, "r");
+  if (ifs == NULL) {
     fprintf (stderr, "Error: Cannot open file %s.\n", queryfile);
     return 1;
   }
 
-  while (fscanf (f, "%s\n", querystring) != EOF) {
+  while (fscanf (ifs, "%s\n", querystring) != EOF) {
     if (beg) {
-      /* checking possible errors */
-      if (p->wordlength != strlen (querystring)) {
-        fprintf (stderr, "Error: Incompatible wordlengths! Wordlength in list: %u, query length: %lu\n", p->wordlength, strlen (querystring));
+      /* Checking possible errors */
+      if (inst->word_length != strlen (querystring)) {
+        fprintf (stderr, "Error: Incompatible wordlengths! Wordlength in list: %u, query length: %lu\n", inst->word_length, strlen (querystring));
         return 1;
       }
-      if (p->wordlength - p->pm3 < p->nmm) {
-        fprintf (stderr, "Error: Number or mismatches specified is too large for %s with %d nucleotides long 3 prime perfect match.\n", querystring, p->pm3);
+      if ((inst->word_length - pm_3) < n_mm) {
+        fprintf (stderr, "Error: Number or mismatches specified is too large for %s with %d nucleotides long 3 prime perfect match.\n", querystring, pm_3);
         return 1;
       }
       beg = 0;
     }
-    search_one_query_string (map, querystring, p, minfreq, maxfreq, printall);
+    search_one_query_string (impl, inst, querystring, n_mm, pm_3, min_freq, max_freq, print_all);
   }
+  fclose (ifs);
   return 0;
 }
 
-int
-search_fasta (GT4WordMap *map, const char *seqfilename, parameters *p, unsigned int minfreq, unsigned int maxfreq, int printall)
+static unsigned int
+search_fasta (GT4WordDictImplementation *impl, GT4WordDictInstance *inst, const char *fname, unsigned int n_mm, unsigned int pm_3, unsigned int min_freq, unsigned int max_freq, int print_all)
 {
-        GT4SequenceStream *stream;
-  querystructure qs = {0};
+  GT4SequenceStream *stream;
+  struct QueryData qs = {0};
   int result;
   GT4FastaReader r;
 
-  qs.map = map;
-  qs.p = p;
-  qs.minfreq = minfreq;
-  qs.maxfreq = maxfreq;
-  qs.printall = printall;
+  qs.impl = impl;
+  qs.inst = inst;
+  qs.n_mm = n_mm;
+  qs.pm_3 = pm_3;
+  qs.min_freq = min_freq;
+  qs.max_freq = max_freq;
+  qs.print_all = print_all;
 
-  stream = gt4_sequence_stream_new (seqfilename);
-  fasta_reader_init (&r, p->wordlength, 0, GT4_SEQUENCE_STREAM_SEQUENCE_SOURCE_IMPLEMENTATION(stream), &stream->source_instance);
-
+  stream = gt4_sequence_stream_new (fname);
+  if (!stream) {
+    fprintf (stderr, "search_fasta: Cannot open %s\n", fname);
+    return 1;
+  }
+  fasta_reader_init (&r, inst->word_length, 0, GT4_SEQUENCE_STREAM_SEQUENCE_SOURCE_IMPLEMENTATION(stream), &stream->source_instance);
   result = fasta_reader_read_nwords (&r, 1000000000000ULL, NULL, NULL, NULL, NULL, process_word, (void *) &qs);
-  /* v = fasta_reader_read_nwords (ff, size, p->wordlength, (void *) &qs, 0, 0, NULL, NULL, process_word); */
   fasta_reader_release (&r);
-
-  az_object_unref (AZ_OBJECT (stream));
-
+  az_object_shutdown (AZ_OBJECT (stream));
   return result;
 }
 
-int search_list (GT4WordMap *map, const char *querylistfilename, parameters *p, unsigned int minfreq, unsigned int maxfreq, int printall)
+static unsigned int
+search_list (GT4WordDictImplementation *impl, GT4WordDictInstance *inst, const char *fname, unsigned int n_mm, unsigned int pm_3, unsigned int min_freq, unsigned int max_freq, int print_all)
 {
-  GT4WordMap *qmap;
-  unsigned long long i, word = 0L;
-  unsigned int freq;
-  
-  qmap = gt4_word_map_new (querylistfilename, VERSION_MAJOR, use_scouts);
+  GT4WordSListImplementation *s_impl;
+  GT4WordSListInstance *s_inst;
+  AZObject *obj = NULL;
+  FILE *ifs;
+  unsigned int code = 0;
 
-  if (map->header->wordlength != qmap->header->wordlength) return GT_INCOMPATIBLE_WORDLENGTH_ERROR;
-  
-  for (i = 0; i < qmap->header->nwords; i++) {
-    word = *((unsigned long long *) (qmap->wordlist + i * (sizeof (unsigned long long) + sizeof (unsigned))));
-    freq = word_map_search_query (map, word, p, printall, 0, 0, NULL);
-    if (!printall && freq >= minfreq && freq <= maxfreq) fprintf (stdout, "%s\t%u\n", word_to_string (word, map->header->wordlength), freq);
+  ifs = fopen (fname, "r");
+  if (!ifs) {
+    fprintf (stderr, "search_list: Cannot open list %s\n", fname);
+    return 1;
   }
+  fread (&code, 4, 1, ifs);
+  fclose (ifs);
+  if (code == GT4_LIST_CODE) {
+    obj = (AZObject *) gt4_word_map_new (fname, VERSION_MAJOR, 0);
+  } else if (code == GT4_INDEX_CODE) {
+    obj = (AZObject *) gt4_index_map_new (fname, VERSION_MAJOR, 0);
+  } else {
+    fprintf (stderr, "search_list: Invalid file format\n");
+    return 1;
+  }
+  s_impl = (GT4WordSListImplementation *) az_object_get_interface (obj, GT4_TYPE_WORD_SLIST, (void **) &s_inst);
+
+  if (inst->word_length != s_inst->word_length) {
+    az_object_shutdown (obj);
+    return GT_INCOMPATIBLE_WORDLENGTH_ERROR;
+  }
+  
+  gt4_word_slist_get_first_word (s_impl, s_inst);
+  while (s_inst->idx < s_inst->num_words) {
+    uint64_t word = s_inst->word;
+    if (gt4_word_dict_lookup_mm (impl, inst, word, n_mm, pm_3, print_all, 0)) {
+      if (!print_all && (inst->value >= min_freq) && (inst->value <= max_freq)) fprintf (stdout, "%s\t%u\n", word_to_string (word, inst->word_length), inst->value);
+    }
+    if (!gt4_word_slist_get_next_word (s_impl, s_inst)) break;
+  }
+  az_object_shutdown (obj);
   return 0;
 }
 
@@ -474,10 +521,10 @@ search_lists_multi (const char *list, const char *lists[], unsigned int n_lists)
 
 int process_word (GT4FastaReader *reader, unsigned long long word, void *data)
 {
-  unsigned int freq = 0;
-  querystructure *qs = (querystructure *) data;
-  freq = word_map_search_query (qs->map, word, qs->p, qs->printall, 0, 0, NULL);
-  if (!qs->printall && freq >= qs->minfreq && freq <= qs->maxfreq) fprintf (stdout, "%s\t%u\n", word_to_string (word, reader->wordlength), freq);
+  struct QueryData *qs = (struct QueryData *) data;
+  if (gt4_word_dict_lookup_mm (qs->impl, qs->inst, word, qs->n_mm, qs->pm_3, qs->print_all, 0)) {
+    if (!qs->print_all && (qs->inst->value >= qs->min_freq) && (qs->inst->value <= qs->max_freq)) fprintf (stdout, "%s\t%u\n", word_to_string (word, reader->wordlength), qs->inst->value);
+  }
   return 0;
 }
 
@@ -602,14 +649,14 @@ print_gc (AZObject *obj)
 void print_help (int exit_value)
 {
     fprintf (stderr, "glistquery version %u.%u.%u (%s)\n", VERSION_MAJOR, VERSION_MINOR, VERSION_MICRO, VERSION_QUALIFIER);
-  fprintf (stderr, "Usage: glistquery <INPUTLIST> [OPTIONS]\n");
+  fprintf (stderr, "Usage: glistquery INPUT_LIST [OPTIONS]\n");
   fprintf (stderr, "Options:\n");
   fprintf (stderr, "    -v, --version             - print version information and exit\n");
   fprintf (stderr, "    -h, --help                - print this usage screen and exit\n");
-  fprintf (stderr, "    -stat                     - print statistics of the list file and exit\n");
-  fprintf (stderr, "    -median                   - print min/max/median/average and exit\n");
-  fprintf (stderr, "    -distribution MAX         - print distribution up to MAX\n");
-  fprintf (stderr, "    -gc                       - print average GC content of all words\n");
+  fprintf (stderr, "    --stat                    - print statistics of the list file and exit\n");
+  fprintf (stderr, "    --median                  - print min/max/median/average and exit\n");
+  fprintf (stderr, "    --distribution MAX        - print distribution up to MAX\n");
+  fprintf (stderr, "    --gc                      - print average GC content of all words\n");
   fprintf (stderr, "    -q, --query               - single query word\n");
   fprintf (stderr, "    -f, --queryfile           - list of query words in a file\n");
   fprintf (stderr, "    -s, --seqfile             - FastA/FastQ file\n");
@@ -618,7 +665,7 @@ void print_help (int exit_value)
   fprintf (stderr, "    -p, --perfectmatch NUMBER - specify number of 3' perfect matches (default 0)\n");
   fprintf (stderr, "    -min, --minfreq NUMBER    - minimum frequency of the printed words (default 0)\n");
   fprintf (stderr, "    -max, --maxfreq NUMBER    - maximum frequency of the printed words (default MAX_UINT)\n");
-  fprintf (stderr, "    -all                      - in case of mismatches prints all found words\n");
+  fprintf (stderr, "    --all                     - in case of mismatches prints all found words\n");
   fprintf (stderr, "    -D                        - increase debug level\n");
   exit (exit_value);
 }

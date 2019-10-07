@@ -44,10 +44,6 @@ unsigned long long get_reverse_complement (unsigned long long word, unsigned int
 
 unsigned long long get_canonical_word (unsigned long long word, unsigned int wordlength);
 
-unsigned long long generate_mismatches (GT4WordTable *mmtable, unsigned long long word, unsigned int wordlength,
-		unsigned int givenfreq, unsigned int nmm, unsigned int startsite, int usesmallercomplement, int countonly,
-		int equalmmonly);
-
 char *word_to_string (unsigned long long word, unsigned int wordlength);
 unsigned int word2string (char *b, unsigned long long word, unsigned int wordlength);
 

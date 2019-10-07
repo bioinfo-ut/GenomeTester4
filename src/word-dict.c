@@ -31,6 +31,9 @@
 
 #include <libarikkei/arikkei-utils.h>
 
+#include "sequence.h"
+#include "word-table.h"
+
 #include "word-dict.h"
 
 static void dict_class_init (GT4WordDictClass *klass);
@@ -64,3 +67,31 @@ gt4_word_dict_lookup (GT4WordDictImplementation *impl, GT4WordDictInstance *inst
   return impl->lookup (impl, inst, word);
 }
 
+unsigned int
+gt4_word_dict_lookup_mm (GT4WordDictImplementation *impl, GT4WordDictInstance *inst, unsigned long long word, unsigned int n_mm, unsigned int pm_3, int print_all, unsigned int equal_mm_only)
+{
+  static GT4WordTable mm_table = {0};
+  unsigned long long i;
+  unsigned int count = 0;
+
+  /* If no mismatches (last resursion) */
+  if (!n_mm) {
+    return gt4_word_dict_lookup (impl, inst, word);
+  }
+  if (!mm_table.n_word_slots) {
+    gt4_word_table_setup (&mm_table, inst->word_length, 256, 0);
+  }
+  gt4_word_table_generate_mismatches (&mm_table, word, NULL, n_mm, pm_3, 0, 0, equal_mm_only);
+  for (i = 0; i < mm_table.n_words; i++) {
+    if (gt4_word_dict_lookup (impl, inst, mm_table.words[i])) {
+      /* Found it */
+      count += inst->value;
+      if (print_all) {
+        fprintf (stdout, "%s\t%u\n", word_to_string (mm_table.words[i], mm_table.wordlength), inst->value);
+      }
+    }
+  }
+  gt4_word_table_clear (&mm_table);
+  inst->value = count;
+  return count != 0;
+}

@@ -90,7 +90,6 @@ gt4_word_table_delete (GT4WordTable *table)
 void 
 gt4_word_table_clear (GT4WordTable *table)
 {
-  table->wordlength = 0;
   table->n_words = 0L;
 }
 
@@ -371,30 +370,26 @@ wordtable_write_to_file (GT4WordTable *table, const char *outputname, unsigned i
 	return 0;
 }
 
-unsigned long long generate_mismatches (GT4WordTable *mmtable, unsigned long long word, unsigned int wordlength,
-		unsigned int givenfreq, unsigned int nmm, unsigned int startsite, int usesmallercomplement, int countonly,
-		int equalmmonly)
+unsigned long long
+gt4_word_table_generate_mismatches (GT4WordTable *tbl, unsigned long long word, void *data, unsigned int n_mm, unsigned int start, unsigned int canonical, unsigned int count_only, unsigned int equal_mm_only)
 {
-	unsigned long long mask = 0L, count = 0L, mismatch = 0L;
-	unsigned int i;
-	assert (mmtable->data_size == 4);
-
-	/* first I put the current word into the table */
-	if (!countonly && (nmm == 0 || !equalmmonly)) {
-		if (usesmallercomplement) word = get_canonical_word (word, wordlength);
-		gt4_word_table_add_word (mmtable, word, &givenfreq);
-	}
-	if (nmm == 0) return 1;
-
-	/* generating mm-s */
-	for (i = startsite; i < wordlength; i++) {
-		for (mismatch = 1; mismatch < 4; mismatch++) {
-			if (!countonly) {
-				mask = mismatch << (2 * i);
-			}
-			count += generate_mismatches (mmtable, word ^ mask, wordlength, givenfreq, nmm - 1, i + 1, usesmallercomplement, countonly, equalmmonly);
-		}
-	}
-	return count;
+  unsigned long long mask = 0L, count = 0L, mismatch = 0L;
+  unsigned int i;
+  /* The current word */
+  if (!count_only && (!equal_mm_only || !n_mm)) {
+    if (canonical) {
+      gt4_word_table_add_word (tbl, get_canonical_word (word, tbl->wordlength), data);
+    } else {
+      gt4_word_table_add_word (tbl, word, data);
+    }
+  }
+  if (!n_mm) return 1;
+  /* Generate mismatches */
+  for (i = start; i < tbl->wordlength; i++) {
+    for (mismatch = 1; mismatch < 4; mismatch++) {
+      if (!count_only) mask = mismatch << (2 * i);
+      count += gt4_word_table_generate_mismatches (tbl, word ^ mask, data, n_mm - 1, i + 1, canonical, count_only, equal_mm_only);
+    }
+  }
+  return count;
 }
-

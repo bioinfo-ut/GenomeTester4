@@ -892,16 +892,13 @@ compare_wordmaps_mm (GT4WordMap *map1, GT4WordMap *map2, int find_diff, int find
 static unsigned long long
 fetch_relevant_words (GT4WordTable *table, GT4WordMap *map, GT4WordMap *querymap, unsigned int cutoff, unsigned int nmm, FILE *f, int subtract, int countonly, unsigned long long *totalfreq)
 {
-  parameters p = {0};
   unsigned long long ri, wi, word, sumfreq = 0L, count = 0L;
   unsigned int freq, cnmm;
   unsigned int *freqs = (unsigned int *) table->data;
 
   if (table->n_words == 0) return 0;
-  p.wordlength = table->wordlength;
 
   for (cnmm = 1; cnmm <= nmm; cnmm++) {
-    p.nmm = cnmm;
     wi = 0L;
 
     for (ri = 0L; ri < table->n_words; ri++) {
@@ -910,7 +907,7 @@ fetch_relevant_words (GT4WordTable *table, GT4WordMap *map, GT4WordMap *querymap
             }
       word = table->words[ri];
       freq = freqs[ri];      
-      sumfreq = word_map_search_query (map, word, &p, 0, 1, subtract, querymap);
+      sumfreq = word_map_search_query (map, word, cnmm, 0, 0, 1, subtract, querymap);
       
       
       if (cnmm == nmm && sumfreq < cutoff) {
