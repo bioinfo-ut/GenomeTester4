@@ -39,11 +39,13 @@ struct _GT4ListHeader {
   unsigned int code;
   unsigned int version_major;
   unsigned int version_minor;
-  unsigned int wordlength;
-  unsigned long long nwords;
-  unsigned long long totalfreq;
+  unsigned int word_length;
+  unsigned long long n_words;
+  unsigned long long total_count;
   /* Offset (from the beginning of header) of word/count data */
   unsigned long long list_start;
 };
+
+void gt4_list_header_init (GT4ListHeader *hdr, unsigned int word_length);
 
 #endif

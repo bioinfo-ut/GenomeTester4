@@ -23,7 +23,7 @@
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-unsigned int listmaker_queue_debug = 1;
+unsigned int listmaker_queue_debug = 0;
 
 #define BLOCK_SIZE 1000000000ULL
 
@@ -101,14 +101,14 @@ maker_queue_release (GT4ListMakerQueue *mq)
 }
 
 static void
-maker_queue_add_source (GT4ListMakerQueue *mq, AZObject *source, unsigned int file_idx, unsigned int block_idx, unsigned long long start, unsigned long long length)
+maker_queue_add_source (GT4ListMakerQueue *mq, const char *id, AZObject *source, unsigned int file_idx, unsigned int block_idx, unsigned long long start, unsigned long long length)
 {
   az_object_ref (AZ_OBJECT(source));
   mq->sources[mq->n_sources].file_idx = file_idx;
   mq->sources[mq->n_sources].block_idx = block_idx;
   mq->sources[mq->n_sources].start = start;
   mq->sources[mq->n_sources].length = length;
-  TaskRead *tr = task_read_new (&mq->queue, source, mq->n_sources++, mq->wordlen);
+  TaskRead *tr = task_read_new (&mq->queue, id, source, mq->n_sources++, mq->wordlen);
   gt4_queue_add_task (&mq->queue, &tr->task, 0);
   mq->n_files_waiting += 1;
 }
@@ -126,19 +126,19 @@ maker_queue_add_file (GT4ListMakerQueue *mq, const char *filename, unsigned int 
       fprintf (stderr, "Cannot open compressed stream %s\n", filename);
       return;
     }
-    maker_queue_add_source (mq, AZ_OBJECT (zstream), file_idx, 0, 0, 0);
+    maker_queue_add_source (mq, filename, AZ_OBJECT (zstream), file_idx, 0, 0, 0);
   } else if (!strcmp (filename, "-")) {
     /* stdin, add as Stream */
     GT4SequenceStream *stream;
     if (listmaker_queue_debug) fprintf (stderr, "maker_queue_add_file: stdin\n");
     stream = gt4_sequence_stream_new_from_stream (stdin, 0);
-    maker_queue_add_source (mq, AZ_OBJECT (stream), file_idx, 0, 0, 0);
+    maker_queue_add_source (mq, "STDIN", AZ_OBJECT (stream), file_idx, 0, 0, 0);
   } else if (stream) {
     /* standard file, add as Stream */
     GT4SequenceStream *stream;
     if (listmaker_queue_debug) fprintf (stderr, "maker_queue_add_file: Stream %s\n", filename);
     stream = gt4_sequence_stream_new (filename);
-    maker_queue_add_source (mq, AZ_OBJECT (stream), file_idx, 0, 0, 0);
+    maker_queue_add_source (mq, filename, AZ_OBJECT (stream), file_idx, 0, 0, 0);
   } else {
     unsigned int nblocks, i;
     GT4SequenceFile *seqf;
@@ -151,10 +151,10 @@ maker_queue_add_file (GT4ListMakerQueue *mq, const char *filename, unsigned int 
     nblocks = gt4_sequence_block_split (&seqf->block, blocks, nblocks);
     if (listmaker_queue_debug) fprintf (stderr, "maker_queue_add_file: File %s as %u blocks\n", filename, nblocks);
     for (i = 0; i < nblocks; i++) {
-      char c[32];
-      snprintf (c, 32, "Block %u", i);
+      char c[1024];
+      snprintf (c, 1024, "%s block %u", filename, i);
       if (listmaker_queue_debug) fprintf (stderr, "  Block %u from %llu to %llu\n", i, (unsigned long long) (blocks[i]->cdata - seqf->block.cdata), (unsigned long long) ((blocks[i]->cdata + blocks[i]->csize) - seqf->block.cdata));
-      maker_queue_add_source (mq, AZ_OBJECT (blocks[i]), file_idx, i, blocks[i]->cdata - seqf->block.cdata, 0);
+      maker_queue_add_source (mq, c, AZ_OBJECT (blocks[i]), file_idx, i, blocks[i]->cdata - seqf->block.cdata, 0);
     }
     az_object_unref (AZ_OBJECT (seqf));
   }
@@ -180,7 +180,7 @@ maker_queue_add_subsequence (GT4ListMakerQueue *mq, unsigned int source_idx, uns
 /* Tasks */
 
 void
-gt4_task_read_setup (TaskRead *tr, GT4Queue *queue, AZObject *source, unsigned int idx, unsigned int wordlen)
+gt4_task_read_setup (TaskRead *tr, const char *id, GT4Queue *queue, AZObject *source, unsigned int idx, unsigned int wordlen)
 {
   GT4SequenceSourceImplementation *impl;
   GT4SequenceSourceInstance *inst;
@@ -193,7 +193,7 @@ gt4_task_read_setup (TaskRead *tr, GT4Queue *queue, AZObject *source, unsigned i
   tr->idx = idx;
   impl = (GT4SequenceSourceImplementation *) az_object_get_interface (AZ_OBJECT(source), GT4_TYPE_SEQUENCE_SOURCE, (void **) &inst);
   gt4_sequence_source_open (impl, inst);
-  fasta_reader_init (&tr->reader, wordlen, 1, impl, inst);
+  fasta_reader_init (&tr->reader, id, wordlen, 1, impl, inst);
 }
 
 void
@@ -204,11 +204,11 @@ gt4_task_read_release (TaskRead *tr)
 }
 
 TaskRead *
-task_read_new (GT4Queue *queue, AZObject *source, unsigned int idx, unsigned int wordlen)
+task_read_new (GT4Queue *queue, const char *id, AZObject *source, unsigned int idx, unsigned int wordlen)
 {
   TaskRead *tr;
   tr = (TaskRead *) malloc (sizeof (TaskRead));
-  gt4_task_read_setup (tr, queue, source, idx, wordlen);
+  gt4_task_read_setup (tr, id, queue, source, idx, wordlen);
   return tr;
 }
 

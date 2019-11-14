@@ -132,7 +132,7 @@ word_map_lookup (GT4WordDictImplementation *impl, GT4WordDictInstance *inst, uns
   GT4WordMap *wmap = GT4_WORD_MAP_FROM_DICT_INST(inst);
   unsigned long long current, low, high, mid;
   low = 0;
-  high = wmap->header->nwords - 1;
+  high = wmap->header->n_words - 1;
   mid = (low + high) / 2;
   while (low <= high) {
     current = WORDMAP_WORD (wmap, mid);
@@ -189,8 +189,8 @@ gt4_word_map_new (const char *listfilename, unsigned int major_version, unsigned
     start = wmap->header->list_start;
   }
   wmap->wordlist = cdata + start;
-  if (csize < start + wmap->header->nwords * 12) {
-    fprintf (stderr, "gt4_word_map_new: file size too small (%llu, should be at least %llu)\n", csize, start + wmap->header->nwords * 12);
+  if (csize < start + wmap->header->n_words * 12) {
+    fprintf (stderr, "gt4_word_map_new: file size too small (%llu, should be at least %llu)\n", csize, start + wmap->header->n_words * 12);
     gt4_word_map_delete (wmap);
     return NULL;
   }
@@ -199,14 +199,14 @@ gt4_word_map_new (const char *listfilename, unsigned int major_version, unsigned
   }
 
   /* Set up sorted array interface */
-  wmap->sarray_inst.slist_inst.num_words = wmap->header->nwords;
-  wmap->sarray_inst.slist_inst.sum_counts = wmap->header->totalfreq;
-  wmap->sarray_inst.slist_inst.word_length = wmap->header->wordlength;
+  wmap->sarray_inst.slist_inst.num_words = wmap->header->n_words;
+  wmap->sarray_inst.slist_inst.sum_counts = wmap->header->total_count;
+  wmap->sarray_inst.slist_inst.word_length = wmap->header->word_length;
   if (wmap->sarray_inst.slist_inst.num_words > 0) {
     wmap->sarray_inst.slist_inst.word = WORDMAP_WORD(wmap,0);
     wmap->sarray_inst.slist_inst.count = WORDMAP_FREQ(wmap,0);
   }
-  wmap->dict_inst.word_length = wmap->header->wordlength;
+  wmap->dict_inst.word_length = wmap->header->word_length;
 
   return wmap;
 }
@@ -230,7 +230,7 @@ word_map_search_query (GT4WordMap *map, unsigned long long query, unsigned int n
   }
 
   if (!mm_table.data_size) {
-    gt4_word_table_setup (&mm_table, map->header->wordlength, 256, 0);
+    gt4_word_table_setup (&mm_table, map->header->word_length, 256, 0);
   }
 
   gt4_word_table_generate_mismatches (&mm_table, query, NULL, n_mm, pm_3, 0, 0, equalmmonly);
@@ -274,7 +274,7 @@ gt4_word_map_lookup_canonical (GT4WordMap *wmap, unsigned long long query)
 unsigned int 
 gt4_word_map_lookup (GT4WordMap *map, unsigned long long query)
 {
-  unsigned long long rev = get_reverse_complement (query, map->header->wordlength);
+  unsigned long long rev = get_reverse_complement (query, map->header->word_length);
   if (rev < query) query = rev;
   return gt4_word_map_lookup_canonical (map, query);
 }

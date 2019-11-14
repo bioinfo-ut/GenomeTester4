@@ -44,6 +44,7 @@ typedef struct _GT4FastaReaderClass GT4FastaReaderClass;
 #define FASTA_READER_STATE_QUALITY 3
 
 struct _GT4FastaReader {
+  char *id;
   /* Read settings */
   unsigned int wordlength;
   unsigned long long mask;
@@ -82,7 +83,7 @@ struct _GT4FastaReaderClass {
 unsigned int gt4_fasta_reader_get_type (void);
 
 /* Set up FastA reader structure */
-int fasta_reader_init (GT4FastaReader *reader, unsigned int wordlength, unsigned int canonize, GT4SequenceSourceImplementation *impl, GT4SequenceSourceInstance *inst);
+int fasta_reader_init (GT4FastaReader *reader, const char *id, unsigned int wordlength, unsigned int canonize, GT4SequenceSourceImplementation *impl, GT4SequenceSourceInstance *inst);
 int fasta_reader_release (GT4FastaReader *reader);
 
 /* Read maximum of nwords words from FastA or fastQ file starting from position cpos */

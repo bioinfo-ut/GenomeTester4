@@ -23,11 +23,14 @@
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
+#include <stdio.h>
 #include <stdlib.h>
 
 #include <libarikkei/arikkei-utils.h>
 
 #include "sequence-block.h"
+
+extern unsigned int debug;
 
 static void sequence_block_class_init (GT4SequenceBlockClass *klass);
 static void sequence_block_init (GT4SequenceBlockClass *klass, GT4SequenceBlock *blk);
@@ -166,11 +169,29 @@ gt4_sequence_block_split (GT4SequenceBlock *blk, GT4SequenceBlock *child_blocks[
           split += 1;
         }
         split += 1;
-        if ((split >= remaining_size) || ((blk->cdata[current_pos + split] == '@') || (blk->cdata[current_pos + split] == '>'))) break;
+        /* FastA name */
+        if ((split >= remaining_size) || (blk->cdata[current_pos + split] == '>')) break;
+        /* FastQ separator */
+        if ((split < remaining_size) || (blk->cdata[current_pos + split] == '+')) {
+          split += 1;
+          if ((split < remaining_size) || (blk->cdata[current_pos + split] == '\n')) {
+            split += 1;
+            while ((split < remaining_size) && (blk->cdata[current_pos + split] != '\n')) split += 1;
+            if (split < remaining_size) split += 1;
+            /* FastQ name */
+            if ((split >= remaining_size) || (blk->cdata[current_pos + split] == '@')) break;
+          }
+        }
       }
       current_size = split;
     }
     /* Add new block current_pos - current_size */
+    if (debug) {
+      unsigned long long i;
+      fprintf (stderr, "Block start:");
+      for (i = 0; i < 100; i++) fprintf (stderr, "%c", blk->cdata[current_pos + i]);
+      fprintf (stderr, "\n");
+    }
     child_blocks[child_idx++] = gt4_sequence_block_new (blk->cdata + current_pos, current_size, &blk->object);
     /* Advance */
     current_pos += current_size;

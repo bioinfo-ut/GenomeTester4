@@ -33,6 +33,8 @@
 #include "utils.h"
 #include "common.h"
 
+extern unsigned int debug;
+
 static unsigned int *c2n = NULL;
 
 static unsigned int fasta_reader_type = 0;
@@ -49,11 +51,12 @@ gt4_fasta_reader_get_type (void)
 }
 
 int
-fasta_reader_init (GT4FastaReader *reader, unsigned int wordlength, unsigned int canonize, GT4SequenceSourceImplementation *impl, GT4SequenceSourceInstance *inst)
+fasta_reader_init (GT4FastaReader *reader, const char *id, unsigned int wordlength, unsigned int canonize, GT4SequenceSourceImplementation *impl, GT4SequenceSourceInstance *inst)
 {
   arikkei_return_val_if_fail (impl != NULL, -1);
   arikkei_return_val_if_fail (inst != NULL, -1);
   az_instance_init (reader, GT4_TYPE_FASTA_READER);
+  reader->id = (id) ? strdup (id) : NULL;
   reader->wordlength = wordlength;
   reader->mask = create_mask (wordlength);
   reader->canonize = canonize;
@@ -75,6 +78,7 @@ int
 fasta_reader_release (GT4FastaReader *reader)
 {
   gt4_sequence_source_close (reader->impl, reader->inst);
+  if (reader->id) free (reader->id);
   az_instance_finalize (reader, GT4_TYPE_FASTA_READER);
   return 0;
 }
@@ -96,6 +100,7 @@ fasta_reader_read_nwords (GT4FastaReader *reader, unsigned long long maxwords,
     /* Read error */
     if (cval < 0) {
       reader->in_eof = 1;
+      fprintf (stderr, "fasta_reader_read_nwords: Reader %s read error (%d) at %llu\n", reader->id, cval, reader->cpos);
       return cval;
     }
     /* EOF */
@@ -103,14 +108,21 @@ fasta_reader_read_nwords (GT4FastaReader *reader, unsigned long long maxwords,
       reader->in_eof = 1;
       if ((reader->state == FASTA_READER_STATE_SEQUENCE) && end_sequence) {
         int result = end_sequence (reader, data);
-	if (result) return result;
+	if (result) {
+	  fprintf (stderr, "fasta_reader_read_nwords: Reader %s end_sequence returned %d at %llu\n", reader->id, result, reader->cpos);
+	  return result;
+        }
       }
+      if (debug) fprintf (stderr, "fasta_reader_read_nwords: Reader %s end of sequence at %llu\n", reader->id, reader->cpos);
       return 0;
     }
     /* Valid character */
     if (read_character) {
       int result = read_character (reader, cval, data);
-      if (result) return result;
+      if (result) {
+        fprintf (stderr, "fasta_reader_read_nwords: Reader %s read_character returned %d at %llu\n", reader->id, result, reader->cpos);
+        return result;
+      }
     }
     switch (reader->state) {
     case FASTA_READER_STATE_NONE:
@@ -121,6 +133,7 @@ fasta_reader_read_nwords (GT4FastaReader *reader, unsigned long long maxwords,
         reader->type = GT4FR_FASTQ;
       } else {
         /* Invalid */
+        fprintf (stderr, "fasta_reader_read_nwords: Reader %s invalid start tag '%c'\n", reader->id, cval);
         return -1;
       }
       reader->state = FASTA_READER_STATE_NAME;
@@ -145,7 +158,10 @@ fasta_reader_read_nwords (GT4FastaReader *reader, unsigned long long maxwords,
 	reader->cpos += 1;
         if (start_sequence) {
 	  int result = start_sequence (reader, data);
-	  if (result) return result;
+	  if (result) {
+	    fprintf (stderr, "fasta_reader_read_nwords: Reader %s start_sequence returned %d at %llu\n", reader->id, result, reader->cpos);
+	    return result;
+          }
 	}
       } else {
 	/* Append character to name */
@@ -161,7 +177,10 @@ fasta_reader_read_nwords (GT4FastaReader *reader, unsigned long long maxwords,
 	/* End of FastA sequence */
 	if (end_sequence) {
 	  int result = end_sequence (reader, data);
-	  if (result) return result;
+	  if (result) {
+	    fprintf (stderr, "fasta_reader_read_nwords: Reader %s end_sequence returned %d at %llu\n", reader->id, result, reader->cpos);
+	    return result;
+          }
 	}
 	/* Start new name */
 	reader->state = FASTA_READER_STATE_NAME;
@@ -172,17 +191,24 @@ fasta_reader_read_nwords (GT4FastaReader *reader, unsigned long long maxwords,
       	/* End of FastQ sequence */
       	if (end_sequence) {
 	  int result = end_sequence (reader, data);
-	  if (result) return result;
+	  if (result) {
+	    fprintf (stderr, "fasta_reader_read_nwords: Reader %s end_sequence returned %d at %llu\n", reader->id, result, reader->cpos);
+	    return result;
+          }
 	}
 	/* Next characters should be '+\n' */
 	cval = gt4_sequence_source_read (reader->impl, reader->inst);
-	if (cval != '+') return -1;
+	if (cval != '+') {
+	  fprintf (stderr, "fasta_reader_read_nwords: Reader %s tag '+' missing, found '%c' instead at %llu\n", reader->id, cval, reader->cpos);
+	  return -1;
+        }
 	reader->cpos += 1;
 	cval = gt4_sequence_source_read (reader->impl, reader->inst);
 	reader->cpos += 1;
 	while (cval != '\n') {
 	  if (cval <= 0) {
 	    reader->in_eof = 1;
+	    fprintf (stderr, "fasta_reader_read_nwords: Reader %s invalid character '%c' after '+' %llu\n", reader->id, cval, reader->cpos);
 	    return -1;
           }
 	  cval = gt4_sequence_source_read (reader->impl, reader->inst);
@@ -196,7 +222,10 @@ fasta_reader_read_nwords (GT4FastaReader *reader, unsigned long long maxwords,
 	  /* Is nucleotide */
 	  if (read_nucleotide) {
 	    int result = read_nucleotide (reader, nuclval, data);
-	    if (result) return result;
+	    if (result) {
+	      fprintf (stderr, "fasta_reader_read_nwords: Reader %s read_nucleotide returned %d at %llu\n", reader->id, result, reader->cpos);
+	      return result;
+            }
 	  }
 	  reader->wordfw <<= 2;
 	  reader->wordfw |= nuclval;
@@ -214,7 +243,10 @@ fasta_reader_read_nwords (GT4FastaReader *reader, unsigned long long maxwords,
 	    unsigned long long word = (!reader->canonize || reader->wordfw < reader->wordrv) ? reader->wordfw : reader->wordrv;
 	    if (read_word) {
 	      int result = read_word (reader, word, data);
-	      if (result) return result;
+	      if (result) {
+	        fprintf (stderr, "fasta_reader_read_nwords: Reader %s read_word returned %d at %llu\n", reader->id, result, reader->cpos);
+	        return result;
+              }
 	    }
 	    reader->wpos += 1;
 	    nwords += 1;
@@ -235,8 +267,14 @@ fasta_reader_read_nwords (GT4FastaReader *reader, unsigned long long maxwords,
       if (cval == '\n') {
       	/* End of quality, next should be EOF or '@' */
       	cval = gt4_sequence_source_read (reader->impl, reader->inst);;
-      	if (cval == 0) return 0;
-      	if (cval != '@') return -1;
+      	if (cval == 0) {
+      	  fprintf (stderr, "fasta_reader_read_nwords: Reader %s end of sequence at %llu\n", reader->id, reader->cpos);
+      	  return 0;
+        }
+      	if (cval != '@') {
+      	  fprintf (stderr, "fasta_reader_read_nwords: Reader %s tag '@' missing, found '%c' instead at %llu\n", reader->id, cval, reader->cpos);
+      	  return -1;
+        }
       	reader->cpos += 1;
 	reader->state = FASTA_READER_STATE_NAME;
 	reader->seq_npos = 0;

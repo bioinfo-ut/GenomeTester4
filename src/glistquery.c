@@ -71,7 +71,7 @@ unsigned int use_scouts = 1;
 int main (int argc, const char *argv[])
 {
   int argidx, v = 0, i;
-  unsigned int n_lists = 0;
+  unsigned int n_lists = 0, invalid = 0;
   const char *lists[MAX_LISTS];
   const char *querystring = NULL, *queryfilename = NULL, *seqfilename = NULL, *querylistfilename = NULL;
   parameters p = {0};
@@ -238,8 +238,12 @@ int main (int argc, const char *argv[])
       maps[i] = (AZObject *) gt4_word_map_new (lists[i], VERSION_MAJOR, !getstat && use_scouts);
     } else if (code == GT4_INDEX_CODE) {
       maps[i] = (AZObject *) gt4_index_map_new (lists[i], VERSION_MAJOR, !getstat && use_scouts);
+    } else {
+      fprintf (stderr, "Error: %s is not a valid GenomeTester4 list/index file\n", lists[i]);
+      invalid = 1;
     }
   }
+  if (invalid) exit (1);
   /* --stat */
   if (getstat) {
     for (i = 0; i < n_lists; i++) {
@@ -306,11 +310,11 @@ int main (int argc, const char *argv[])
     GT4WordDictImplementation *impl;
     GT4WordDictInstance *inst;
     /* checking possible errors */
-    if (map->header->wordlength != strlen (querystring)) {
-      fprintf (stderr, "Error: Incompatible wordlengths! Wordlength in list: %u, query length: %lu\n", map->header->wordlength, strlen (querystring));
+    if (map->header->word_length != strlen (querystring)) {
+      fprintf (stderr, "Error: Incompatible wordlengths! Wordlength in list: %u, query length: %lu\n", map->header->word_length, strlen (querystring));
       return 1;
     }
-    if (map->header->wordlength - p.pm3 < p.nmm) {
+    if (map->header->word_length - p.pm3 < p.nmm) {
       fprintf(stderr, "Error: Number or mismatches specified is too large for %s with %d nucleotides long 3 prime perfect match.\n", querystring, p.pm3);
       return 1;
     }
@@ -424,7 +428,7 @@ search_fasta (GT4WordDictImplementation *impl, GT4WordDictInstance *inst, const 
     fprintf (stderr, "search_fasta: Cannot open %s\n", fname);
     return 1;
   }
-  fasta_reader_init (&r, inst->word_length, 0, GT4_SEQUENCE_STREAM_SEQUENCE_SOURCE_IMPLEMENTATION(stream), &stream->source_instance);
+  fasta_reader_init (&r, fname, inst->word_length, 0, GT4_SEQUENCE_STREAM_SEQUENCE_SOURCE_IMPLEMENTATION(stream), &stream->source_instance);
   result = fasta_reader_read_nwords (&r, 1000000000000ULL, NULL, NULL, NULL, NULL, process_word, (void *) &qs);
   fasta_reader_release (&r);
   az_object_shutdown (AZ_OBJECT (stream));

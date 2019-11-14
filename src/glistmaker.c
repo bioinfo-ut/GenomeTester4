@@ -82,6 +82,7 @@ static void process (GT4Queue *queue, unsigned int thread_idx, void *arg);
 static unsigned long long merge_tables_to_file (GT4WordTable *t[], unsigned int ntables, int ofile);
 static unsigned long long merge_tables_to_file_index (GT4WordTable *tables[], unsigned int ntables_in, int ofile);
 static unsigned long long collate_files_index (const char *files[], unsigned int n_files, int ofile);
+static void write_index_header (FILE *ofs, unsigned int wlen);
 static unsigned int write_index (FILE *ofs, const char *loc_files[], unsigned int n_loc_files, GT4ListMakerQueue *mq, const char *files[], unsigned int n_files);
 /* Reading callback */
 static int start_sequence_index (GT4FastaReader *reader, void *data);
@@ -297,6 +298,15 @@ main (int argc, const char *argv[])
       }
     }
     fclose (ofs);
+  } else {
+    if (create_index) {
+      write_index_header (ofs, mq.wordlen);
+    } else {
+      GT4ListHeader header;
+      gt4_list_header_init (&header, mq.wordlen);
+      fwrite (&header, sizeof (header), 1, ofs);
+    }
+    fclose (ofs);
   }
 
   if (debug) {
@@ -499,6 +509,58 @@ write_locations (FILE *ofs, const char *loc_files[], unsigned int n_loc_files, G
     }
   }
   return *pos - start;
+}
+
+static void
+write_index_header (FILE *ofs, unsigned int wlen)
+{
+  unsigned int n_file_bits = 1, n_subseq_bits = 1, n_pos_bits = 1, n_lpos_bits = 1;
+  unsigned long long pos = 0;
+  unsigned int version;
+  unsigned long long file_block_loc, file_block_pos, kmer_list_loc, kmer_list_pos, locations_loc, locations_pos;
+  unsigned char zero[16] = { 0 };
+  /* GT4I */
+  write_entry (index_block, 4, 1, ofs, &pos);
+  /* VERSION */
+  version = VERSION_MAJOR;
+  write_entry (&version, 4, 1, ofs, &pos);
+  version = VERSION_MINOR;
+  write_entry (&version, 4, 1, ofs, &pos);
+  /* Word length */
+  write_entry (&wlen, 4, 1, ofs, &pos);
+  /* Num Words */
+  write_entry (zero, 8, 1, ofs, &pos);
+  /* Num locations */
+  write_entry (zero, 8, 1, ofs, &pos);
+  /* Bitsizes */
+  write_entry (&n_file_bits, 4, 1, ofs, &pos);
+  write_entry (&n_subseq_bits, 4, 1, ofs, &pos);
+  write_entry (&n_pos_bits, 4, 1, ofs, &pos);
+  write_entry (&n_lpos_bits, 4, 1, ofs, &pos);
+  /* File block start */
+  file_block_loc = pos;
+  write_entry (zero, 8, 1, ofs, &pos);
+  /* Kmer list start */
+  kmer_list_loc = pos;
+  write_entry (zero, 8, 1, ofs, &pos);
+  /* Locations start */
+  locations_loc = pos;
+  write_entry (zero, 8, 1, ofs, &pos);
+
+  /* File block */
+  file_block_pos = pos;
+  /* Kmer list */
+  kmer_list_pos = pos;
+  /* Locations */
+  locations_pos = pos;
+
+  /* Write positions */
+  fseek (ofs, file_block_loc, SEEK_SET);
+  fwrite (&file_block_pos, 8, 1, ofs);
+  fseek (ofs, kmer_list_loc, SEEK_SET);
+  fwrite (&kmer_list_pos, 8, 1, ofs);
+  fseek (ofs, locations_loc, SEEK_SET);
+  fwrite (&locations_pos, 8, 1, ofs);
 }
 
 static unsigned int
@@ -913,13 +975,7 @@ merge_tables_to_file (GT4WordTable *tables[], unsigned int ntables_in, int ofile
 
   GT4ListHeader h;
 
-  h.code = GT4_LIST_CODE;
-  h.version_major = VERSION_MAJOR;
-  h.version_minor = VERSION_MINOR;
-  h.wordlength = tables[0]->wordlength;
-  h.nwords = 0;
-  h.totalfreq = 0;
-  h.list_start = sizeof (GT4ListHeader);
+  gt4_list_header_init (&h, tables[0]->wordlength);
 
   write (ofile, &h, sizeof (GT4ListHeader));
 
@@ -969,8 +1025,8 @@ merge_tables_to_file (GT4WordTable *tables[], unsigned int ntables_in, int ofile
         write (ofile, b, bp);
         bp = 0;
       }
-      h.nwords += 1;
-      h.totalfreq += freq;
+      h.n_words += 1;
+      h.total_count += freq;
     }
     word = next;
   }
@@ -979,10 +1035,10 @@ merge_tables_to_file (GT4WordTable *tables[], unsigned int ntables_in, int ofile
   }
   pwrite (ofile, &h, sizeof (GT4ListHeader), 0);
   if (debug) {
-    fprintf (stderr, "Words %llu, unique %llu\n", h.totalfreq, h.nwords);
+    fprintf (stderr, "Words %llu, unique %llu\n", h.total_count, h.n_words);
   }
 
-  return h.nwords;
+  return h.n_words;
 }
 
 #define TMP_BUF_SIZE_INDEX (256 * (8 + sizeof (Location)))

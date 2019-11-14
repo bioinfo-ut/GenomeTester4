@@ -141,9 +141,9 @@ struct _TaskRead {
   void *data;
 };
 
-void gt4_task_read_setup (TaskRead *tr, GT4Queue *queue, AZObject *source, unsigned int idx, unsigned int wordlen);
+void gt4_task_read_setup (TaskRead *tr, const char *id, GT4Queue *queue, AZObject *source, unsigned int idx, unsigned int wordlen);
 void gt4_task_read_release (TaskRead *tr);
-TaskRead *task_read_new (GT4Queue *queue, AZObject *source, unsigned int idx, unsigned int wordlen);
+TaskRead *task_read_new (GT4Queue *queue, const char *id, AZObject *source, unsigned int idx, unsigned int wordlen);
 void task_read_delete (TaskRead *tr);
 
 struct _TaskCollateTables {

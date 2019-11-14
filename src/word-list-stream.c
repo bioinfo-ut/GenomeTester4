@@ -168,9 +168,9 @@ gt4_word_list_stream_new (const char *filename, unsigned int major_version)
   }
 
   /* Set up sorted array interface */
-  stream->slist_instance.num_words = stream->header.nwords;
-  stream->slist_instance.sum_counts = stream->header.totalfreq;
-  stream->slist_instance.word_length = stream->header.wordlength;
+  stream->slist_instance.num_words = stream->header.n_words;
+  stream->slist_instance.sum_counts = stream->header.total_count;
+  stream->slist_instance.word_length = stream->header.word_length;
   if (stream->slist_instance.num_words > 0) {
     lseek (stream->ifile, stream->header.list_start, SEEK_SET);
     if (!stream_read (stream)) {

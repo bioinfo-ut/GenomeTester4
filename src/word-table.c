@@ -350,17 +350,10 @@ wordtable_write_to_file (GT4WordTable *table, const char *outputname, unsigned i
 			totalfreq += freqs[i];
 		}
 	}
-	if (bp) {
-		fwrite (b, 1, bp, f);
-	}
-
-	h.code = GT4_LIST_CODE;
-	h.version_major = VERSION_MAJOR;
-	h.version_minor = VERSION_MINOR;
-	h.wordlength = table->wordlength;
-	h.nwords = count;
-	h.totalfreq = totalfreq;
-	h.list_start = sizeof (GT4ListHeader);
+	if (bp) fwrite (b, 1, bp, f);
+	gt4_list_header_init (&h, table->wordlength);
+	h.n_words = count;
+	h.total_count = totalfreq;
 	fseek (f, 0, SEEK_SET);
 	fwrite (&h, sizeof (GT4ListHeader), 1, f);
 	fclose (f);

@@ -695,7 +695,7 @@ read_file (SNPQueue *snpq, TaskRead *tr)
   /* if (debug > 0) fprintf (stderr, "Thread %d: reading file %s from %llu\n", idx, tt->_seqfile->path, tf->task_read.reader.cpos); */
   result = fasta_reader_read_nwords (&tr->reader, BLOCK_SIZE, start_sequence, end_sequence, NULL, (stats) ? read_nucleotide : NULL, read_word, tr);
   if (result) {
-    /* fprintf (stderr, "Error reading from file %s\n", tt->_seqfile->path); */
+    fprintf (stderr, "read_file: Fasta reader %s returned %u\n", tr->reader.id, result);
     if (!recover) exit (1);
   }
   /* if (debug > 1) fprintf (stderr, "Thread %d: finished reading %s at %llu\n", idx, tt->_seqfile->path, tf->task_read.reader.cpos); */

@@ -23,5 +23,20 @@
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
+#include <string.h>
+
+#include "version.h"
+#include "word-list.h"
+
 unsigned int GT4_LIST_CODE = 'G' << 24 | 'T' << 16 | '4' << 8 | 'C';
 
+void
+gt4_list_header_init (GT4ListHeader *hdr, unsigned int word_length)
+{
+  memset (hdr, 0, sizeof (GT4ListHeader));
+  hdr->code = GT4_LIST_CODE;
+  hdr->version_major = VERSION_MAJOR;
+  hdr->version_minor = VERSION_MINOR;
+  hdr->word_length = word_length;
+  hdr->list_start = sizeof (GT4ListHeader);
+}

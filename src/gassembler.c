@@ -39,7 +39,7 @@ static unsigned int sex = 0;
 static unsigned int output = OUTPUT_POLY_BEST;
 static unsigned int print_extra = 0;
 static unsigned int debug_pos = 0;
-static double error_prob = 0.01f;
+static double error_prob = 0.001f;
 static unsigned int exome = 0;
 static float min_hzp = 0.01f;
 
@@ -87,6 +87,11 @@ unsigned int align_reads_to_reference (NSeq *ref_seq, GASMRead *reads[], unsigne
 unsigned int create_gapped_alignment (NSeq *ref_seq, unsigned int ref_start, GASMRead *a_reads[], unsigned int na, short a[][MAX_REFERENCE_LENGTH], unsigned int aligned_ref[], int ref_pos[], short _p[][MAX_REFERENCE_LENGTH * 2]);
 static void test_alignment (const char *a, const char *b);
 static float find_coverage (GT4Index *index);
+static double calc_p_mdetect (Call *call, CallExtra *extra, unsigned int kmer_cov);
+static double calc_p_qual_haploid (Call *call, CallExtra *extra, unsigned int kmer_cov);
+static double calc_p_qual_diploid (Call *call, CallExtra *extra, unsigned int kmer_cov);
+static double calc_p_select_haploid (Call *call, CallExtra *extra, unsigned int kmer_cov);
+static double calc_p_select_diploid (Call *call, CallExtra *extra, unsigned int kmer_cov, unsigned int n0, unsigned int n1);
 
 struct _GASMRead {
   char *name;
@@ -95,7 +100,8 @@ struct _GASMRead {
   unsigned long long tag;
   unsigned long long mask;
   unsigned long long unknown;
-  unsigned int group;
+  unsigned short group;
+  unsigned short dir;
 };
 
 struct _ReadInfo {
@@ -105,7 +111,7 @@ struct _ReadInfo {
   unsigned int dir;
 };
 
-static GASMRead *gasm_read_new (const char *name, const char *seq, unsigned int wlen);
+static GASMRead *gasm_read_new (const char *name, const char *seq, unsigned int wlen, unsigned int dir);
 static void gasm_read_delete (GASMRead *read);
 
 struct _SeqFile {
@@ -325,8 +331,7 @@ assembly_data_clear (AssemblyData *adata)
 
 static void
 print_header (FILE *ofs) {
-  fprintf (ofs, "CHR\tPOS\tSUB\tREF\tCOV\tCALL\tCLASS\t");
-  if (!exome) fprintf (ofs, "P\tPMUT");
+  fprintf (ofs, "CHR\tPOS\tSUB\tREF\tCOV\tCALL\tCLASS\tP\tPMUT");
   fprintf (ofs, "\tPREV");
   if (print_extra > 0) {
     fprintf (ofs, "\tA\tC\tG\tT\tGAP");
@@ -334,232 +339,6 @@ print_header (FILE *ofs) {
   if (print_extra > 1) {
     fprintf (ofs, "\tPROB\tRPROB\tHZPROB\tEDIST\tGRP_ALL\tGRP\tDIV0\tDIV1\tG0\tG1\tG0_COMP\tG1_COMP\tCOMP_2");
   }
-}
-
-static double
-calc_p_select_diploid (Call *call, CallExtra *extra, unsigned int kmer_cov, unsigned int n0, unsigned int n1)
-{
-  if (exome) return call->cov / (call->cov + 0.25);
-  /* Diloid selection model */
-  double COMP_2 = extra->compat_both;
-  double G0_COMP = extra->compat_0;
-  double katvus = kmer_cov;
-  double EDIST = extra->end_dist;
-  double EDIST0 = (extra->end_dist == 0);
-  double EDIST1 = (extra->end_dist == 1);
-  double EDIST2 = (extra->end_dist == 2);
-  double alternatiiv = (extra->n_groups_total > 1);
-  double ignoreeri = (extra->n_groups_total != extra->n_groups);
-  double max = (call->counts[n0] >= call->counts[n1]) ? call->counts[n0] : call->counts[n1];
-  double all = call->counts[A] + call->counts[C] + call->counts[G] + call->counts[T] + call->counts[GAP];
-  double kaugus1 = (call->cov - katvus) / sqrt(katvus);
-  double kaugus2 = ((max - 0.5 * all) / sqrt(call->cov)) * (extra->n_groups >= 2);
-  double suhe = max / (call->counts[A] + call->counts[C] + call->counts[G] + call->counts[T] + call->counts[GAP]) * (extra->n_groups != 1);
-  double deletsioon2 = ((n0 == GAP) && (n1 == GAP));
-  double deletsioon1 = (((n0 != GAP) && (n1 == GAP)) || ((n0 == GAP) && (n1 != GAP)));
-  double HET = ((n0 == n1) && (n0 != GAP));
-  
-  double p = 1.549817e+01 +
-    COMP_2/G0_COMP * 3.214268e+00 +
-    HET * -1.603723e+01 +
-    deletsioon1 * 4.057173e+00 +
-    deletsioon2 * -1.295838e+01 +
-    katvus * 3.327203e-01 +
-    EDIST0 * -2.055305e+00 +
-    EDIST1 * -1.914959e+00 +
-    EDIST2 * -5.105844e-01 +
-    EDIST * 5.987854e-02 +
-    alternatiiv * -7.634908e-01 +
-    kaugus1 * 1.563516e+00 +
-    kaugus2 * -1.233070e+01 +
-    (kaugus1 + 0.5) * (kaugus1 > (-0.5)) * -3.456876e-01 +
-    (kaugus1 - 2) * (kaugus1 > 2) * -1.089758e-01 +
-    (kaugus1 - 3) * (kaugus1 > 3) * -8.686674e-01 +
-    kaugus2 * kaugus2 * -6.547970e-01 +
-    G0_COMP / katvus * -1.655326e+00 +
-    G0_COMP * G0_COMP / (katvus * katvus) * 2.113226e-01 +
-    (EDIST - 40) * (EDIST - 40) * (EDIST - 40) * (EDIST > 40) * 2.992796e-03 +
-    (EDIST - 45) * (EDIST - 45) * (EDIST - 45) * (EDIST > 45) * -6.197973e-03 +
-    ignoreeri * -2.224370e-01 +
-    suhe * -1.255600e+02 +
-    suhe * suhe * 3.233437e+02 +
-    suhe * suhe * suhe * -2.755079e+02 +
-    suhe * suhe * suhe * suhe * 7.897496e+01 +
-    EDIST * EDIST * -8.887499e-04 +
-    HET * (EDIST <= 5) * -2.998684e-01 +
-    COMP_2 / G0_COMP * katvus * -1.062955e-01 +
-    HET * katvus * -2.855130e-01 +
-    deletsioon1 * katvus * -9.098014e-02 +
-    deletsioon2 * katvus * -2.018754e-01 +
-    deletsioon2 * EDIST * 7.388170e-02 +
-    deletsioon2 * alternatiiv * -4.950726e+00 +
-    deletsioon2 * kaugus1 * -6.573440e-01 +
-    deletsioon2 * kaugus2 * 1.337017e+01 +
-    HET * kaugus2 * kaugus2 * 2.234410e+00 +
-    HET * G0_COMP / katvus * 2.994476e+00 +
-    HET * G0_COMP * G0_COMP / (katvus * katvus) * -4.286640e-01 +
-    HET * kaugus1 * -8.026551e-01 +
-    HET * kaugus2 * 9.614824e+00 +
-    deletsioon1 * EDIST * -1.301157e-01 +
-    EDIST * kaugus1 * -1.017782e-02 +
-    kaugus1 * EDIST * EDIST * 1.413317e-04 +
-    deletsioon1 * EDIST * EDIST * 2.472375e-03;
-  p = exp(p);
-  return (isfinite (p)) ? p / (1 + p) : 1;
-}
-
-static double
-calc_p_select_haploid (Call *call, CallExtra *extra, unsigned int kmer_cov)
-{
-  if (exome) return call->cov / (call->cov + 0.25);
-  /* Haploid selection model */
-  double katvus = kmer_cov;
-  double EDIST = extra->end_dist;
-  double EDIST0 = (extra->end_dist == 0);
-  double kaugus1 = (call->cov - katvus) / sqrt(katvus);
-
-  double p = 2.734031375 +
-    EDIST0 * -8.395304525 +
-    ((EDIST == 1) || (EDIST == 2)) * -2.292773866 +
-    (EDIST - 45) * (EDIST > 45) * 1.502826728 +
-    kaugus1 * 0.617528244 +
-    EDIST * kaugus1 * -0.009752782;
-  p = exp(p);
-  return (isfinite (p)) ? p / (1 + p) : 1;
-}
-
-static double
-calc_p_qual_diploid (Call *call, CallExtra *extra, unsigned int kmer_cov)
-{
-  if (exome) return 1.0 + call->cov / (call->cov + 0.25);
-#ifdef USE_SUB
-  double SUB = call->sub;
-#else
-  double SUB = 0;
-#endif
-  double COMP_2 = extra->compat_both;
-  double G0_COMP = extra->compat_0;
-  double katvus = kmer_cov;
-  double EDIST = extra->end_dist;
-  double EDIST0 = (extra->end_dist == 0);
-  double EDIST1 = (extra->end_dist == 1);
-  double EDIST2 = (extra->end_dist == 2);
-  double alternatiiv = (extra->n_groups_total > 1);
-  double mitualternatiivi = (extra->n_groups_total > 2);
-  double ignoreeri = (extra->n_groups_total != extra->n_groups);
-  double max = (call->counts[call->nucl[0]] >= call->counts[call->nucl[1]]) ? call->counts[call->nucl[0]] : call->counts[call->nucl[1]];
-  double all = call->counts[A] + call->counts[C] + call->counts[G] + call->counts[T] + call->counts[GAP];
-  double kaugus1 = (call->cov - katvus) / sqrt(katvus);
-  double kaugus2 = ((max - 0.5 * all) / sqrt(call->cov)) * (extra->n_groups >= 2);
-  double suhe = max / (call->counts[A] + call->counts[C] + call->counts[G] + call->counts[T] + call->counts[GAP]) * (extra->n_groups != 1);
-  double deletsioon2 = ((call->nucl[0] == GAP) && (call->nucl[1] == GAP));
-  double deletsioon1 = (((call->nucl[0] != GAP) && (call->nucl[1] == GAP)) || ((call->nucl[0] == GAP) && (call->nucl[1] != GAP)));
-  double HET = ((call->nucl[0] == call->nucl[1]) && (call->nucl[0] != GAP));
-
-  double p = 5.625990e+00 +
-    HET * -1.926639e+00 +
-    deletsioon2 * -4.149465e+00 +
-    kaugus1 * 1.976799e+00 +
-    deletsioon1 * -3.674773e-01 +
-    katvus * 2.505259e-01 +
-    COMP_2 / G0_COMP * 3.530792e+00 +
-    mitualternatiivi * 2.384205e-01 +
-    alternatiiv * -1.893987e+00 +
-    EDIST0 * 2.488365e+00 +
-    EDIST1 * 3.614451e+00 +
-    EDIST2 * -8.343540e-01 +
-    (kaugus1 + 2) * (kaugus1 > (-2)) * -3.608020e-01 +
-    (kaugus1 - 2) * (kaugus1 > (2)) * -1.369033e+00 +
-    kaugus2 * -8.717219e-01 +
-    (kaugus1 + 1) * (kaugus1 > (-1)) * -5.990449e-01 +
-    G0_COMP / katvus * -5.090870e-01 +
-    (EDIST - 35) * (EDIST > 35) * 7.200000e-02 +
-    (EDIST - 30) * (EDIST > 30) * -6.277709e-02 +
-    (EDIST - 45) * (EDIST > 45) * 1.407460e-01 +
-    katvus * katvus * -3.807892e-03 +
-    ignoreeri * -5.524936e-01 +
-    1.0 * (SUB > 0) * -1.085515e+00 +
-    HET * (EDIST < 5) * 1.155368e+00 +
-    suhe * -1.489082e+02 +
-    suhe * suhe * 6.542650e+02 +
-    suhe * suhe * suhe * -9.392902e+02 +
-    suhe * suhe * suhe * suhe * 4.360459e+02 +
-    kaugus1 * deletsioon1 * -2.069432e-01 +
-    HET * katvus * 1.598539e-01 +
-    deletsioon2 * katvus * 2.304383e-01 +
-    kaugus1 * katvus * -1.981619e-02 +
-    deletsioon1 * katvus * 5.554233e-02 +
-    deletsioon2 * alternatiiv * -5.609686e-01 +
-    deletsioon2 * kaugus1 * 7.001617e-01 +
-    deletsioon1 * kaugus1 * kaugus1 * 1.859963e-01 +
-    HET * kaugus1 * 6.971654e-01 +
-    HET * kaugus2 * -1.003972e-01 +
-    HET * G0_COMP / katvus * -6.196470e-01 +
-    HET * G0_COMP * G0_COMP / (katvus * katvus) * 1.267673e-01 +
-    katvus * 1.0 * (SUB > 0) * -1.475575e-01 +
-    kaugus1 * 1.0 * (SUB > 0) * -7.022790e-01 +
-    HET * kaugus2 * kaugus2 * 2.281341e-01 +
-    kaugus1 * deletsioon1 * katvus * 1.536606e-02 +
-    HET * kaugus2 * 1.0 * (SUB > 0) * -5.997786e-01;
-  p = exp(p);
-  return (isfinite (p)) ? p / (1 + p) : 1;
-}
-
-static double
-calc_p_qual_haploid (Call *call, CallExtra *extra, unsigned int kmer_cov)
-{
-  if (exome) return 1.0 + call->cov / (call->cov + 0.25);
-  /* Homozygote quality model */
-#ifdef USE_SUB
-  double SUB = call->sub;
-#else
-  double SUB = 0;
-#endif
-  double EDIST = extra->end_dist;
-  double HET = ((call->nucl[0] == call->nucl[1]) && (call->nucl[0] != GAP));
-
-  double p = 7.7911387 +
-    (EDIST - 45) * (EDIST > 45) * 0.7390936 +
-    (SUB > 0) * -5.7026205 +
-    HET * (EDIST < 5) * -0.9447409;
-  p = exp(p);
-  return (isfinite (p)) ? p / (1 + p) : 1;
-}
-
-static double
-calc_p3 (Call *call, CallExtra *extra, unsigned int kmer_cov)
-{
-  if (exome) return 1.0 + call->cov / (call->cov + 0.25);
-  /* Mutation detectability model */
-  double katvus = kmer_cov;
-  double EDIST = extra->end_dist;
-  double EDIST2 = (extra->end_dist == 2);
-  double COV = call->cov;
-  double kaugus1 = (call->cov - katvus) / sqrt(katvus);
-
-  double p = -7.339851e+00 +
-    kaugus1 * 2.457963e+00 +
-    kaugus1 * kaugus1 * -2.092731e-01 +
-    kaugus1 * kaugus1 * kaugus1 * 1.757365e-02 +
-    EDIST * 1.174253e+00 +
-    COV * 2.189787e-01 +
-    katvus * 7.489705e-01 +
-    COV * COV * -1.873808e-02 +
-    COV * COV * COV * 2.716039e-04 +
-    (kaugus1 + 0.5) * (kaugus1 > (-0.5)) * -5.814003e-01 +
-    (kaugus1 - 3) * (kaugus1 > 3) * -8.967198e-02 +
-    EDIST2 * 1.881940e+00 +
-    EDIST * EDIST * -1.146688e-01 +
-    EDIST * EDIST * EDIST * 4.807719e-03 +
-    EDIST * EDIST * EDIST * EDIST * -9.036972e-05 +
-    EDIST * EDIST * EDIST * EDIST * EDIST * 6.263128e-07 +
-    kaugus1 * EDIST * -4.384856e-03 +
-    COV * katvus * -3.309976e-02 +
-    katvus * COV * COV * 9.086561e-04 +
-    katvus * COV * COV * COV * -9.727565e-06 +
-    EDIST * katvus * -9.141201e-05;
-  p = exp(p);
-  return (isfinite (p)) ? p / (1 + p) : 1;
 }
 
 static void
@@ -584,11 +363,9 @@ print_call (CallBlock *cb, unsigned int pos)
   } else {
     fprintf (stdout, "\t0");
   }
-  if (!exome) {
-    /* PVALUE */
-    fprintf (stdout, "\t%.3f", call->q);
-    fprintf (stdout, "\t%.3f", call->p_det);
-  }
+  /* PVALUE */
+  fprintf (stdout, "\t%.3f", call->q);
+  fprintf (stdout, "\t%.3f", call->p_det);
   fprintf (stdout, "\t%c", call->prev_ref);
   if (print_extra > 0) {
     /* A C G T GAP */
@@ -838,7 +615,7 @@ SNV *snvs = NULL;
 SNV *fps = NULL;
 unsigned int n_snvs = 0;
 unsigned int n_fps = 0;
-static unsigned int min_end_distance = 0;
+static unsigned int single_cutoff = 10;
 static unsigned int min_confirming = 2;
 static unsigned int min_group_coverage = 1;
 static unsigned int max_divergent = 4;
@@ -847,7 +624,9 @@ static unsigned int min_group_size = 3;
 static float min_group_rsize = 0.0f;
 static unsigned int max_group_divergence = 3;
 static unsigned int max_group_rdivergence = 3;
-static unsigned int max_uncovered = 10;
+static unsigned int skip_end_align = 10;
+static unsigned int skip_end_call = 10;
+static unsigned int require_both_dirs = 1;
 
 static void
 print_usage (FILE *ofs, unsigned int advanced, int exit_value)
@@ -873,7 +652,7 @@ print_usage (FILE *ofs, unsigned int advanced, int exit_value)
     fprintf (ofs, "Advanced options:\n");
     fprintf (ofs, "    --snvs FILENAME                  - gmer_caller called SNVs\n");
     fprintf (ofs, "    --fp FILENAME                    - List of known false positives\n");
-    fprintf (ofs, "    --min_end_distance INTEGER       - minimum distance from segment end to call (default %u)\n", min_end_distance);
+    fprintf (ofs, "    --error_prob FLOAT               - Probability of error (default %f)\n", error_prob);
     fprintf (ofs, "    --min_confirming INTEGER         - minimum confirming nucleotide count for a call (default %u)\n", min_confirming);
     fprintf (ofs, "    --min_group_coverage INTEGER     - minimum coverage of group (default %u)\n", min_group_coverage);
     fprintf (ofs, "    --max_divergent INTEGER          - maximum number of mismatches per read (default %u)\n", max_divergent);
@@ -882,7 +661,9 @@ print_usage (FILE *ofs, unsigned int advanced, int exit_value)
     fprintf (ofs, "    --min_group_rsize FLOAT          - minimum relative group size (default %.2f)\n", min_group_rsize);
     fprintf (ofs, "    --max_group_divergence INTEGER   - maximum divergence in group (default %u)\n", max_group_divergence);
     fprintf (ofs, "    --max_group_rdivergence INTEGER  - maximum relative divergence in group (default %u)\n", max_group_rdivergence);
-    fprintf (ofs, "    --max_uncovered INTEGER          - maximum length of sequence end not covered by group (default %u)\n", max_uncovered);
+    fprintf (ofs, "    --skip_end_align INTEGER         - skip nucleotides at region ends during alignment (default %u)\n", skip_end_align);
+    fprintf (ofs, "    --skip_end_call INTEGER          - skip nucleotides at alignment ends (default %u)\n", skip_end_call);
+    fprintf (ofs, "    --allow_one_dir                  - Allow calling if all confirming reads have the same dir\n");
     fprintf (ofs, "    --output poly | best | all       - output type (only polymorphisms, best calls for positon, all calls) (default poly)\n");
     fprintf (ofs, "    --counts                         - output nucleotide counts\n");
     fprintf (ofs, "    --extra                          - output extra information about call\n");
@@ -981,10 +762,10 @@ main (int argc, const char *argv[])
       } else {
         print_usage (stderr, 0, 1);
       }
-    } else if (!strcmp (argv[i], "--min_end_distance")) {
+    } else if (!strcmp (argv[i], "--error_prob")) {
       i += 1;
       if (i >= argc) print_usage (stderr, 0, 1);
-      min_end_distance = strtol (argv[i], NULL, 10);
+      error_prob = atof (argv[i]);
     } else if (!strcmp (argv[i], "--min_confirming")) {
       i += 1;
       if (i >= argc) print_usage (stderr, 0, 1);
@@ -1017,10 +798,16 @@ main (int argc, const char *argv[])
       i += 1;
       if (i >= argc) print_usage (stderr, 0, 1);
       max_group_rdivergence = strtol (argv[i], NULL, 10);
-    } else if (!strcmp (argv[i], "--max_uncovered")) {
+    } else if (!strcmp (argv[i], "--skip_end_align")) {
       i += 1;
       if (i >= argc) print_usage (stderr, 0, 1);
-      max_uncovered = strtol (argv[i], NULL, 10);
+      skip_end_align = strtol (argv[i], NULL, 10);
+    } else if (!strcmp (argv[i], "--skip_end_call")) {
+      i += 1;
+      if (i >= argc) print_usage (stderr, 0, 1);
+      skip_end_call = strtol (argv[i], NULL, 10);
+    } else if (!strcmp (argv[i], "--allow_one_dir")) {
+      require_both_dirs = 0;
     } else if (!strcmp (argv[i], "--coverage")) {
       i += 1;
       if (i >= argc) print_usage (stderr, 0, 1);
@@ -1286,27 +1073,36 @@ assemble_recursive (KMerDB *db, SeqFile *files, unsigned int ref_chr, unsigned i
   return result;
 }
 
-static float
-gt1_prob (unsigned int gt_count, unsigned int total_count)
+static double
+gt1_prob (const unsigned short counts[], unsigned int n0, unsigned int coverage)
 {
-  double q0, q1;
-  unsigned int err_count = total_count - gt_count;
-  q0 = poisson (err_count, error_prob * total_count);
-  q1 = poisson (gt_count, total_count);
-  if (debug_pos) fprintf (stderr, "gt_count %u total_count %u q0 %g q1 %g\n", gt_count, total_count, q0, q1);
-  return (float) (q0 * q1);
+  unsigned int i;
+  double log_p = lgamma (coverage);
+  for (i = A; i <= GAP; i++) {
+    log_p -= lgamma (counts[i]);
+    if (i == n0) {
+      log_p += (log (1 - error_prob) * counts[i]);
+    } else {
+      log_p += (log (error_prob / 4) * counts[i]);
+    }
+  }
+  return exp (log_p);
 }
 
 static float
-gt2_prob (unsigned int gt1_count, unsigned int gt2_count, unsigned int total_count)
+gt2_prob (const unsigned short counts[], unsigned int n0, unsigned int n1, unsigned int coverage)
 {
-  double q0, q1, q2;
-  unsigned int err_count = total_count - gt1_count - gt2_count;
-  q0 = poisson (err_count, error_prob * total_count);
-  q1 = poisson (gt1_count, total_count / 2.0);
-  q2 = poisson (gt2_count, total_count / 2.0);
-  if (debug_pos) fprintf (stderr, "gt1_count %u gt2_count %u total_count %u q0 %g q1 %g q2 %g\n", gt1_count, gt2_count, total_count, q0, q1, q2);
-  return (float) (q0 * q1 * q2);
+  unsigned int i;
+  double log_p = lgamma (coverage);
+  for (i = A; i <= GAP; i++) {
+    log_p -= lgamma (counts[i]);
+    if ((i == n0) || (i == n1)) {
+      log_p += (log (0.5 - error_prob / 2) * counts[i]);
+    } else {
+      log_p += (log (error_prob / 3) * counts[i]);
+    }
+  }
+  return exp (log_p);
 }
 
 static unsigned int
@@ -1348,9 +1144,8 @@ struct _Group {
   unsigned int compat;
   unsigned int min_cov;
   unsigned int max_cov;
-  unsigned int has_start;
-  unsigned int has_end;
-  unsigned int divergent;
+  unsigned short divergent;
+  unsigned short dirs;
   unsigned int *consensus;
 };
 
@@ -1420,10 +1215,11 @@ align (AssemblyData *adata, const char *kmers[], unsigned int nkmers)
   for (i = 0; i < adata->p_len; i++) {
     unsigned int j;
     unsigned int diverges = 0;
+    unsigned int cutoff = (adata->coverage[i] >= single_cutoff) ? 2 : 1;
     for (j = 0; j <= GAP; j++) {
       if (j == adata->aligned_ref[i]) continue;
       if (j == N) continue;
-      if (adata->nucl_counts[i][j] >= 2) diverges = 1;
+      if (adata->nucl_counts[i][j] >= cutoff) diverges = 1;
     }
     if (diverges) {
       unsigned int known = 0;
@@ -1449,7 +1245,7 @@ align (AssemblyData *adata, const char *kmers[], unsigned int nkmers)
         unsigned int nucl = adata->alignment[j][i];
         unsigned int mask = 7;
         /* Do not count single nucleotides */
-        if ((nucl <= GAP) && (adata->nucl_counts[i][nucl] < 2)) mask = 0;
+        if ((nucl <= GAP) && (adata->nucl_counts[i][nucl] < cutoff)) mask = 0;
         /* N-s are counted same as reference */
         if (nucl == N) nucl = ref;
         /* Uncovered positions are counted as reference but masked */
@@ -1493,7 +1289,7 @@ group (AssemblyData *adata, unsigned int print)
       }
     }
   }
-
+  /* Distribute reads into singleto groups */
   memset (groups, 0, sizeof (groups));
   unsigned int n_groups = adata->na;
   for (i = 0; i < adata->na; i++) {
@@ -1501,11 +1297,12 @@ group (AssemblyData *adata, unsigned int print)
     groups[i].size = 1;
     groups[i].tag = adata->aligned_reads[i]->tag & adata->aligned_reads[i]->mask;
     groups[i].mask = adata->aligned_reads[i]->mask;
+    groups[i].dirs = adata->aligned_reads[i]->dir;
   }
   if (debug > 1) {
-    for (i = 0; i < n_groups; i++) fprintf (stderr, "%llu\t", groups[i].tag);
+    for (i = 0; i < n_groups; i++) fprintf (stderr, "%llx\t", groups[i].tag);
     fprintf (stderr, "\n");
-    for (i = 0; i < n_groups; i++) fprintf (stderr, "%llu\t", groups[i].mask);
+    for (i = 0; i < n_groups; i++) fprintf (stderr, "%llx\t", groups[i].mask);
     fprintf (stderr, "\n");
   }
   memset (adata->is_compat, 0, n_groups * MAX_GROUPS);
@@ -1559,16 +1356,18 @@ group (AssemblyData *adata, unsigned int print)
     }
     if (max_i == max_j) break;
     /* Can merge groups i and j */
-    if (debug_groups) fprintf (stderr, "Merging groups %u (size %u) and %u (size %u) (common %u): %llu %llu %llu %llu -> ", max_i, groups[max_i].size, max_j, groups[max_j].size, adata->n_common[max_i][max_j], groups[max_i].tag, groups[max_i].mask, groups[max_j].tag, groups[max_j].mask);
+    if (debug_groups) fprintf (stderr, "Merging groups %u (size %u) and %u (size %u) (common %u): %llx %llx %llx %llx -> ", max_i, groups[max_i].size, max_j, groups[max_j].size, adata->n_common[max_i][max_j], groups[max_i].tag, groups[max_i].mask, groups[max_j].tag, groups[max_j].mask);
     groups[max_i].tag = (groups[max_i].tag & groups[max_i].mask) | (groups[max_j].tag & groups[max_j].mask);
     groups[max_i].mask = groups[max_i].mask | groups[max_j].mask;
     groups[max_i].size += groups[max_j].size;
-    if (debug_groups) fprintf (stderr, "%llu %llu\n", groups[max_i].tag, groups[max_i].tag);
+    groups[max_i].dirs |= groups[max_j].dirs;
+    if (debug_groups) fprintf (stderr, "%llx %llx\n", groups[max_i].tag, groups[max_j].mask);
     for (i = 0; i < adata->na; i++) if (adata->aligned_reads[i]->group == max_j) adata->aligned_reads[i]->group = max_i;
     n_groups -= 1;
     groups[max_j].tag = groups[n_groups].tag;
     groups[max_j].mask = groups[n_groups].mask;
     groups[max_j].size = groups[n_groups].size;
+    groups[max_j].dirs = groups[n_groups].dirs;
     for (i = 0; i < adata->na; i++) if (adata->aligned_reads[i]->group == n_groups) adata->aligned_reads[i]->group = max_j;
   }
   if (debug_groups) fprintf (stderr, "Num remaining groups: %u\n", n_groups);
@@ -1584,10 +1383,6 @@ group (AssemblyData *adata, unsigned int print)
       }
       if (cov < groups[i].min_cov) groups[i].min_cov = cov;
       if (cov > groups[i].max_cov) groups[i].max_cov = cov;
-      if (cov) {
-        if (j <= max_uncovered) groups[i].has_start = 1;
-        if (j >= (adata->p_len - 1 - max_uncovered)) groups[i].has_end = 1;
-      }
     }
     /* Calculate compat */
     for (j = 0; j < adata->na; j++) {
@@ -1668,7 +1463,7 @@ group (AssemblyData *adata, unsigned int print)
   if (debug_groups > 0) {
     for (i = 0; i < n_groups; i++) {
       unsigned int j;
-      if (debug_groups > 0) fprintf (stderr, "Group %u size %u divergent %u, min %u max %u\n", i, groups[i].size, groups[i].divergent, groups[i].min_cov, groups[i].max_cov);
+      if (debug_groups > 0) fprintf (stderr, "Group %u size %u divergent %u, min %u max %u tag %llx mask %llx\n", i, groups[i].size, groups[i].divergent, groups[i].min_cov, groups[i].max_cov, groups[i].tag, groups[i].mask);
       if (debug_groups > 1) {
         for (j = 0; j < adata->p_len; j++) fprintf (stderr, "%c", n2c[groups[i].consensus[j]]);
         fprintf (stderr, "\n");
@@ -1690,19 +1485,16 @@ group (AssemblyData *adata, unsigned int print)
   }
   if (adata->chr == CHR_MT) max_groups = 1;
 
+
   unsigned int min_div = groups[0].divergent;
   for (i = 0; i < n_groups; i++) if (groups[i].divergent < min_div) min_div = groups[i].divergent;
   unsigned int good_groups[2];
   unsigned int n_included = 0;
   for (i = 0; i < n_groups; i++) {
     groups[i].included = (n_included < max_groups);
-    if (!groups[i].has_start) {
+    if (require_both_dirs && (groups[i].dirs != 3)) {
       groups[i].included = 0;
-      if (debug_groups > 0) fprintf (stderr, "Discarded group %u (%u): Start position not covered\n", i, groups[i].size);
-    }
-    if (!groups[i].has_end) {
-      groups[i].included = 0;
-      if (debug_groups > 0) fprintf (stderr, "Discarded group %u (%u): End position not covered\n", i, groups[i].size);
+      if (debug_groups > 0) fprintf (stderr, "Discarded group %u (%u): All reads have the same dir (%s)\n", i, groups[i].size, (groups[i].dirs == 2) ? "rev" : "fwd");
     }
     if (groups[i].min_cov < min_group_coverage) {
       groups[i].included = 0;
@@ -1821,7 +1613,7 @@ recalculate_and_call (AssemblyData *adata, Group groups[], unsigned int n_groups
   CallBlock *cb = adata->cblock;
   cb->n_calls = 0;
   cb->chr_cov = chr_coverage;
-  for (i = 0; i < adata->p_len; i++) {
+  for (i = skip_end_call; i < (adata->p_len - skip_end_call); i++) {
     CallExtra extra = { 0 };
     unsigned int hz = 0;
     if (adata->ref_pos[i] == last_call_pos) {
@@ -1943,59 +1735,64 @@ call (AssemblyData *adata, CallBlock *cb, unsigned int a_pos, unsigned int sub, 
     /* NC if too small coverage of most numerous allele */
     if (best0 < min_confirming) return 1;
 
-    double p0 = gt1_prob (best0, adata->coverage[a_pos] - call->counts[N]);
-    double p1 = (best1 > 2) ? gt1_prob (best1, adata->coverage[a_pos] - call->counts[N]) : 0;
-    double p2 = (best1 > 2) ? gt2_prob (best0, best1, adata->coverage[a_pos] - call->counts[N]) : 0;
-    double sum_probs = p0 + p1 + p2;
-    if (!sum_probs) sum_probs = 1;
-    double best_prob = p0;
-    double hzp = 1;
     unsigned int local_cov = cb->chr_cov;
+    double p_hom, p_het;
+    if (!exome) {
+      p_hom = calc_p_select_diploid (call, extra, local_cov, best_n0, best_n0);
+      p_het = calc_p_select_diploid (call, extra, local_cov, best_n0, best_n1);
+    } else {
+      p_hom = gt1_prob (call->counts, best_n0, adata->coverage[a_pos] - call->counts[N]);
+      p_het = (best1 >= min_confirming) ? gt2_prob (call->counts, best_n0, best_n1, adata->coverage[a_pos] - call->counts[N]) : 0;
+    }
+    double sum_probs = p_hom + p_het;
+    if (!sum_probs) sum_probs = 1;
+    p_hom /= sum_probs;
+    p_het /= sum_probs;
+    double hzp = 1;
     if (coverage == -2) local_cov = call->cov;
     if (cb->haploid) {
       /* Haploid */
-      call->nucl[0] = call->nucl[1] = best_n0;
-      call->p = calc_p_select_haploid (call, extra, local_cov);
-      call->q = calc_p_qual_haploid (call, extra, local_cov);
       best_n1 = best_n0;
+      call->nucl[0] = call->nucl[1] = best_n0;
+      if (!exome) {
+        call->p = calc_p_select_haploid (call, extra, local_cov);
+        call->q = calc_p_qual_haploid (call, extra, local_cov);
+      } else {
+        call->p = call->q = p_hom;
+      }
     } else if (!best1 || force_homozygote) {
       /* Diploid homozygote */
-      call->nucl[0] = call->nucl[1] = best_n0;
-      call->p = calc_p_select_diploid (call, extra, local_cov, best_n0, best_n0);
-      call->q = calc_p_qual_diploid (call, extra, local_cov);
       best_n1 = best_n0;
+      call->nucl[0] = call->nucl[1] = best_n0;
+      if (!exome) {
+        call->p = calc_p_select_diploid (call, extra, local_cov, best_n0, best_n0);
+        call->q = calc_p_qual_diploid (call, extra, local_cov);
+      } else {
+        call->p = call->q = p_hom;
+      }
     } else {
       /* Heterozygote */
-      double d_hom, d_het;
-      double p_het = calc_p_select_diploid (call, extra, local_cov, best_n0, best_n1);
-      double p_hom = calc_p_select_diploid (call, extra, local_cov, best_n0, best_n0);
-      if (exome) {
-        d_het = 0;
-        for (j = 0; j <= best1; j++) {
-          d_het += dbinom (j, best0 + best1, 0.5);
-        }
-        d_hom = min_hzp;
-      } else {
-        d_het = p_het;
-        d_hom = p_hom;
-      }
-      if (d_het >= d_hom) {
+      if (p_het >= p_hom) {
         call->nucl[0] = (best_n0 < best_n1) ? best_n0 : best_n1;
         call->nucl[1] = (best_n0 < best_n1) ? best_n1 : best_n0;
         call->p = p_het;
       } else {
         assert (best0 >= best1);
         assert (call->counts[best_n0] >= call->counts[best_n1]);
+        best_n1 = best_n0;
         call->nucl[0] = call->nucl[1] = best_n0;
         call->p = p_hom;
-        best_n1 = best_n0;
       }
-      call->q = calc_p_qual_diploid (call, extra, local_cov);
+      if (!exome) {
+        call->q = calc_p_qual_diploid (call, extra, local_cov);
+      } else {
+        call->q = call->p;
+      }
     }
-    call->p_det = calc_p3 (call, extra, local_cov);
+    call->p_det = calc_p_mdetect (call, extra, local_cov);
     call->poly = ((call->nucl[0] != adata->aligned_ref[a_pos]) || (call->nucl[1] != adata->aligned_ref[a_pos]));
-    extra->prob = best_prob;
-    extra->rprob = best_prob / sum_probs;
+    extra->prob = 1;//best_prob;
+    extra->rprob = call->q / sum_probs;
     extra->hzprob = hzp;
     
     return 1;
@@ -2021,11 +1818,11 @@ assemble (AssemblyData *adata, const char *kmers[], unsigned int nkmers, unsigne
   if (result <= 0) {
     /* Fill call block with NC-s */
     CallBlock *cb = adata->cblock;
-    cb->n_calls = adata->end - adata->start;
+    cb->n_calls = adata->end - adata->start - 2 * skip_end_align - 2 * skip_end_call;
     for (i = 0; i < cb->n_calls; i++) {
       memset (&cb->calls[i], 0, sizeof (Call));
-      cb->calls[i].pos = adata->start + i;
-      cb->calls[i].ref = adata->ref_seq->pos[i].nucl;
+      cb->calls[i].pos = adata->start + skip_end_align + skip_end_call + i;
+      cb->calls[i].ref = adata->ref_seq->pos[skip_end_align + skip_end_call + i].nucl;
       cb->calls[i].prev_ref = '.';
     }
   }
@@ -2156,15 +1953,19 @@ align_reads_to_reference (NSeq *ref_seq, GASMRead *reads[], unsigned int nreads,
 unsigned int
 create_gapped_alignment (NSeq *ref_seq, unsigned int ref_start, GASMRead *a_reads[], unsigned int na, short a[][MAX_REFERENCE_LENGTH], unsigned int aligned_ref[], int ref_pos[], short _p[][MAX_REFERENCE_LENGTH * 2])
 {
-  int ref_p = 0, last_ref_p = UNKNOWN;
+  int ref_p, last_ref_p;
   int read_p[1024], last_read_p[1024];
   unsigned int p_len = 0;
   unsigned int i;
+  /* Set read positions to alignment start (+ skip) */
   for (i = 0; i < na; i++) {
-    read_p[i] = a[i][0];
+    read_p[i] = a[i][skip_end_align];
     last_read_p[i] = UNKNOWN;
   }
-  while (ref_p < ref_seq->len) {
+  ref_p = skip_end_align;
+  last_ref_p = UNKNOWN;
+  /* Iterate over reference (+ skip) */
+  while (ref_p < (ref_seq->len - skip_end_align)) {
     /* Write alignment */
     /* Ref */
     if ((last_ref_p < 0) || (ref_p > last_ref_p)) {
@@ -2188,7 +1989,7 @@ create_gapped_alignment (NSeq *ref_seq, unsigned int ref_start, GASMRead *a_read
     }
     /* Advance */
     int rgap = 1;
-    if (ref_p < (ref_seq->len - 1)) {
+    if (ref_p < (ref_seq->len - skip_end_align - 1)) {
       int next_ref_p = ref_p + 1;
       for (i = 0; i < na; i++) {
         int next_read_p = a[i][next_ref_p];
@@ -2198,7 +1999,7 @@ create_gapped_alignment (NSeq *ref_seq, unsigned int ref_start, GASMRead *a_read
         }
       }
     }
-    if (ref_p < (ref_seq->len - 1)) {
+    if (ref_p < (ref_seq->len - skip_end_align - 1)) {
       int next_ref_p = ref_p + 1;
       for (i = 0; i < na; i++) {
         int next_read_p = a[i][next_ref_p];
@@ -2796,7 +2597,7 @@ get_read_sequences (GASMRead *seqs[], const ReadInfo reads[], unsigned int nread
     memcpy (seq, p, len);
     seq[len] = 0;
     if (reads[i].dir) gt4_string_revcomp_inplace (seq, len);
-    seqs[i] = gasm_read_new (name, seq, WORDLEN);
+    seqs[i] = gasm_read_new (name, seq, WORDLEN, reads[i].dir);
     if (debug > 1) fprintf (stderr, "Read %2u(%u): >%s\n%s\n", i, reads[i].dir, seqs[i]->name, seqs[i]->seq);
   }
   return 1;
@@ -2917,13 +2718,14 @@ find_coverage (GT4Index *index)
 }
 
 static GASMRead *
-gasm_read_new (const char *name, const char *seq, unsigned int wlen)
+gasm_read_new (const char *name, const char *seq, unsigned int wlen, unsigned int dir)
 {
   GASMRead *read = (GASMRead *) malloc (sizeof (GASMRead));
   memset (read, 0, sizeof (GASMRead));
   read->name = strdup (name);
   read->seq = strdup (seq);
   read->nseq = n_seq_new (seq, wlen);
+  read->dir = (1U << dir);
   return read;
 }
 
@@ -2934,5 +2736,231 @@ gasm_read_delete (GASMRead *read)
   free (read->seq);
   n_seq_delete (read->nseq);
   free (read);
+}
+
+static double
+calc_p_select_diploid (Call *call, CallExtra *extra, unsigned int kmer_cov, unsigned int n0, unsigned int n1)
+{
+  if (exome) return call->cov / (call->cov + 0.25);
+  /* Diloid selection model */
+  double COMP_2 = extra->compat_both;
+  double G0_COMP = extra->compat_0;
+  double katvus = kmer_cov;
+  double EDIST = extra->end_dist;
+  double EDIST0 = (extra->end_dist == 0);
+  double EDIST1 = (extra->end_dist == 1);
+  double EDIST2 = (extra->end_dist == 2);
+  double alternatiiv = (extra->n_groups_total > 1);
+  double ignoreeri = (extra->n_groups_total != extra->n_groups);
+  double max = (call->counts[n0] >= call->counts[n1]) ? call->counts[n0] : call->counts[n1];
+  double all = call->counts[A] + call->counts[C] + call->counts[G] + call->counts[T] + call->counts[GAP];
+  double kaugus1 = (call->cov - katvus) / sqrt(katvus);
+  double kaugus2 = ((max - 0.5 * all) / sqrt(call->cov)) * (extra->n_groups >= 2);
+  double suhe = max / (call->counts[A] + call->counts[C] + call->counts[G] + call->counts[T] + call->counts[GAP]) * (extra->n_groups != 1);
+  double deletsioon2 = ((n0 == GAP) && (n1 == GAP));
+  double deletsioon1 = (((n0 != GAP) && (n1 == GAP)) || ((n0 == GAP) && (n1 != GAP)));
+  double HET = ((n0 == n1) && (n0 != GAP));
+  
+  double p = 1.549817e+01 +
+    COMP_2/G0_COMP * 3.214268e+00 +
+    HET * -1.603723e+01 +
+    deletsioon1 * 4.057173e+00 +
+    deletsioon2 * -1.295838e+01 +
+    katvus * 3.327203e-01 +
+    EDIST0 * -2.055305e+00 +
+    EDIST1 * -1.914959e+00 +
+    EDIST2 * -5.105844e-01 +
+    EDIST * 5.987854e-02 +
+    alternatiiv * -7.634908e-01 +
+    kaugus1 * 1.563516e+00 +
+    kaugus2 * -1.233070e+01 +
+    (kaugus1 + 0.5) * (kaugus1 > (-0.5)) * -3.456876e-01 +
+    (kaugus1 - 2) * (kaugus1 > 2) * -1.089758e-01 +
+    (kaugus1 - 3) * (kaugus1 > 3) * -8.686674e-01 +
+    kaugus2 * kaugus2 * -6.547970e-01 +
+    G0_COMP / katvus * -1.655326e+00 +
+    G0_COMP * G0_COMP / (katvus * katvus) * 2.113226e-01 +
+    (EDIST - 40) * (EDIST - 40) * (EDIST - 40) * (EDIST > 40) * 2.992796e-03 +
+    (EDIST - 45) * (EDIST - 45) * (EDIST - 45) * (EDIST > 45) * -6.197973e-03 +
+    ignoreeri * -2.224370e-01 +
+    suhe * -1.255600e+02 +
+    suhe * suhe * 3.233437e+02 +
+    suhe * suhe * suhe * -2.755079e+02 +
+    suhe * suhe * suhe * suhe * 7.897496e+01 +
+    EDIST * EDIST * -8.887499e-04 +
+    HET * (EDIST <= 5) * -2.998684e-01 +
+    COMP_2 / G0_COMP * katvus * -1.062955e-01 +
+    HET * katvus * -2.855130e-01 +
+    deletsioon1 * katvus * -9.098014e-02 +
+    deletsioon2 * katvus * -2.018754e-01 +
+    deletsioon2 * EDIST * 7.388170e-02 +
+    deletsioon2 * alternatiiv * -4.950726e+00 +
+    deletsioon2 * kaugus1 * -6.573440e-01 +
+    deletsioon2 * kaugus2 * 1.337017e+01 +
+    HET * kaugus2 * kaugus2 * 2.234410e+00 +
+    HET * G0_COMP / katvus * 2.994476e+00 +
+    HET * G0_COMP * G0_COMP / (katvus * katvus) * -4.286640e-01 +
+    HET * kaugus1 * -8.026551e-01 +
+    HET * kaugus2 * 9.614824e+00 +
+    deletsioon1 * EDIST * -1.301157e-01 +
+    EDIST * kaugus1 * -1.017782e-02 +
+    kaugus1 * EDIST * EDIST * 1.413317e-04 +
+    deletsioon1 * EDIST * EDIST * 2.472375e-03;
+  p = exp(p);
+  return (isfinite (p)) ? p / (1 + p) : 1;
+}
+
+static double
+calc_p_select_haploid (Call *call, CallExtra *extra, unsigned int kmer_cov)
+{
+  if (exome) return call->cov / (call->cov + 0.25);
+  /* Haploid selection model */
+  double katvus = kmer_cov;
+  double EDIST = extra->end_dist;
+  double EDIST0 = (extra->end_dist == 0);
+  double kaugus1 = (call->cov - katvus) / sqrt(katvus);
+
+  double p = 2.734031375 +
+    EDIST0 * -8.395304525 +
+    ((EDIST == 1) || (EDIST == 2)) * -2.292773866 +
+    (EDIST - 45) * (EDIST > 45) * 1.502826728 +
+    kaugus1 * 0.617528244 +
+    EDIST * kaugus1 * -0.009752782;
+  p = exp(p);
+  return (isfinite (p)) ? p / (1 + p) : 1;
+}
+
+static double
+calc_p_qual_diploid (Call *call, CallExtra *extra, unsigned int kmer_cov)
+{
+  if (exome) return 1.0 + call->cov / (call->cov + 0.25);
+#ifdef USE_SUB
+  double SUB = call->sub;
+#else
+  double SUB = 0;
+#endif
+  double COMP_2 = extra->compat_both;
+  double G0_COMP = extra->compat_0;
+  double katvus = kmer_cov;
+  double EDIST = extra->end_dist;
+  double EDIST0 = (extra->end_dist == 0);
+  double EDIST1 = (extra->end_dist == 1);
+  double EDIST2 = (extra->end_dist == 2);
+  double alternatiiv = (extra->n_groups_total > 1);
+  double mitualternatiivi = (extra->n_groups_total > 2);
+  double ignoreeri = (extra->n_groups_total != extra->n_groups);
+  double max = (call->counts[call->nucl[0]] >= call->counts[call->nucl[1]]) ? call->counts[call->nucl[0]] : call->counts[call->nucl[1]];
+  double all = call->counts[A] + call->counts[C] + call->counts[G] + call->counts[T] + call->counts[GAP];
+  double kaugus1 = (call->cov - katvus) / sqrt(katvus);
+  double kaugus2 = ((max - 0.5 * all) / sqrt(call->cov)) * (extra->n_groups >= 2);
+  double suhe = max / (call->counts[A] + call->counts[C] + call->counts[G] + call->counts[T] + call->counts[GAP]) * (extra->n_groups != 1);
+  double deletsioon2 = ((call->nucl[0] == GAP) && (call->nucl[1] == GAP));
+  double deletsioon1 = (((call->nucl[0] != GAP) && (call->nucl[1] == GAP)) || ((call->nucl[0] == GAP) && (call->nucl[1] != GAP)));
+  double HET = ((call->nucl[0] == call->nucl[1]) && (call->nucl[0] != GAP));
+
+  double p = 5.625990e+00 +
+    HET * -1.926639e+00 +
+    deletsioon2 * -4.149465e+00 +
+    kaugus1 * 1.976799e+00 +
+    deletsioon1 * -3.674773e-01 +
+    katvus * 2.505259e-01 +
+    COMP_2 / G0_COMP * 3.530792e+00 +
+    mitualternatiivi * 2.384205e-01 +
+    alternatiiv * -1.893987e+00 +
+    EDIST0 * 2.488365e+00 +
+    EDIST1 * 3.614451e+00 +
+    EDIST2 * -8.343540e-01 +
+    (kaugus1 + 2) * (kaugus1 > (-2)) * -3.608020e-01 +
+    (kaugus1 - 2) * (kaugus1 > (2)) * -1.369033e+00 +
+    kaugus2 * -8.717219e-01 +
+    (kaugus1 + 1) * (kaugus1 > (-1)) * -5.990449e-01 +
+    G0_COMP / katvus * -5.090870e-01 +
+    (EDIST - 35) * (EDIST > 35) * 7.200000e-02 +
+    (EDIST - 30) * (EDIST > 30) * -6.277709e-02 +
+    (EDIST - 45) * (EDIST > 45) * 1.407460e-01 +
+    katvus * katvus * -3.807892e-03 +
+    ignoreeri * -5.524936e-01 +
+    1.0 * (SUB > 0) * -1.085515e+00 +
+    HET * (EDIST < 5) * 1.155368e+00 +
+    suhe * -1.489082e+02 +
+    suhe * suhe * 6.542650e+02 +
+    suhe * suhe * suhe * -9.392902e+02 +
+    suhe * suhe * suhe * suhe * 4.360459e+02 +
+    kaugus1 * deletsioon1 * -2.069432e-01 +
+    HET * katvus * 1.598539e-01 +
+    deletsioon2 * katvus * 2.304383e-01 +
+    kaugus1 * katvus * -1.981619e-02 +
+    deletsioon1 * katvus * 5.554233e-02 +
+    deletsioon2 * alternatiiv * -5.609686e-01 +
+    deletsioon2 * kaugus1 * 7.001617e-01 +
+    deletsioon1 * kaugus1 * kaugus1 * 1.859963e-01 +
+    HET * kaugus1 * 6.971654e-01 +
+    HET * kaugus2 * -1.003972e-01 +
+    HET * G0_COMP / katvus * -6.196470e-01 +
+    HET * G0_COMP * G0_COMP / (katvus * katvus) * 1.267673e-01 +
+    katvus * 1.0 * (SUB > 0) * -1.475575e-01 +
+    kaugus1 * 1.0 * (SUB > 0) * -7.022790e-01 +
+    HET * kaugus2 * kaugus2 * 2.281341e-01 +
+    kaugus1 * deletsioon1 * katvus * 1.536606e-02 +
+    HET * kaugus2 * 1.0 * (SUB > 0) * -5.997786e-01;
+  p = exp(p);
+  return (isfinite (p)) ? p / (1 + p) : 1;
+}
+
+static double
+calc_p_qual_haploid (Call *call, CallExtra *extra, unsigned int kmer_cov)
+{
+  if (exome) return 1.0 + call->cov / (call->cov + 0.25);
+  /* Homozygote quality model */
+#ifdef USE_SUB
+  double SUB = call->sub;
+#else
+  double SUB = 0;
+#endif
+  double EDIST = extra->end_dist;
+  double HET = ((call->nucl[0] == call->nucl[1]) && (call->nucl[0] != GAP));
+
+  double p = 7.7911387 +
+    (EDIST - 45) * (EDIST > 45) * 0.7390936 +
+    (SUB > 0) * -5.7026205 +
+    HET * (EDIST < 5) * -0.9447409;
+  p = exp(p);
+  return (isfinite (p)) ? p / (1 + p) : 1;
+}
+
+static double
+calc_p_mdetect (Call *call, CallExtra *extra, unsigned int kmer_cov)
+{
+  if (exome) return call->cov / (call->cov + 8.0);
+  /* Mutation detectability model */
+  double katvus = kmer_cov;
+  double EDIST = extra->end_dist;
+  double EDIST2 = (extra->end_dist == 2);
+  double COV = call->cov;
+  double kaugus1 = (call->cov - katvus) / sqrt(katvus);
+
+  double p = -7.339851e+00 +
+    kaugus1 * 2.457963e+00 +
+    kaugus1 * kaugus1 * -2.092731e-01 +
+    kaugus1 * kaugus1 * kaugus1 * 1.757365e-02 +
+    EDIST * 1.174253e+00 +
+    COV * 2.189787e-01 +
+    katvus * 7.489705e-01 +
+    COV * COV * -1.873808e-02 +
+    COV * COV * COV * 2.716039e-04 +
+    (kaugus1 + 0.5) * (kaugus1 > (-0.5)) * -5.814003e-01 +
+    (kaugus1 - 3) * (kaugus1 > 3) * -8.967198e-02 +
+    EDIST2 * 1.881940e+00 +
+    EDIST * EDIST * -1.146688e-01 +
+    EDIST * EDIST * EDIST * 4.807719e-03 +
+    EDIST * EDIST * EDIST * EDIST * -9.036972e-05 +
+    EDIST * EDIST * EDIST * EDIST * EDIST * 6.263128e-07 +
+    kaugus1 * EDIST * -4.384856e-03 +
+    COV * katvus * -3.309976e-02 +
+    katvus * COV * COV * 9.086561e-04 +
+    katvus * COV * COV * COV * -9.727565e-06 +
+    EDIST * katvus * -9.141201e-05;
+  p = exp(p);
+  return (isfinite (p)) ? p / (1 + p) : 1;
 }
 
