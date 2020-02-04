@@ -149,10 +149,11 @@ unsigned int
 gt4_sequence_block_split (GT4SequenceBlock *blk, GT4SequenceBlock *child_blocks[], unsigned int n_child_blocks)
 {
   unsigned long long remaining_size, current_pos, current_size;
-  unsigned int child_idx;
+  unsigned int fastq, child_idx;
   child_idx = 0;
   current_pos = 0;
   remaining_size = blk->csize;
+  fastq = (blk->cdata[0] == '@');
   while ((child_idx < n_child_blocks) && (current_pos < blk->csize)) {
     unsigned long long split;
     unsigned int n_splits;
@@ -169,17 +170,20 @@ gt4_sequence_block_split (GT4SequenceBlock *blk, GT4SequenceBlock *child_blocks[
           split += 1;
         }
         split += 1;
-        /* FastA name */
-        if ((split >= remaining_size) || (blk->cdata[current_pos + split] == '>')) break;
-        /* FastQ separator */
-        if ((split < remaining_size) || (blk->cdata[current_pos + split] == '+')) {
-          split += 1;
-          if ((split < remaining_size) || (blk->cdata[current_pos + split] == '\n')) {
+        if (!fastq) {
+          /* FastA name */
+          if ((split >= remaining_size) || (blk->cdata[current_pos + split] == '>')) break;
+        } else {
+          /* FastQ separator */
+          if ((split < remaining_size) || (blk->cdata[current_pos + split] == '+')) {
             split += 1;
-            while ((split < remaining_size) && (blk->cdata[current_pos + split] != '\n')) split += 1;
-            if (split < remaining_size) split += 1;
-            /* FastQ name */
-            if ((split >= remaining_size) || (blk->cdata[current_pos + split] == '@')) break;
+            if ((split < remaining_size) || (blk->cdata[current_pos + split] == '\n')) {
+              split += 1;
+              while ((split < remaining_size) && (blk->cdata[current_pos + split] != '\n')) split += 1;
+              if (split < remaining_size) split += 1;
+              /* FastQ name */
+              if ((split >= remaining_size) || (blk->cdata[current_pos + split] == '@')) break;
+            }
           }
         }
       }

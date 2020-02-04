@@ -61,6 +61,7 @@ LISTCOMPARE_SOURCES = \
 	fasta.c \
 	buffer.c \
 	file-array.c file-array.h \
+	index-map.c index-map.h \
 	sequence.c \
 	sequence-collection.c sequence-collection.h \
 	sequence-block.c sequence-block.h \

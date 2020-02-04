@@ -12,7 +12,7 @@ unsigned int db_debug = 0;
 #define debug db_debug
 
 void
-gt4_db_clear_index (KMerDB *db)
+gt4_db_clear_index (GT4GmerDB *db)
 {
   memset (&db->index, 0, sizeof (db->index));
 }
@@ -85,17 +85,18 @@ get_bits (unsigned int value) {
   return bits;
 }
 
-unsigned int
-read_db_from_text (KMerDB *db, const unsigned char *cdata, unsigned long long csize, unsigned int max_kmers_per_node, unsigned int count_bits)
+GT4GmerDB *
+gt4_gmer_db_new_from_text (const unsigned char *cdata, unsigned long long csize, unsigned int max_kmers_per_node, unsigned int count_bits)
 {
+  GT4GmerDB *db;
   unsigned long long cpos, last, div;
   unsigned int nlines, wordsize, n_kmers, max_kmers, names_size;
   unsigned int node_bits, kmer_bits;
   unsigned int names_pos, kmers_pos, idx;
   double t_s, t_e;
 
-  if (csize < 8) return 0;
-  if (!cdata[5] || !cdata[7]) return 0;
+  if (csize < 8) return NULL;
+  if (!cdata[5] || !cdata[7]) return NULL;
 
   div = csize / 100;
   
@@ -118,6 +119,8 @@ read_db_from_text (KMerDB *db, const unsigned char *cdata, unsigned long long cs
     return 0;
   }
   /* Set up DB */
+  db = (GT4GmerDB *) malloc (sizeof (GT4GmerDB));
+  memset (db, 0, sizeof (GT4GmerDB));
   db->major = 0;
   db->minor = 4;
   db->wordsize = wordsize;
@@ -263,19 +266,19 @@ read_db_from_text (KMerDB *db, const unsigned char *cdata, unsigned long long cs
     fprintf (stderr, "  Names size: %llu\n", db->names_size);
   }
   
-  return idx;
+  return db;
 }
 
 static const char *DBKEY = "GMDB";
 
 unsigned int
-write_db_to_file (KMerDB *db, FILE *ofs, unsigned int kmers)
+write_db_to_file (GT4GmerDB *db, FILE *ofs, unsigned int kmers)
 {
   return write_db_to_file_with_reads_callback (db, ofs, kmers, NULL, NULL);
 }
 
 unsigned int
-write_db_to_file_with_reads_callback (KMerDB *db, FILE *ofs, unsigned int kmers, unsigned long long (*write_reads) (GT4Index *index, FILE *ofs, void *data), void *data)
+write_db_to_file_with_reads_callback (GT4GmerDB *db, FILE *ofs, unsigned int kmers, unsigned long long (*write_reads) (GT4Index *index, FILE *ofs, void *data), void *data)
 {
   unsigned long long written = 0, blocksize, nodes_start, kmers_start, names_start, trie_start, index_start;
   unsigned short major, minor;
@@ -383,15 +386,19 @@ write_db_to_file_with_reads_callback (KMerDB *db, FILE *ofs, unsigned int kmers,
   return written;
 }
 
-unsigned int
-read_database_from_binary (KMerDB *db, const unsigned char *cdata, unsigned long long csize)
+GT4GmerDB *
+gt4_gmer_db_new_from_binary (const unsigned char *cdata, unsigned long long csize)
 {
+  GT4GmerDB *db;
   unsigned long long cpos = 0, blocksize, nodes_start, kmers_start, names_start, trie_start, index_start;
   unsigned short major, minor;
   unsigned int version;
   unsigned int has_index = 0;
 
-  if (memcmp (cdata + cpos, DBKEY, 4)) return 0;
+  if (memcmp (cdata + cpos, DBKEY, 4)) return NULL;
+  db = (GT4GmerDB *) malloc (sizeof (GT4GmerDB));
+  memset (db, 0, sizeof (GT4GmerDB));
+
   cpos += 4;
   memcpy (&major, cdata + cpos, 2);
   db->major = major;
@@ -504,7 +511,7 @@ read_database_from_binary (KMerDB *db, const unsigned char *cdata, unsigned long
     cpos += 8;
     gt4_index_init_from_data (&db->index, cdata + cpos, blocksize, db->n_kmers, version < 4);
   }
-  return 1;
+  return db;
 }
 
 ReadList
@@ -522,7 +529,7 @@ ReadList
 }
 
 void
-gt4_db_dump (KMerDB *db, FILE *ofs)
+gt4_db_dump (GT4GmerDB *db, FILE *ofs)
 {
   unsigned long long i;
   unsigned int version = (db->major << 16) | db->minor;

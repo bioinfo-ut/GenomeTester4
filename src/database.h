@@ -20,9 +20,9 @@ struct _Node {
   unsigned int nkmers;
 };
 
-typedef struct _KMerDB KMerDB;
+typedef struct _GT4GmerDB GT4GmerDB;
 
-struct _KMerDB {
+struct _GT4GmerDB {
   unsigned int major;
   unsigned int minor;
   unsigned int wordsize;
@@ -74,7 +74,7 @@ struct _ReadList {
 ReadList *gm4_read_list_new (void);
 
 /* Return number of nodes successfully read */
-unsigned int read_db_from_text (KMerDB *db, const unsigned char *cdata, unsigned long long csize, unsigned int max_kmers_per_node, unsigned int count_bits);
+GT4GmerDB *gt4_gmer_db_new_from_text (const unsigned char *cdata, unsigned long long csize, unsigned int max_kmers_per_node, unsigned int count_bits);
 
 /*
  * Binary representation
@@ -107,14 +107,14 @@ unsigned int read_db_from_text (KMerDB *db, const unsigned char *cdata, unsigned
 */
 
 /* Return number of bytes written */
-unsigned int write_db_to_file (KMerDB *db, FILE *ofs, unsigned int kmers);
-unsigned int write_db_to_file_with_reads_callback (KMerDB *db, FILE *ofs, unsigned int kmers, unsigned long long (*write_reads) (GT4Index *index, FILE *ofs, void *data), void *data);
+unsigned int write_db_to_file (GT4GmerDB *db, FILE *ofs, unsigned int kmers);
+unsigned int write_db_to_file_with_reads_callback (GT4GmerDB *db, FILE *ofs, unsigned int kmers, unsigned long long (*write_reads) (GT4Index *index, FILE *ofs, void *data), void *data);
 
-unsigned int read_database_from_binary (KMerDB *db, const unsigned char *cdata, unsigned long long csize);
+GT4GmerDB *gt4_gmer_db_new_from_binary (const unsigned char *cdata, unsigned long long csize);
 
-void gt4_db_clear_index (KMerDB *db);
+void gt4_db_clear_index (GT4GmerDB *db);
 
 /* Debug */
-void gt4_db_dump (KMerDB *db, FILE *ofs);
+void gt4_db_dump (GT4GmerDB *db, FILE *ofs);
 
 #endif
