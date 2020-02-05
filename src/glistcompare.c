@@ -55,8 +55,12 @@ enum Rules {
 };
 
 enum SubsetMethods {
+  /* Choose n k-mers from all kmers, collate counts */
   RAND_ALL,
-  RAND_UNIQUE
+  /* Choose n unique k-mers, copy counts */
+  RAND_UNIQUE,
+  /* Choose n unique k-mers weighted by counts, copy counts */
+  RAND_WEIGHTED_UNIQUE
 };
 
 static int compare_word_map_headers (GT4ListHeader *h1, GT4ListHeader *h2);
@@ -65,7 +69,7 @@ static int compare_wordmaps (AZObject *list1, AZObject *list2, int find_union, i
 /* No actual writing will be done if ofile is 0 */
 /* Upon completion list header is filled regardless of whether actual writing was performed */
 static unsigned int union_multi (AZObject *m[], unsigned int nmaps, unsigned int cutoff, int ofile, GT4ListHeader *header);
-static unsigned int subset (GT4WordSArrayImplementation *impl, GT4WordSArrayInstance *inst, unsigned int subset_method, unsigned long long subset_size, const char *filename);
+static unsigned int subset (GT4WordSListImplementation *impl, GT4WordSListInstance *inst, unsigned int subset_method, unsigned long long subset_size, const char *filename);
 static int compare_wordmaps_mm (GT4WordMap *map1, GT4WordMap *map2, int find_diff, int find_ddiff, int subtract, int countonly, const char *out, unsigned int cutoff, unsigned int nmm, int rule);
 static unsigned long long fetch_relevant_words (GT4WordTable *table, GT4WordMap *map, GT4WordMap *querymap, unsigned int cutoff, unsigned int nmm, FILE *f, int subtract, int countonly, unsigned long long *totalfreq);
 static void print_help (int exitvalue);
@@ -84,6 +88,7 @@ int main (int argc, const char *argv[])
   unsigned int nfiles = 0;
   char *end;
   int rule = RULE_DEFAULT;
+  long seed = -1;
 
   /* default values */
   unsigned int cutoff = 1, nmm = 0;
@@ -156,11 +161,10 @@ int main (int argc, const char *argv[])
     } else if (!strcmp (argv[arg_idx], "--count_only")) {
       countonly = 1;
     } else if (!strcmp (argv[arg_idx], "-r")|| !strcmp (argv[arg_idx], "--rule")) {
-      if (arg_idx >= argc) {
-        fprintf (stderr, "Warning: No rule specified!");
-        exit (1);
-      }
       arg_idx += 1;
+      if (arg_idx >= argc) {
+        print_help (1);
+      }
       if (!strcmp (argv[arg_idx], "default")) {
         rule = RULE_DEFAULT;
                         } else if (!strcmp (argv[arg_idx], "add")) {
@@ -180,7 +184,7 @@ int main (int argc, const char *argv[])
                         } else if (!strcmp (argv[arg_idx], "2")) {
         rule = RULE_TWO;        
                         }
-    } else if (!strcmp (argv[arg_idx], "-ss") || !strcmp (argv[arg_idx], "-subset")) {
+    } else if (!strcmp (argv[arg_idx], "-ss") || !strcmp (argv[arg_idx], "--subset")) {
       find_subset = 1;
       arg_idx += 1;
       if (arg_idx >= argc) {
@@ -190,6 +194,8 @@ int main (int argc, const char *argv[])
         subset_method = RAND_ALL;
       } else if (!strcmp (argv[arg_idx], "rand_unique")) {
         subset_method = RAND_UNIQUE;
+      } else if (!strcmp (argv[arg_idx], "rand_weighted_unique")) {
+        subset_method = RAND_WEIGHTED_UNIQUE;
       } else {
         print_help (1);
       }
@@ -202,6 +208,12 @@ int main (int argc, const char *argv[])
         fprintf (stderr, "Error: Invalid subset size: %s! Must be an integer.\n", argv[arg_idx]);
         print_help (1);
       }
+    } else if (!strcmp (argv[arg_idx], "--seed")) {
+      arg_idx += 1;
+      if (arg_idx >= argc) {
+        print_help (1);
+      }
+      seed = strtoll (argv[arg_idx], &end, 10);
     } else if (!strcmp (argv[arg_idx], "--print_operation")) {
       print_operation = 1;
     } else if (!strcmp (argv[arg_idx], "--disable_scouts")) {
@@ -221,11 +233,16 @@ int main (int argc, const char *argv[])
   
   if (debug) fprintf (stderr, "Num files: %d\n", nfiles);
 
+  if (seed == -1) {
+    srand48 ((unsigned int) time(NULL));
+  } else {
+    srand48 (seed);
+  }
   /* Subset */
   if (find_subset) {
     AZObject *obj;
-    GT4WordSArrayImplementation *impl;
-    GT4WordSArrayInstance *inst;
+    GT4WordSListImplementation *impl;
+    GT4WordSListInstance *inst;
     FILE *ifs;
     uint32_t code;
     char c[2048];
@@ -249,16 +266,16 @@ int main (int argc, const char *argv[])
       fprintf (stderr, "Error: Invalid list format\n");
       exit (1);
     }
-    impl = (GT4WordSArrayImplementation *) az_object_get_interface (obj, GT4_TYPE_WORD_SLIST, (void **) &inst);
+    impl = (GT4WordSListImplementation *) az_object_get_interface (obj, GT4_TYPE_WORD_SLIST, (void **) &inst);
     if (!impl) {
       fprintf (stderr, "Invalid or corrupted list file\n");
       exit (1);
     }
-    if ((subset_method == RAND_UNIQUE) && (subset_size > inst->slist_inst.num_words)) {
-      fprintf (stderr, "Error: Unique subset size (%llu) is bigger than number of unique kmers (%llu)\n", subset_size, inst->slist_inst.num_words);
+    if (((subset_method == RAND_UNIQUE) || (subset_method == RAND_WEIGHTED_UNIQUE)) && (subset_size > inst->num_words)) {
+      fprintf (stderr, "Error: Unique subset size (%llu) is bigger than number of unique kmers (%llu)\n", subset_size, inst->num_words);
       exit (1);
     }
-    snprintf (c, 2048, "%s_subset", outputname);
+    snprintf (c, 2048, "%s_subset_%u.list", outputname, inst->word_length);
     c[2047] = 0;
     subset (impl, inst, subset_method, subset_size, c);
     return 0;
@@ -707,44 +724,72 @@ union_multi (AZObject *m[], unsigned int nmaps, unsigned int cutoff, int ofile, 
 }
 
 static unsigned int
-subset (GT4WordSArrayImplementation *impl, GT4WordSArrayInstance *inst, unsigned int subset_method, unsigned long long subset_size, const char *filename)
+subset (GT4WordSListImplementation *impl, GT4WordSListInstance *inst, unsigned int subset_method, unsigned long long subset_size, const char *filename)
 {
-  GT4WordTable *wt;
-  unsigned long long i;
+  GT4ListHeader h_out;
+  FILE *ofs;
+  uint64_t in = 0;
+  uint64_t out = subset_size;
 
-  wt = gt4_word_table_new (inst->slist_inst.word_length, subset_size, 4);
-  /* fixme: We rely here on RNG cycle being at least >>32 bits */
+  gt4_list_header_init (&h_out, inst->word_length);
+
+  ofs = fopen (filename, "w");
+  fwrite (&h_out, sizeof (GT4ListHeader), 1, ofs);
+
+  gt4_word_slist_get_first_word (impl, inst);
   if (subset_method == RAND_ALL) {
-    while (subset_size > 0) {
-      /* Pick random KMer */
-      unsigned long long lhs = (unsigned long long) (((rand () + 1.0) / RAND_MAX) * 0xffffffff);
-      unsigned long long rhs = (unsigned long long) (((rand () + 1.0) / RAND_MAX) * 0xffffffff);
-      unsigned long long p = ((lhs << 32) | rhs) % inst->slist_inst.num_words;
-      if (!gt4_word_sarray_get_word (impl, inst, p)) return 1;
-      gt4_word_table_add_word_nofreq (wt, inst->slist_inst.word);
-      subset_size -= 1;
+    in = inst->sum_counts;
+    while (out > 0) {
+      unsigned int count = 0, i;
+      for (i = 0; (i < inst->count) && (out > 0); i++) {
+        double val = drand48 ();
+        if (val <= ((double) out / in)) {
+          count += 1;
+          in -= 1;
+          out -= 1;
+        }
+      }
+      if (count > 0) {
+        fwrite (&inst->word, sizeof (unsigned long long), 1, ofs);
+        fwrite (&count, sizeof (unsigned int), 1, ofs);
+        h_out.n_words += 1;
+        h_out.total_count += count;
+      }
+      gt4_word_slist_get_next_word (impl, inst);
     }
   } else if (subset_method == RAND_UNIQUE) {
-    unsigned long long *q = (unsigned long long *) malloc (inst->slist_inst.num_words * sizeof (unsigned long long));
-    for (i = 0; i < inst->slist_inst.num_words; i++) q[i] = i;
-    for (i = 0; i < subset_size; i++) {
-      unsigned long long lhs = (unsigned long long) (((rand () + 1.0) / RAND_MAX) * 0xffffffff);
-      unsigned long long rhs = (unsigned long long) (((rand () + 1.0) / RAND_MAX) * 0xffffffff);
-      unsigned long long p = ((lhs << 32) | rhs) % inst->slist_inst.num_words;
-      unsigned long long t = q[i];
-      q[i] = q[p];
-      q[p] = t;
+    in = inst->num_words;
+    while (out > 0) {
+      double val = drand48 ();
+      if (val <= ((double) out / in)) {
+        fwrite (&inst->word, sizeof (unsigned long long), 1, ofs);
+        fwrite (&inst->count, sizeof (unsigned int), 1, ofs);
+        h_out.n_words += 1;
+        h_out.total_count += inst->count;
+        in -= 1;
+        out -= 1;
+      }
+      gt4_word_slist_get_next_word (impl, inst);
     }
-    for (i = 0; i < subset_size; i++) {
-      if (!gt4_word_sarray_get_word (impl, inst, q[i])) return 1;
-      gt4_word_table_add_word_nofreq (wt, inst->slist_inst.word);
+  } else if (subset_method == RAND_WEIGHTED_UNIQUE) {
+    in = inst->sum_counts;
+    while (out > 0) {
+      double val = drand48 ();
+      if (val <= ((double) inst->count * out / in)) {
+        fwrite (&inst->word, sizeof (unsigned long long), 1, ofs);
+        fwrite (&inst->count, sizeof (unsigned int), 1, ofs);
+        h_out.n_words += 1;
+        h_out.total_count += inst->count;
+        in -= inst->count;
+        out -= 1;
+      }
+      gt4_word_slist_get_next_word (impl, inst);
     }
-    free (q);
   }
-  wordtable_sort (wt, 0);
-  wordtable_find_frequencies (wt);
-  wordtable_write_to_file (wt, filename, 1);
-  gt4_word_table_delete (wt);
+        
+  fseek (ofs, 0, SEEK_SET);
+  fwrite (&h_out, sizeof (GT4ListHeader), 1, ofs);
+  fclose (ofs);
   return 0;
 }
 
@@ -972,7 +1017,8 @@ print_help (int exit_value)
   fprintf (stdout, "    -o, --outputname STRING  - specify output name (default \"out\")\n");
   fprintf (stdout, "    -r, --rule STRING        - specify rule how final frequencies are calculated (default, add, subtract, min, max, first, second, 1, 2)\n");
   fprintf (stdout, "                               NOTE: rules min, subtract, first and second can only be used with finding the intersection.\n");
-  fprintf (stdout, "    -ss, --subset METHOD SIZE - make subset with given method (rand, rand_unique)\n");
+  fprintf (stdout, "    -ss, --subset METHOD SIZE - make subset with given method (rand, rand_unique, rand_weighted_unique)\n");
+  fprintf (stdout, "    -seed INTEGER            - Set seed of random nu,ber generator (default uses start time)\n");
   fprintf (stdout, "    --count_only             - output count of k-mers instead of k-mers themself\n");
   fprintf (stdout, "    --disable_scouts         - disable list read-ahead in background thread\n");
   fprintf (stdout, "    --stream                 - read input as stream (do not memory map files)\n");
