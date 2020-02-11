@@ -49,17 +49,12 @@ extern unsigned int debug_wordmap;
 
 #include <az/object.h>
 
-#include "word-list.h"
-
+#include "bloom.h"
 #include "word-array-sorted.h"
 #include "word-dict.h"
+#include "word-list.h"
 
 #define WORDMAP_ELEMENT_SIZE (sizeof (unsigned long long) + sizeof (unsigned int))
-
-typedef struct _parameters {
-	unsigned int nmm;
-	unsigned int pm3;
-} parameters;
 
 struct _GT4WordMap {
   AZObject object;
@@ -68,11 +63,14 @@ struct _GT4WordMap {
   unsigned long long file_size;
   GT4ListHeader *header;
   const unsigned char *wordlist;
-  void *user_data;
   /* GT4WordSArray instance */
   GT4WordSArrayInstance sarray_inst;
   /* GT4WordDict instance */
   GT4WordDictInstance dict_inst;
+  /* Bloom filter */
+  GT4Bloom *bloom;
+  unsigned long long reject;
+  unsigned long long pass;
 };
 
 struct _GT4WordMapClass {
@@ -90,7 +88,7 @@ unsigned int gt4_word_map_get_type (void);
 
 /* Creates new GT4WordMap by memory-mapping file, returns NULL if error */
 /* If "scout" is true, a new thread is created that sequentially prefetces the map into virtual memory */
-GT4WordMap *gt4_word_map_new (const char *listfilename, unsigned int major_version, unsigned int scout);
+GT4WordMap *gt4_word_map_new (const char *listfilename, unsigned int major_version, unsigned int scout, unsigned int create_bloom);
 /* Releases word map and frees the structure */
 void gt4_word_map_delete (GT4WordMap *map);
 

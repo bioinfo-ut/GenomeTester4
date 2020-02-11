@@ -9,6 +9,7 @@ LISTMAKER_SOURCES = \
 	glistmaker.c \
 	listmaker-queue.c listmaker-queue.h \
 	queue.c queue.h \
+	bloom.c bloom.h \
 	fasta.c fasta.h \
 	file-array.c file-array.h \
 	buffer.c buffer.h \
@@ -34,6 +35,7 @@ LISTQUERY_SOURCES = \
 	glistquery.c \
 	listmaker-queue.c listmaker-queue.h \
 	fasta.c fasta.h \
+	bloom.c bloom.h \
 	buffer.c buffer.h \
 	file-array.c file-array.h \
 	index-map.c index-map.h \
@@ -58,6 +60,7 @@ LISTQUERY_SOURCES = \
 LISTCOMPARE_SOURCES = \
 	glistcompare.c \
 	listmaker-queue.c listmaker-queue.h \
+	bloom.c bloom.h \
 	fasta.c \
 	buffer.c \
 	file-array.c file-array.h \

@@ -42,7 +42,9 @@ static unsigned int debug_pos = 0;
 static double error_prob = 0.001f;
 static unsigned int exome = 0;
 static float min_hzp = 0.01f;
-
+#define COVERAGE_IGNORE -2
+#define COVERAGE_LOCAL -1
+#define COVERAGE_MEDIAN 0
 /*
  * -2 - per position
  * -1 - per block
@@ -82,7 +84,7 @@ static void recalculate_and_call (AssemblyData *adata, Group *groups, unsigned i
 /* Returns true if last call is written */
 static unsigned int call (AssemblyData *adata, CallBlock *cb, unsigned int a_pos, unsigned int sub, CallExtra *extra, unsigned int *call_alignment, unsigned int homozygote);
 static int assemble (AssemblyData *adata, const char *kmers[], unsigned int nkmers, unsigned int print);
-static int assemble_recursive (KMerDB *db, SeqFile *files, unsigned int ref_chr, unsigned int ref_start, unsigned int ref_end, const char *ref, const char *kmers[], unsigned int nkmers);
+static int assemble_recursive (GT4GmerDB *db, SeqFile *files, unsigned int ref_chr, unsigned int ref_start, unsigned int ref_end, const char *ref, const char *kmers[], unsigned int nkmers);
 unsigned int align_reads_to_reference (NSeq *ref_seq, GASMRead *reads[], unsigned int nreads, GASMRead *a_reads[], short a[][MAX_REFERENCE_LENGTH], SWCell *sw_matrix);
 unsigned int create_gapped_alignment (NSeq *ref_seq, unsigned int ref_start, GASMRead *a_reads[], unsigned int na, short a[][MAX_REFERENCE_LENGTH], unsigned int aligned_ref[], int ref_pos[], short _p[][MAX_REFERENCE_LENGTH * 2]);
 static void test_alignment (const char *a, const char *b);
@@ -172,7 +174,7 @@ struct _Call {
 
 struct _AssemblyData {
   GASMQueue *queue;
-  KMerDB *db;
+  GT4GmerDB *db;
   SeqFile *files;
   /* Reference data */
   unsigned int chr;
@@ -301,7 +303,7 @@ queue_free_call_block (GASMQueue *gq, CallBlock *cb)
 }
 
 static AssemblyData *
-assembly_data_new (KMerDB *db, SeqFile *files)
+assembly_data_new (GT4GmerDB *db, SeqFile *files)
 {
   AssemblyData *adata = (AssemblyData *) malloc (sizeof (AssemblyData));
   memset (adata, 0, sizeof (AssemblyData));
@@ -589,11 +591,11 @@ static SNV *read_fps (const char *filename, unsigned int *n_snvs);
 /* Get index of SNV at or next to pos */
 static unsigned int lookup_snv (SNV *snvs, unsigned int n_snvs, unsigned int chr, unsigned long long pos);
 
-static void load_db_or_die (KMerDB *db, const char *db_name, const char *seq_dir, const char *id);
-static SeqFile *map_sequences (KMerDB *db, const char *seq_dir);
+static GT4GmerDB *load_db_or_die (const char *db_name, const char *seq_dir, const char *id);
+static SeqFile *map_sequences (GT4GmerDB *db, const char *seq_dir);
 
 /* Get list of unique reads containing at lest one kmer from list */
-static unsigned int get_unique_reads (ReadInfo reads[], unsigned int nreads, KMerDB *db, SeqFile files[], const char *kmers[], unsigned int nkmers, unsigned int max_reads_per_kmer);
+static unsigned int get_unique_reads (ReadInfo reads[], unsigned int nreads, GT4GmerDB *db, SeqFile files[], const char *kmers[], unsigned int nkmers, unsigned int max_reads_per_kmer);
 /* Get proper read sequences (forward direction) */
 static unsigned int get_read_sequences (GASMRead *reads[], const ReadInfo read_info[], unsigned int nreads, SeqFile files[]);
 static void print_db_reads (GT4Index *index, SeqFile *files, unsigned long long kmer_idx, unsigned int kmer_dir, FILE *ofs);
@@ -688,7 +690,7 @@ main (int argc, const char *argv[])
   unsigned int ref_start = 0, ref_end = 0;
   const char *ref = NULL;
 
-  KMerDB db;
+  GT4GmerDB *db;
   SeqFile *files;
 
   srand(1);
@@ -812,11 +814,11 @@ main (int argc, const char *argv[])
       i += 1;
       if (i >= argc) print_usage (stderr, 0, 1);
       if (!strcmp (argv[i], "ignore")) {
-        coverage = -2;
+        coverage = COVERAGE_IGNORE;
       } else if (!strcmp (argv[i], "local")) {
-        coverage = -1;
+        coverage = COVERAGE_LOCAL;
       } else if (!strcmp (argv[i], "median")) {
-        coverage = 0;
+        coverage = COVERAGE_MEDIAN;
       } else {
         coverage = (float) atof (argv[i]);
         if (!coverage) {
@@ -883,9 +885,9 @@ main (int argc, const char *argv[])
   }
 
   /* Read databases */
-  load_db_or_die (&db, db_name, seq_dir, "reads");
+  db = load_db_or_die (db_name, seq_dir, "reads");
 
-  if (coverage == 0) coverage = find_coverage (&db.index);
+  if (coverage == COVERAGE_MEDIAN) coverage = find_coverage (&db->index);
 
   if (snv_db_name) {
     fprintf (stderr, "Loading SNV database\n");
@@ -901,7 +903,7 @@ main (int argc, const char *argv[])
 
   /* Set up file lists */
   if (debug) fprintf (stderr, "Loading read sequences\n");
-  files = map_sequences (&db, seq_dir);
+  files = map_sequences (db, seq_dir);
   if (!files) {
     fprintf (stderr, "Cannot read sequences: terminating\n");
     exit (1);
@@ -913,9 +915,9 @@ main (int argc, const char *argv[])
     unsigned int count[3] = { 0 };
     double avg[3];
     fprintf (stderr, "Determine sex\n");
-    for (j = 0; j < db.n_nodes; j++) {
-      Node *node = &db.nodes[j];
-      const char *name = db.names + node->name;
+    for (j = 0; j < db->n_nodes; j++) {
+      Node *node = &db->nodes[j];
+      const char *name = db->names + node->name;
       unsigned int first_kmer = node->kmers;
       unsigned int nkmers = node->nkmers;
       /* 0 - autosome, 1 - X, 2 - Y */
@@ -927,7 +929,7 @@ main (int argc, const char *argv[])
       }
       for (i = 0; i < nkmers; i++) {
         unsigned int kmer_count;
-        gt4_index_get_kmer_info (&db.index, first_kmer + i, &kmer_count);
+        gt4_index_get_kmer_info (&db->index, first_kmer + i, &kmer_count);
         sum[klass] += kmer_count;
         count[klass] += 1;
       }
@@ -974,7 +976,7 @@ main (int argc, const char *argv[])
       queue.last_chr = 0;
       queue.last_pos = 0;
       for (i = 0; i < n_threads; i++) {
-        queue.adata[i] = assembly_data_new (&db, files);
+        queue.adata[i] = assembly_data_new (db, files);
       }
       gt4_queue_create_threads (&queue.gt4_queue, process, NULL);
       process (&queue.gt4_queue, 0, NULL);
@@ -1023,12 +1025,12 @@ main (int argc, const char *argv[])
           for (i = 4; i < ntokenz; i++) {
             kmers[nkmers++] = strndup ((const char *) tokenz[i], lengths[i]);
           }
-          assemble_recursive (&db, files, chr, start, end, ref, kmers, nkmers);
+          assemble_recursive (db, files, chr, start, end, ref, kmers, nkmers);
         }
       }
     }
   } else {
-    assemble_recursive (&db, files, ref_chr, ref_start, ref_end, ref, kmers, nkmers);
+    assemble_recursive (db, files, ref_chr, ref_start, ref_end, ref, kmers, nkmers);
   }
 
   if (prefetch_db || prefetch_seq) {
@@ -1039,7 +1041,7 @@ main (int argc, const char *argv[])
 }
 
 static int
-assemble_recursive (KMerDB *db, SeqFile *files, unsigned int ref_chr, unsigned int ref_start, unsigned int ref_end, const char *ref, const char *kmers[], unsigned int nkmers)
+assemble_recursive (GT4GmerDB *db, SeqFile *files, unsigned int ref_chr, unsigned int ref_start, unsigned int ref_end, const char *ref, const char *kmers[], unsigned int nkmers)
 {
   AssemblyData *adata = assembly_data_new (db, files);
   int result;
@@ -1079,7 +1081,7 @@ gt1_prob (const unsigned short counts[], unsigned int n0, unsigned int coverage)
   unsigned int i;
   double log_p = lgamma (coverage);
   for (i = A; i <= GAP; i++) {
-    log_p -= lgamma (counts[i]);
+    log_p -= lgamma (counts[i] + 1);
     if (i == n0) {
       log_p += (log (1 - error_prob) * counts[i]);
     } else {
@@ -1095,7 +1097,7 @@ gt2_prob (const unsigned short counts[], unsigned int n0, unsigned int n1, unsig
   unsigned int i;
   double log_p = lgamma (coverage);
   for (i = A; i <= GAP; i++) {
-    log_p -= lgamma (counts[i]);
+    log_p -= lgamma (counts[i] + 1);
     if ((i == n0) || (i == n1)) {
       log_p += (log (0.5 - error_prob / 2) * counts[i]);
     } else {
@@ -1749,7 +1751,7 @@ call (AssemblyData *adata, CallBlock *cb, unsigned int a_pos, unsigned int sub, 
     p_hom /= sum_probs;
     p_het /= sum_probs;
     double hzp = 1;
-    if (coverage == -2) local_cov = call->cov;
+    if (coverage == COVERAGE_IGNORE) local_cov = call->cov;
     if (cb->haploid) {
       /* Haploid */
       best_n1 = best_n0;
@@ -2412,11 +2414,12 @@ lookup_snv (SNV *snvs, unsigned int n_snvs, unsigned int chr, unsigned long long
   return mid;
 }
 
-static void
-load_db_or_die (KMerDB *db, const char *db_name, const char *seq_dir, const char *id)
+static GT4GmerDB *
+load_db_or_die (const char *db_name, const char *seq_dir, const char *id)
 {
   const unsigned char *cdata;
   unsigned long long csize;
+  GT4GmerDB *db;
   /* Read database */
   if (debug) fprintf (stderr, "Loading %s database %s... ", id, db_name);
   cdata = gt4_mmap (db_name, &csize);
@@ -2428,7 +2431,8 @@ load_db_or_die (KMerDB *db, const char *db_name, const char *seq_dir, const char
     scout_mmap (cdata, csize);
     sleep (10);
   }
-  if (!read_database_from_binary (db, cdata, csize)) {
+  db = gt4_gmer_db_new_from_binary (cdata, csize);
+  if (!db) {
     fprintf (stderr, "cannot read (wrong file format?)\n");
     exit (1);
   }
@@ -2437,6 +2441,7 @@ load_db_or_die (KMerDB *db, const char *db_name, const char *seq_dir, const char
     exit (1);
   }
   if (debug) fprintf (stderr, "done\n");
+  return db;
 }
 
 static char *
@@ -2470,7 +2475,7 @@ get_seq_name (const char *in_name, const char *seq_dir)
 }
 
 static SeqFile *
-map_sequences (KMerDB *db, const char *seq_dir)
+map_sequences (GT4GmerDB *db, const char *seq_dir)
 {
   unsigned int i;
   SeqFile *files = (SeqFile *) malloc (db->index.n_files * sizeof (SeqFile));
@@ -2495,7 +2500,7 @@ map_sequences (KMerDB *db, const char *seq_dir)
 #define max_reads_per_region 200
 
 static unsigned int
-get_unique_reads (ReadInfo reads[], unsigned int max_reads, KMerDB *db, SeqFile files[], const char *kmers[], unsigned int nkmers, unsigned int max_reads_per_kmer)
+get_unique_reads (ReadInfo reads[], unsigned int max_reads, GT4GmerDB *db, SeqFile files[], const char *kmers[], unsigned int nkmers, unsigned int max_reads_per_kmer)
 {
   unsigned int nreads = 0, i;
 

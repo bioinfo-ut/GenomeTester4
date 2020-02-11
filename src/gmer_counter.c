@@ -75,21 +75,21 @@ struct _SNPQueue {
   unsigned long long n_kmers;
   unsigned long long n_kmer_gc;
   /* Data */
-  KMerDB *db;
+  GT4GmerDB *db;
   /* Read lists */
   ReadList **reads;
 };
 
 /* Main thread loop */
-static void write_index (SNPQueue *snpq, KMerDB *db, const char *files[], unsigned int n_files);
-static void print_counts (SNPQueue *snpq, KMerDB *db);
+static void write_index (SNPQueue *snpq, GT4GmerDB *db, const char *files[], unsigned int n_files);
+static void print_counts (SNPQueue *snpq, GT4GmerDB *db);
 static void process (GT4Queue *queue, unsigned int idx, void *arg);
 static int start_sequence (GT4FastaReader *reader, void *data);
 static int end_sequence (GT4FastaReader *reader, void *data);
 static int read_nucleotide (GT4FastaReader *reader, unsigned int nucleotide, void *data);
 static int read_word (GT4FastaReader *reader, unsigned long long word, void *data);
 static int compare_counts (const void *lhs, const void *rhs);
-static unsigned int get_pair_median (KMerDB *db);
+static unsigned int get_pair_median (GT4GmerDB *db);
 
 static void
 print_usage (FILE *ofs) {
@@ -141,8 +141,7 @@ main (int argc, const char *argv[])
   unsigned int nthreads = DEFAULT_NUM_THREADS;
   SNPQueue snpq;
 
-  KMerDB db;
-
+  GT4GmerDB *db = NULL;
   
   for (i = 1; i < argc; i++) {
     if (!strcmp (argv[i], "-v") || !strcmp (argv[i], "--version")) {
@@ -268,8 +267,6 @@ main (int argc, const char *argv[])
 
   start_time = last_time = get_time();
 
-  memset (&db, 0, sizeof db);
-
   if (db_name) {
     /* Read text database */
     const unsigned char *cdata;
@@ -281,7 +278,8 @@ main (int argc, const char *argv[])
     }
     if (!lowmem) scout_mmap (cdata, csize);
     if (debug) fprintf (stderr, "Loading text database %s\n", db_name);
-    if (!read_db_from_text (&db, cdata, csize, max_kmers_per_node, (big) ? 32 : 16)) {
+    db = gt4_gmer_db_new_from_text (cdata, csize, max_kmers_per_node, (big) ? 32 : 16);
+    if (!db) {
       fprintf (stderr, "Cannot read text database %s\n", dbb);
       exit (1);
     }
@@ -303,13 +301,14 @@ main (int argc, const char *argv[])
       exit (1);
     }
     if (!lowmem) scout_mmap (cdata, csize);
-    if (!read_database_from_binary (&db, cdata, csize)) {
+    db = gt4_gmer_db_new_from_binary (cdata, csize);
+    if (!db) {
       fprintf (stderr, "Cannot read binary database %s\n", dbb);
       exit (1);
     }
-    if (debug) fprintf (stderr, "Finished loading binary database (index = %u)\n", db.index.read_blocks != NULL);
+    if (debug) fprintf (stderr, "Finished loading binary database (index = %u)\n", db->index.read_blocks != NULL);
     if (dump_index) {
-      gt4_db_dump (&db, stdout);
+      gt4_db_dump (db, stdout);
       exit (0);
     }
     if (debug) {
@@ -319,7 +318,7 @@ main (int argc, const char *argv[])
   }
 
   if (gt4_trie_debug & GT4_TRIE_COUNT_ALLOCATIONS) {
-    fprintf (stderr, "Trie: %u allocations, total memory %llu MiB\n", db.trie.num_allocations, db.trie.total_memory / (1024 * 1024));
+    fprintf (stderr, "Trie: %u allocations, total memory %llu MiB\n", db->trie.num_allocations, db->trie.total_memory / (1024 * 1024));
   }
   if (wdb) {
     /* Write binary database */
@@ -332,7 +331,7 @@ main (int argc, const char *argv[])
       fprintf (stderr, "Cannot open %s for writing\n", wdb);
       exit (1);
     }
-    write_db_to_file (&db, ofs, 0);
+    write_db_to_file (db, ofs, 0);
     fclose (ofs);
     if (debug) {
       fprintf (stderr, "Done\n");
@@ -347,7 +346,7 @@ main (int argc, const char *argv[])
     /* Set up queue */
     memset (&snpq, 0, sizeof (SNPQueue));
     az_instance_init (&snpq.lmq, GT4_TYPE_LISTMAKER_QUEUE);
-    maker_queue_setup (&snpq.lmq, nthreads, db.wordsize, 0, 0, 0);
+    maker_queue_setup (&snpq.lmq, nthreads, db->wordsize, 0, 0, 0);
     snpq.n_free_tables = DEFAULT_NUM_TABLES;
     snpq.free_tables = (SNPTable **) malloc (DEFAULT_NUM_TABLES * sizeof (SNPTable *));
     for (i = 0; i < DEFAULT_NUM_TABLES; i++) {
@@ -355,13 +354,13 @@ main (int argc, const char *argv[])
     }
     snpq.full_tables = (SNPTable **) malloc (DEFAULT_NUM_TABLES * sizeof (SNPTable *));
     /* Read files */
-    snpq.db = &db;
+    snpq.db = db;
     for (i = 0; i < nseqs; i++) {
       maker_queue_add_file (&snpq.lmq, seqnames[i], lowmem, i);
     }
     if (index_name) {
-      snpq.reads = (ReadList **) malloc (db.n_kmers * sizeof (ReadList *));
-      memset (snpq.reads, 0, db.n_kmers * sizeof (ReadList *));
+      snpq.reads = (ReadList **) malloc (db->n_kmers * sizeof (ReadList *));
+      memset (snpq.reads, 0, db->n_kmers * sizeof (ReadList *));
     }
     gt4_queue_create_threads (&snpq.lmq.queue, process, &snpq);
     process (&snpq.lmq.queue, 0, &snpq);
@@ -381,7 +380,7 @@ main (int argc, const char *argv[])
     if (dbb) fprintf (stdout, "#BinaryDatabase\t%s\n", dbb);
         
     if (dm) {
-      unsigned int med = get_pair_median (&db);
+      unsigned int med = get_pair_median (db);
       fprintf (stdout, "#PairMedian\t%u\n", med);
     }
 
@@ -391,11 +390,11 @@ main (int argc, const char *argv[])
       fprintf (stdout, "\t%.3f", (double) snpq.n_gc / snpq.n_nucl);
       fprintf (stdout, "\t%llu", snpq.n_kmers_total);
       fprintf (stdout, "\t%llu", snpq.n_kmers);
-      fprintf (stdout, "\t%.3f\n", (double) snpq.n_kmer_gc / (snpq.n_kmers * db.wordsize));
+      fprintf (stdout, "\t%.3f\n", (double) snpq.n_kmer_gc / (snpq.n_kmers * db->wordsize));
     }
 
     if (index_name) {
-      write_index (&snpq, &db, seqnames, nseqs);
+      write_index (&snpq, db, seqnames, nseqs);
       if (debug) {
         fprintf (stderr, "Index writing time: %.1fs\n", get_time() - last_time);
       }
@@ -403,7 +402,7 @@ main (int argc, const char *argv[])
     }
 
     if (!silent) {
-      print_counts (&snpq, &db);
+      print_counts (&snpq, db);
     }
     /* Need queue for stats */
     az_instance_finalize (&snpq.lmq, GT4_TYPE_LISTMAKER_QUEUE);
@@ -455,7 +454,7 @@ static unsigned long long
 write_reads (GT4Index *index, FILE *ofs, void *data)
 {
   SNPQueue *snpq = (SNPQueue *) data;
-  KMerDB *db = snpq->db;
+  GT4GmerDB *db = snpq->db;
   unsigned long long i;
   unsigned long long written = 0;
   unsigned long long buf[1024];
@@ -487,7 +486,7 @@ write_reads (GT4Index *index, FILE *ofs, void *data)
 }
 
 static void
-write_index (SNPQueue *snpq, KMerDB *db, const char *files[], unsigned int n_files)
+write_index (SNPQueue *snpq, GT4GmerDB *db, const char *files[], unsigned int n_files)
 {
   /* Build read index */
   unsigned long long max_name_pos = 0;
@@ -591,7 +590,7 @@ write_index (SNPQueue *snpq, KMerDB *db, const char *files[], unsigned int n_fil
 }
 
 static void
-print_counts (SNPQueue *snpq, KMerDB *db)
+print_counts (SNPQueue *snpq, GT4GmerDB *db)
 {
   unsigned int i;
   if (header) {
@@ -717,7 +716,7 @@ read_file (SNPQueue *snpq, TaskRead *tr)
 static unsigned int
 process_table (SNPQueue *snpq, TaskTable *tt, unsigned int thread_idx)
 {
-  KMerDB *db = snpq->db;
+  GT4GmerDB *db = snpq->db;
   unsigned int i;
 
   gt4_queue_unlock (&snpq->lmq.queue);
@@ -900,7 +899,7 @@ compare_counts (const void *lhs, const void *rhs) {
 }
 
 static unsigned int
-get_pair_median (KMerDB *db)
+get_pair_median (GT4GmerDB *db)
 {
   unsigned long long i;
   unsigned int total, min, max, med, j;

@@ -74,12 +74,14 @@ int main (int argc, const char *argv[])
   unsigned int n_lists = 0, invalid = 0;
   const char *lists[MAX_LISTS];
   const char *querystring = NULL, *queryfilename = NULL, *seqfilename = NULL, *querylistfilename = NULL;
-  parameters p = {0};
+  unsigned int nmm = 0;
+  unsigned int pm3 = 0;
   char *end;
   int printall = 0, getstat = 0, getmed = 0;
   unsigned int minfreq = 0, maxfreq = UINT_MAX;
   unsigned int distro = 0;
   unsigned int gc = 0;
+  unsigned int bloom = 0;
   
   for (argidx = 1; argidx < argc; argidx++) {
     if (!strcmp (argv[argidx], "-v") || !strcmp (argv[argidx], "--version")) {
@@ -123,11 +125,11 @@ int main (int argc, const char *argv[])
       argidx += 1;
     } else if (!strcmp(argv[argidx], "-p") || !strcmp(argv[argidx], "--perfectmatch")) {
       if (!argv[argidx + 1]) {
-        fprintf(stderr, "Warning: No number of 3 prime perfect matches specified! Using the default value: %d.\n", p.pm3);
+        fprintf(stderr, "Warning: No number of 3 prime perfect matches specified! Using the default value: %d.\n", pm3);
         argidx += 1;
         continue;
       }
-      p.pm3 = strtol (argv[argidx + 1], &end, 10);
+      pm3 = strtol (argv[argidx + 1], &end, 10);
       if (*end != 0) {
         fprintf(stderr, "Error: Invalid number of 3 prime perfect matches: %s! Must be an integer.\n", argv[argidx + 1]);
         print_help (1);
@@ -135,11 +137,11 @@ int main (int argc, const char *argv[])
       argidx += 1;
     } else if (!strcmp(argv[argidx], "-mm") || !strcmp(argv[argidx], "--mismatch")) {
       if (!argv[argidx + 1]) {
-        fprintf(stderr, "Warning: No number of mismatches specified! Using the default value: %d.\n", p.nmm);
+        fprintf(stderr, "Warning: No number of mismatches specified! Using the default value: %d.\n", nmm);
         argidx += 1;
         continue;
       }
-      p.nmm = strtol (argv[argidx + 1], &end, 10);
+      nmm = strtol (argv[argidx + 1], &end, 10);
       if (*end != 0) {
         fprintf(stderr, "Error: Invalid number of mismatches: %s! Must be an integer.\n", argv[argidx + 1]);
         print_help (1);
@@ -185,6 +187,8 @@ int main (int argc, const char *argv[])
       distro = strtol (argv[argidx], &end, 10);;
     } else if (!strcmp(argv[argidx], "-gc") || !strcmp(argv[argidx], "--gc")) {
       gc = 1;
+    } else if (!strcmp(argv[argidx], "--bloom")) {
+      bloom = 1;
     } else if (!strcmp(argv[argidx], "--disable_scouts")) {  
       use_scouts = 0;
     } else if (argv[argidx][0] != '-') {
@@ -201,12 +205,12 @@ int main (int argc, const char *argv[])
   }
 
   /* checking the parameters */
-  if (p.nmm < 0) {
-    fprintf(stderr, "Error: Invalid number of mismatches: %d! Must be between 0 and the length of the query.\n", p.nmm);
+  if (nmm < 0) {
+    fprintf(stderr, "Error: Invalid number of mismatches: %d! Must be between 0 and the length of the query.\n", nmm);
     print_help (1);
   }
-  if (p.pm3 < 0) {
-    fprintf(stderr, "Error: Invalid number of 3 prime perfect matches: %d! Must be between 0 and the length of the query.\n", p.pm3);
+  if (pm3 < 0) {
+    fprintf(stderr, "Error: Invalid number of 3 prime perfect matches: %d! Must be between 0 and the length of the query.\n", pm3);
     print_help (1);
   }
   if (minfreq < 0) {
@@ -235,7 +239,8 @@ int main (int argc, const char *argv[])
     fread (&code, 4, 1, ifs);
     fclose (ifs);
     if (code == GT4_LIST_CODE) {
-      maps[i] = (AZObject *) gt4_word_map_new (lists[i], VERSION_MAJOR, !getstat && use_scouts);
+      maps[i] = (AZObject *) gt4_word_map_new (lists[i], VERSION_MAJOR, !getstat && use_scouts, !getstat && bloom);
+      if (debug) fprintf (stderr, "List %s loaded\n", lists[i]);
     } else if (code == GT4_INDEX_CODE) {
       maps[i] = (AZObject *) gt4_index_map_new (lists[i], VERSION_MAJOR, !getstat && use_scouts);
     } else {
@@ -292,19 +297,22 @@ int main (int argc, const char *argv[])
     GT4WordDictImplementation *impl;
     GT4WordDictInstance *inst;
     impl = (GT4WordDictImplementation *) az_object_get_interface (maps[0], GT4_TYPE_WORD_DICT, (void **) &inst);
-    v = search_fasta (impl, inst, seqfilename, p.nmm, p.pm3, minfreq, maxfreq, printall);
+    v = search_fasta (impl, inst, seqfilename, nmm, pm3, minfreq, maxfreq, printall);
     if (v) return v;
   } else if (querylistfilename) { /* list input */  
     GT4WordDictImplementation *impl;
     GT4WordDictInstance *inst;
     impl = (GT4WordDictImplementation *) az_object_get_interface (maps[0], GT4_TYPE_WORD_DICT, (void **) &inst);
-    v = search_list (impl, inst, querylistfilename, p.nmm, p.pm3, minfreq, maxfreq, printall);
+    v = search_list (impl, inst, querylistfilename, nmm, pm3, minfreq, maxfreq, printall);
+    if (bloom) {
+      fprintf (stderr, "Reject %llu pass %llu\n", map->reject, map->pass);
+    }
     if (v) return v;
   } else if (queryfilename) { /* list of queries */
     GT4WordDictImplementation *impl;
     GT4WordDictInstance *inst;
     impl = (GT4WordDictImplementation *) az_object_get_interface (maps[0], GT4_TYPE_WORD_DICT, (void **) &inst);
-    v = search_n_query_strings (impl, inst, queryfilename, p.nmm, p.pm3, minfreq, maxfreq, printall);
+    v = search_n_query_strings (impl, inst, queryfilename, nmm, pm3, minfreq, maxfreq, printall);
     if (v) return v;
   } else if (querystring) { /* one query */
     GT4WordDictImplementation *impl;
@@ -314,12 +322,12 @@ int main (int argc, const char *argv[])
       fprintf (stderr, "Error: Incompatible wordlengths! Wordlength in list: %u, query length: %lu\n", map->header->word_length, strlen (querystring));
       return 1;
     }
-    if (map->header->word_length - p.pm3 < p.nmm) {
-      fprintf(stderr, "Error: Number or mismatches specified is too large for %s with %d nucleotides long 3 prime perfect match.\n", querystring, p.pm3);
+    if (map->header->word_length - pm3 < nmm) {
+      fprintf(stderr, "Error: Number or mismatches specified is too large for %s with %d nucleotides long 3 prime perfect match.\n", querystring, pm3);
       return 1;
     }
     impl = (GT4WordDictImplementation *) az_object_get_interface (maps[0], GT4_TYPE_WORD_DICT, (void **) &inst);
-    search_one_query_string (impl, inst, querystring, p.nmm, p.pm3, 0, UINT_MAX, printall);
+    search_one_query_string (impl, inst, querystring, nmm, pm3, 0, UINT_MAX, printall);
   }
 
   for (i = 0; i < n_lists; i++) {
@@ -452,7 +460,7 @@ search_list (GT4WordDictImplementation *impl, GT4WordDictInstance *inst, const c
   fread (&code, 4, 1, ifs);
   fclose (ifs);
   if (code == GT4_LIST_CODE) {
-    obj = (AZObject *) gt4_word_map_new (fname, VERSION_MAJOR, 0);
+    obj = (AZObject *) gt4_word_map_new (fname, VERSION_MAJOR, 0, 0);
   } else if (code == GT4_INDEX_CODE) {
     obj = (AZObject *) gt4_index_map_new (fname, VERSION_MAJOR, 0);
   } else {
@@ -669,6 +677,7 @@ void print_help (int exit_value)
   fprintf (stderr, "    -p, --perfectmatch NUMBER - specify number of 3' perfect matches (default 0)\n");
   fprintf (stderr, "    -min, --minfreq NUMBER    - minimum frequency of the printed words (default 0)\n");
   fprintf (stderr, "    -max, --maxfreq NUMBER    - maximum frequency of the printed words (default MAX_UINT)\n");
+  fprintf (stderr, "    --bloom                   - use bloom filter to speed up lookups\n");
   fprintf (stderr, "    --all                     - in case of mismatches prints all found words\n");
   fprintf (stderr, "    -D                        - increase debug level\n");
   exit (exit_value);

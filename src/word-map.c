@@ -95,7 +95,10 @@ word_map_shutdown (AZObject *object)
   }
   wmap->header = NULL;
   wmap->wordlist = NULL;
-  wmap->user_data = NULL;
+  if (wmap->bloom) {
+    gt4_bloom_delete (wmap->bloom);
+    wmap->bloom = NULL;
+  }
 }
 
 unsigned int
@@ -131,6 +134,13 @@ word_map_lookup (GT4WordDictImplementation *impl, GT4WordDictInstance *inst, uns
 {
   GT4WordMap *wmap = GT4_WORD_MAP_FROM_DICT_INST(inst);
   unsigned long long current, low, high, mid;
+  if (wmap->bloom) {
+    if (!gt4_bloom_query (wmap->bloom, word)) {
+      wmap->reject += 1;
+      return 0;
+    }
+  }
+  wmap->pass += 1;
   low = 0;
   high = wmap->header->n_words - 1;
   mid = (low + high) / 2;
@@ -151,7 +161,7 @@ word_map_lookup (GT4WordDictImplementation *impl, GT4WordDictInstance *inst, uns
 }
 
 GT4WordMap * 
-gt4_word_map_new (const char *listfilename, unsigned int major_version, unsigned int scout)
+gt4_word_map_new (const char *listfilename, unsigned int major_version, unsigned int scout, unsigned int create_bloom)
 {
   const unsigned char *cdata;
   unsigned long long csize, start;
@@ -207,6 +217,14 @@ gt4_word_map_new (const char *listfilename, unsigned int major_version, unsigned
     wmap->sarray_inst.slist_inst.count = WORDMAP_FREQ(wmap,0);
   }
   wmap->dict_inst.word_length = wmap->header->word_length;
+
+  if (create_bloom) {
+    unsigned long long i;
+    wmap->bloom = gt4_bloom_new (30, 6);
+    for (i = 0; i < wmap->sarray_inst.slist_inst.num_words; i++) {
+      gt4_bloom_insert (wmap->bloom, WORDMAP_WORD(wmap, i));
+    }
+  }
 
   return wmap;
 }

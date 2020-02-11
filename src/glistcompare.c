@@ -259,7 +259,7 @@ int main (int argc, const char *argv[])
     fread (&code, 4, 1, ifs);
     fclose (ifs);
     if (code == GT4_LIST_CODE) {
-      obj = (AZObject *) gt4_word_map_new (fnames[0], VERSION_MAJOR, 0);
+      obj = (AZObject *) gt4_word_map_new (fnames[0], VERSION_MAJOR, 0, 0);
     } else if (code == GT4_INDEX_CODE) {
       obj = (AZObject *) gt4_index_map_new (fnames[0], VERSION_MAJOR, 0);
     } else {
@@ -329,8 +329,8 @@ int main (int argc, const char *argv[])
   if (nmm) {
     GT4WordMap *map1, *map2;
     int cinf;
-    map1 = gt4_word_map_new (fnames[0], VERSION_MAJOR, USE_SCOUTS);
-    map2 = gt4_word_map_new (fnames[1], VERSION_MAJOR, USE_SCOUTS);
+    map1 = gt4_word_map_new (fnames[0], VERSION_MAJOR, USE_SCOUTS, 0);
+    map2 = gt4_word_map_new (fnames[1], VERSION_MAJOR, USE_SCOUTS, 0);
     if (!map1 || !map2) {
       fprintf (stderr, "Error: Creating the wordmap failed!\n");
       exit (1);
@@ -355,8 +355,8 @@ int main (int argc, const char *argv[])
       list1 = (AZObject *) gt4_word_list_stream_new (fnames[0], VERSION_MAJOR);
       list2 = (AZObject *) gt4_word_list_stream_new (fnames[1], VERSION_MAJOR);
     } else {
-      list1 = (AZObject *) gt4_word_map_new (fnames[0], VERSION_MAJOR, use_scouts);
-      list2 = (AZObject *) gt4_word_map_new (fnames[1], VERSION_MAJOR, use_scouts);
+      list1 = (AZObject *) gt4_word_map_new (fnames[0], VERSION_MAJOR, use_scouts, 0);
+      list2 = (AZObject *) gt4_word_map_new (fnames[1], VERSION_MAJOR, use_scouts, 0);
     }
     if (!list1 || !list2) {
       fprintf (stderr, "Error: Creating the wordmap failed!\n");
@@ -377,7 +377,7 @@ int main (int argc, const char *argv[])
         maps[i] = (AZObject *) gt4_word_list_stream_new (fnames[i], VERSION_MAJOR);
         if (!maps[i]) exit (1);
       } else {
-        maps[i] = (AZObject *) gt4_word_map_new (fnames[i], VERSION_MAJOR, use_scouts);
+        maps[i] = (AZObject *) gt4_word_map_new (fnames[i], VERSION_MAJOR, use_scouts, 0);
         if (!maps[i]) exit (1);
       }
     }
