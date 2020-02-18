@@ -280,7 +280,7 @@ int main (int argc, const char *argv[])
     subset (impl, inst, subset_method, subset_size, tmp_name);
     snprintf (out_name, 2048, "%s_subset_%u.list", outputname, inst->word_length);
     out_name[2047] = 0;
-    if (!rename (tmp_name, out_name)) {
+    if (rename (tmp_name, out_name)) {
       fprintf (stderr, "Cannot rename %s to %s\n", tmp_name, out_name);
       exit (1);
     }
@@ -402,7 +402,7 @@ int main (int argc, const char *argv[])
       close (ofile);
       snprintf (out_name, 2048, "%s_%d_union.list", outputname, inst->word_length);
       out_name[2047] = 0;
-      if (!rename (tmp_name, out_name)) {
+      if (rename (tmp_name, out_name)) {
         fprintf (stderr, "Cannot rename %s to %s\n", tmp_name, out_name);
         exit (1);
       }
@@ -958,7 +958,7 @@ compare_wordmaps_mm (GT4WordMap *map1, GT4WordMap *map2, int find_diff, int find
     fseek (outf[2], 0, SEEK_SET);
     fwrite (&h_out, sizeof (GT4ListHeader), 1, outf[2]);
     fclose (outf[2]);
-    sprintf (fname[0], "%s_%d_%d_diff1.list", out, map1->header->word_length, nmm);
+    sprintf (name, "%s_%d_%d_diff1.list", out, map1->header->word_length, nmm);
     rename (fname[0], name);
   } else if (find_diff) {
     fprintf (stdout, "NUnique\t%llu\nNTotal\t%llu\n", c_diff1, freqsum_diff1);
@@ -969,7 +969,8 @@ compare_wordmaps_mm (GT4WordMap *map1, GT4WordMap *map2, int find_diff, int find
     fseek (outf[3], 0, SEEK_SET);
     fwrite (&h_out, sizeof (GT4ListHeader), 1, outf[3]);
     fclose (outf[3]);
-    sprintf (fname[0], "%s_%d_%d_diff2.list", out, map1->header->word_length, nmm);
+    sprintf (name, "%s_%d_%d_diff2.list", out, map1->header->word_length, nmm);
+    rename (fname[0], name);
   } else if (find_ddiff) {
     fprintf (stdout, "NUnique\t%llu\nNTotal\t%llu\n", c_diff2, freqsum_diff2);
   }
@@ -1044,7 +1045,7 @@ print_help (int exit_value)
   fprintf (stdout, "    -r, --rule STRING        - specify rule how final frequencies are calculated (default, add, subtract, min, max, first, second, 1, 2)\n");
   fprintf (stdout, "                               NOTE: rules min, subtract, first and second can only be used with finding the intersection.\n");
   fprintf (stdout, "    -ss, --subset METHOD SIZE - make subset with given method (rand, rand_unique, rand_weighted_unique)\n");
-  fprintf (stdout, "    -seed INTEGER            - Set seed of random nu,ber generator (default uses start time)\n");
+  fprintf (stdout, "    --seed INTEGER           - Set seed of random number generator (default uses start time)\n");
   fprintf (stdout, "    --count_only             - output count of k-mers instead of k-mers themself\n");
   fprintf (stdout, "    --disable_scouts         - disable list read-ahead in background thread\n");
   fprintf (stdout, "    --stream                 - read input as stream (do not memory map files)\n");

@@ -23,7 +23,7 @@
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-static unsigned int debug = 1;
+extern int debug;
 
 #include <stdio.h>
 #include <string.h>

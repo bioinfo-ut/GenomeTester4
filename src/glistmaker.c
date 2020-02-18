@@ -139,8 +139,6 @@ main (int argc, const char *argv[])
   unsigned long long tablesize = DEFAULT_TABLE_SIZE;
   unsigned int ntables = DEFAULT_NUM_TABLES;
   unsigned int stream = 0;
-  char c[1024];
-  FILE *ofs;
 
   GT4ListMakerQueue mq;
 
@@ -244,17 +242,6 @@ main (int argc, const char *argv[])
     fprintf (stderr, "Table size is %lld\n", tablesize);
   }
 
-  if (create_index) {
-    snprintf (c, 1024, "%s_%u.index", outputname, wordlength);
-  } else {
-    snprintf (c, 1024, "%s_%u.list", outputname, wordlength);
-  }
-  ofs = fopen (c, "w");
-  if (ofs == NULL) {
-    fprintf (stderr, "Cannot create output file %s\n", c);
-    exit (1);
-  }
-
   /* Set up queue */
   maker_queue_setup (&mq, nthreads, wordlength, ntables, tablesize, (create_index) ? sizeof (Location) : 0);
   for (i = 0; i < n_files; i++) maker_queue_add_file (&mq, files[i], stream, i);
@@ -278,6 +265,22 @@ main (int argc, const char *argv[])
     }
   }
 
+  char tmp_name[1024], out_name[1024];
+  FILE *ofs;
+  if (create_index) {
+    snprintf (tmp_name, 1024, "%s_%u.index.tmp", outputname, wordlength);
+    snprintf (out_name, 1024, "%s_%u.index", outputname, wordlength);
+  } else {
+    snprintf (tmp_name, 1024, "%s_%u.list.tmp", outputname, wordlength);
+    snprintf (out_name, 1024, "%s_%u.list", outputname, wordlength);
+  }
+
+  ofs = fopen (tmp_name, "w");
+  if (ofs == NULL) {
+    fprintf (stderr, "Cannot create output file %s\n", tmp_name);
+    exit (1);
+  }
+
   if (mq.n_final_files > 0) {
     if (create_index) {
       write_index (ofs, (const char **) mq.final_files, mq.n_final_files, &mq, files, n_files);
@@ -297,7 +300,6 @@ main (int argc, const char *argv[])
         unlink (mq.final_files[i]);
       }
     }
-    fclose (ofs);
   } else {
     if (create_index) {
       write_index_header (ofs, mq.wordlen);
@@ -306,7 +308,10 @@ main (int argc, const char *argv[])
       gt4_list_header_init (&header, mq.wordlen);
       fwrite (&header, sizeof (header), 1, ofs);
     }
-    fclose (ofs);
+  }
+  fclose (ofs);
+  if (rename (tmp_name, out_name)) {
+    fprintf (stderr, "Cannot rename %s to %s\n", tmp_name, out_name);
   }
 
   if (debug) {
