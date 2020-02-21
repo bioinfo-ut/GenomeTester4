@@ -637,7 +637,7 @@ compare_wordmaps (AZObject *list1, AZObject *list2, int find_union, int find_int
     fseek (outf[2], 0, SEEK_SET);
     fwrite (&h_out, sizeof (GT4ListHeader), 1, outf[2]);
     fclose (outf[2]);
-    sprintf (name, "%s_%d_diff1.list", out, inst1->word_length);
+    sprintf (name, "%s_%d_0_diff1.list", out, inst1->word_length);
     rename (fname[2], name);
   } else if (find_diff) {
     fprintf (stdout, "NUnique\t%llu\nNTotal\t%llu\n", c_diff1, freqsum_diff1);
@@ -648,7 +648,7 @@ compare_wordmaps (AZObject *list1, AZObject *list2, int find_union, int find_int
     fseek (outf[3], 0, SEEK_SET);
     fwrite (&h_out, sizeof (GT4ListHeader), 1, outf[3]);
     fclose (outf[3]);
-    sprintf (name, "%s_%d_diff2.list", out, inst1->word_length);
+    sprintf (name, "%s_%d_0_diff2.list", out, inst1->word_length);
     rename (fname[3], name);
   } else if (find_ddiff) {
     fprintf (stdout, "NUnique\t%llu\nNTotal\t%llu\n", c_diff2, freqsum_diff2);
