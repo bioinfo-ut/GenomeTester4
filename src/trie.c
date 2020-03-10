@@ -62,17 +62,24 @@ trie_release (Trie *trie)
   free (trie->roots);
 }
 
-void
+unsigned int
 trie_add_word (Trie *trie, unsigned long long word, unsigned int count)
 {
   trie_add_word_with_allocator (trie, word, count, 0);
+  return 1;
 }
 
-void
+unsigned int
 trie_add_word_with_allocator (Trie *trie, unsigned long long word, unsigned int count, unsigned int aidx)
 {
   unsigned int cbits = trie->nbits - trie->nbits_root;
-  trie->roots[word >> cbits] = trie_node_add_word (trie, trie->roots[word >> cbits], 0, word % (1ULL << cbits), cbits, count, aidx);
+  TrieRef ref = trie_node_add_word (trie, trie->roots[word >> cbits], 0, word % (1ULL << cbits), cbits, count, aidx);
+  if (REF_IS_EMPTY (ref)) {
+    fprintf (stderr, "Cannot add word to trie (double word?)\n");
+    return 0;
+  }
+  trie->roots[word >> cbits] = ref;
+  return 1;
 }
 
 unsigned int
@@ -265,8 +272,13 @@ trie_node_kmer_add_word (Trie *trie, TrieRef ref, unsigned int level, unsigned l
   if (KMER_GET_WORD (ref) == word) {
     /* Same kmer, increase count */
     /* kmer->count = kmer->count + count; */
+    if (debug) {
+      if ((unsigned long long) KMER_GET_COUNT (kmer) + count > 0xffffffff) {
+        fprintf (stderr, "Count too big: kmer %llu existing %u added %u\n", KMER_GET_WORD (kmer), KMER_GET_COUNT (kmer), count);
+      }
+    }
     kmer = MAKE_KMER (KMER_GET_NBITS (kmer), KMER_GET_WORD (kmer), KMER_GET_COUNT (kmer) + count);
-    
+    assert (KMER_GET_WORD (kmer) == word);
     return (TrieRef) kmer;
   } else {
     unsigned int bit, new_this_bits, new_child_bits, child_kmer_bits;
@@ -275,6 +287,7 @@ trie_node_kmer_add_word (Trie *trie, TrieRef ref, unsigned int level, unsigned l
     TrieNodeBranch *new_branch;
     TrieRef new_node_ref;
 
+    assert (nbits != 0);
     /* Different kmer, split */
     bit = 63 - __builtin_clzll (KMER_GET_WORD (kmer) ^ word);
 
@@ -373,6 +386,9 @@ trie_node_add_word (Trie *trie, TrieRef ref, unsigned int level, unsigned long l
     }
   }
   if (REF_IS_KMER (ref)) {
+    if (!nbits) {
+      assert (KMER_GET_WORD (ref) == word);
+    }
     return trie_node_kmer_add_word (trie, ref, level, word, nbits, count, aidx);
   } else {
     return trie_node_branch_add_word (trie, ref, level, word, nbits, count, aidx);

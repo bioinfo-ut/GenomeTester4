@@ -51,7 +51,7 @@ struct _TrieNodeBranch {
 
 #define KMER_GET_NBITS(n) (((unsigned long long) (n) >> 59) & 0x1f)
 #define KMER_GET_WORD(n) (((unsigned long long) (n) >> 33) & 0x3ffffff)
-#define KMER_GET_COUNT(n) (((unsigned long long) (n) >> 1) & 0xffffffff)
+#define KMER_GET_COUNT(n) (unsigned int) (((unsigned long long) (n) >> 1) & 0xffffffff)
 
 #define MAKE_KMER(b,w,c) (((unsigned long long) (b) << 59) | ((unsigned long long) (w) << 33) | ((unsigned long long) (c) << 1) | TYPE_KMER)
 
@@ -95,8 +95,8 @@ Trie *trie_new (unsigned int nbits, unsigned int nbits_root, unsigned int nalloc
 void trie_setup (Trie *trie, unsigned int nbits, unsigned int nbits_root);
 void trie_setup_full (Trie *trie, unsigned int nbits, unsigned int nbits_root, unsigned int nallocators);
 void trie_release (Trie *trie);
-void trie_add_word (Trie *trie, unsigned long long word, unsigned int count);
-void trie_add_word_with_allocator (Trie *trie, unsigned long long word, unsigned int count, unsigned int aidx);
+unsigned int trie_add_word (Trie *trie, unsigned long long word, unsigned int count);
+unsigned int trie_add_word_with_allocator (Trie *trie, unsigned long long word, unsigned int count, unsigned int aidx);
 unsigned int trie_lookup (Trie *trie, unsigned long long word);
 
 /* If callback return not 0 lookup stops */
