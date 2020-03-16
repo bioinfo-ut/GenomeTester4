@@ -768,9 +768,9 @@ subset (GT4WordSListImplementation *impl, GT4WordSListInstance *inst, unsigned i
         double val = drand48 ();
         if (val <= ((double) out / in)) {
           count += 1;
-          in -= 1;
           out -= 1;
         }
+        in -= 1;
       }
       if (count > 0) {
         fwrite (&inst->word, sizeof (unsigned long long), 1, ofs);
@@ -789,9 +789,9 @@ subset (GT4WordSListImplementation *impl, GT4WordSListInstance *inst, unsigned i
         fwrite (&inst->count, sizeof (unsigned int), 1, ofs);
         h_out.n_words += 1;
         h_out.total_count += inst->count;
-        in -= 1;
         out -= 1;
       }
+      in -= 1;
       gt4_word_slist_get_next_word (impl, inst);
     }
   } else if (subset_method == RAND_WEIGHTED_UNIQUE) {
@@ -803,9 +803,9 @@ subset (GT4WordSListImplementation *impl, GT4WordSListInstance *inst, unsigned i
         fwrite (&inst->count, sizeof (unsigned int), 1, ofs);
         h_out.n_words += 1;
         h_out.total_count += inst->count;
-        in -= inst->count;
         out -= 1;
       }
+      in -= inst->count;
       gt4_word_slist_get_next_word (impl, inst);
     }
   }
