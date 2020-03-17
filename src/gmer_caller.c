@@ -423,7 +423,7 @@ print_genotypes (const unsigned char *lines[], SNPCall *calls, unsigned int ncal
         double *a;
         double summa;
         unsigned int best_gt;
-        char c[64];
+        char c[256];
         const unsigned char *p;
         unsigned int cancall;
         SNPCall *call = calls + optim[t].first + k;
@@ -433,7 +433,7 @@ print_genotypes (const unsigned char *lines[], SNPCall *calls, unsigned int ncal
 
         p = lines[call->line];
         j = 0;
-        while (p[j] != '\t') j += 1;
+        while ((p[j] != '\t') && (j < 255)) j += 1;
         memcpy (c, p, j);
         c[j] = 0;
         fprintf (stdout, "%s", c);
