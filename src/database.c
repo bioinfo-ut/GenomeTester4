@@ -294,7 +294,6 @@ write_db_to_file_with_reads_callback (GT4GmerDB *db, FILE *ofs, unsigned int kme
   fwrite (&db->count_bits, 4, 1, ofs);
   fwrite (&db->n_nodes, 8, 1, ofs);
   fwrite (&db->n_kmers, 8, 1, ofs);
-  fprintf (stderr, "Names size %llu\n", db->names_size);
   fwrite (&db->names_size, 8, 1, ofs);
   written = 48;
   /* Starts (5 * 8 bytes) */

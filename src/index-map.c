@@ -245,7 +245,7 @@ gt4_index_map_delete (GT4IndexMap *imap)
 unsigned int 
 gt4_index_map_lookup_canonical (GT4IndexMap *imap, unsigned long long query)
 {
-  if (gt4_word_dict_lookup (GT4_INDEX_MAP_DICT_IMPL(imap), &imap->dict_inst, query)) {
+  if (gt4_word_dict_lookup (GT4_INDEX_MAP_DICT_IMPL(imap), &imap->dict_inst, query, 0)) {
     return imap->dict_inst.value;
   }
   return 0;
@@ -254,7 +254,8 @@ gt4_index_map_lookup_canonical (GT4IndexMap *imap, unsigned long long query)
 unsigned int 
 gt4_index_map_lookup (GT4IndexMap *imap, unsigned long long query)
 {
-  unsigned long long rev = get_reverse_complement (query, imap->header->word_length);
-  if (rev < query) query = rev;
-  return gt4_index_map_lookup_canonical (imap, query);
+  if (gt4_word_dict_lookup (GT4_INDEX_MAP_DICT_IMPL(imap), &imap->dict_inst, query, 0)) {
+    return imap->dict_inst.value;
+  }
+  return 0;
 }

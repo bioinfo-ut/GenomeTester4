@@ -38,10 +38,8 @@ static unsigned int sex = 0;
 #define OUTPUT_ALL 2
 static unsigned int output = OUTPUT_POLY_BEST;
 static unsigned int print_extra = 0;
-static unsigned int debug_pos = 0;
 static double error_prob = 0.001f;
 static unsigned int exome = 0;
-static float min_hzp = 0.01f;
 #define COVERAGE_IGNORE -2
 #define COVERAGE_LOCAL -1
 #define COVERAGE_MEDIAN 0
@@ -334,7 +332,7 @@ assembly_data_clear (AssemblyData *adata)
 static void
 print_header (FILE *ofs) {
   fprintf (ofs, "CHR\tPOS\tSUB\tREF\tCOV\tCALL\tCLASS\tP\tPMUT");
-  fprintf (ofs, "\tPREV");
+  if (print_extra > 1) fprintf (ofs, "\tPREV");
   if (print_extra > 0) {
     fprintf (ofs, "\tA\tC\tG\tT\tGAP");
   }
@@ -368,7 +366,7 @@ print_call (CallBlock *cb, unsigned int pos)
   /* PVALUE */
   fprintf (stdout, "\t%.3f", call->q);
   fprintf (stdout, "\t%.3f", call->p_det);
-  fprintf (stdout, "\t%c", call->prev_ref);
+  if (print_extra > 1) fprintf (stdout, "\t%c", call->prev_ref);
   if (print_extra > 0) {
     /* A C G T GAP */
     fprintf (stdout, "\t%u\t%u\t%u\t%u\t%u", call->counts[A], call->counts[C], call->counts[G], call->counts[T], call->counts[GAP]);
@@ -703,6 +701,7 @@ main (int argc, const char *argv[])
   for (i = 1; i < argc; i++) {
     if (!strcmp (argv[i], "-v") || !strcmp (argv[i], "--version")) {
       fprintf (stdout, "gassembler version %u.%u.%u (%s)\n", VERSION_MAJOR, VERSION_MINOR, VERSION_MICRO, VERSION_QUALIFIER);
+      exit (0);
     } else if (!strcmp (argv[i], "-h") || !strcmp (argv[i], "--help")) {
       print_usage (stdout, 0, 0);
     } else if (!strcmp (argv[i], "--advanced")) {

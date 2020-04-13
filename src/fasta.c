@@ -268,7 +268,7 @@ fasta_reader_read_nwords (GT4FastaReader *reader, unsigned long long maxwords,
       	/* End of quality, next should be EOF or '@' */
       	cval = gt4_sequence_source_read (reader->impl, reader->inst);;
       	if (cval == 0) {
-      	  fprintf (stderr, "fasta_reader_read_nwords: Reader %s end of sequence at %llu\n", reader->id, reader->cpos);
+      	  if (debug) fprintf (stderr, "fasta_reader_read_nwords: Reader %s end of sequence at %llu\n", reader->id, reader->cpos);
       	  return 0;
         }
       	if (cval != '@') {

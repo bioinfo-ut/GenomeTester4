@@ -375,7 +375,7 @@ search_one_query_string (GT4WordDictImplementation *impl, GT4WordDictInstance *i
 {
   unsigned long long word;
   word = string_to_word (query, inst->word_length);
-  if (gt4_word_dict_lookup_mm (impl, inst, word, n_mm, pm_3, print_all, 0)) {
+  if (gt4_word_dict_lookup_mm (impl, inst, word, n_mm, pm_3, 1, print_all, 0)) {
     /* Found it */
     if (!print_all && (inst->value >= min_freq) && (inst->value <= max_freq)) fprintf (stdout, "%s\t%u\n", query, inst->value);
   }
@@ -477,7 +477,7 @@ search_list (GT4WordDictImplementation *impl, GT4WordDictInstance *inst, const c
   gt4_word_slist_get_first_word (s_impl, s_inst);
   while (s_inst->idx < s_inst->num_words) {
     uint64_t word = s_inst->word;
-    if (gt4_word_dict_lookup_mm (impl, inst, word, n_mm, pm_3, print_all, 0)) {
+    if (gt4_word_dict_lookup_mm (impl, inst, word, n_mm, pm_3, 1, print_all, 0)) {
       if (!print_all && (inst->value >= min_freq) && (inst->value <= max_freq)) fprintf (stdout, "%s\t%u\n", word_to_string (word, inst->word_length), inst->value);
     }
     if (!gt4_word_slist_get_next_word (s_impl, s_inst)) break;
@@ -534,7 +534,7 @@ search_lists_multi (const char *list, const char *lists[], unsigned int n_lists)
 int process_word (GT4FastaReader *reader, unsigned long long word, void *data)
 {
   struct QueryData *qs = (struct QueryData *) data;
-  if (gt4_word_dict_lookup_mm (qs->impl, qs->inst, word, qs->n_mm, qs->pm_3, qs->print_all, 0)) {
+  if (gt4_word_dict_lookup_mm (qs->impl, qs->inst, word, qs->n_mm, qs->pm_3, 1, qs->print_all, 0)) {
     if (!qs->print_all && (qs->inst->value >= qs->min_freq) && (qs->inst->value <= qs->max_freq)) fprintf (stdout, "%s\t%u\n", word_to_string (word, reader->wordlength), qs->inst->value);
   }
   return 0;

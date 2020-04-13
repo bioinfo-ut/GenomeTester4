@@ -375,22 +375,24 @@ main (int argc, const char *argv[])
     }
     last_time = get_time();
 
-    fprintf (stdout, "#gmer_counter version %u.%u.%u (%s)\n", VERSION_MAJOR, VERSION_MINOR, VERSION_MICRO, VERSION_QUALIFIER);
-    if (db_name) fprintf (stdout, "#TextDatabase\t%s\n", db_name);
-    if (dbb) fprintf (stdout, "#BinaryDatabase\t%s\n", dbb);
+    if (!silent) {
+      fprintf (stdout, "#gmer_counter version %u.%u.%u (%s)\n", VERSION_MAJOR, VERSION_MINOR, VERSION_MICRO, VERSION_QUALIFIER);
+      if (db_name) fprintf (stdout, "#TextDatabase\t%s\n", db_name);
+      if (dbb) fprintf (stdout, "#BinaryDatabase\t%s\n", dbb);
         
-    if (dm) {
-      unsigned int med = get_pair_median (db);
-      fprintf (stdout, "#PairMedian\t%u\n", med);
-    }
+      if (dm) {
+        unsigned int med = get_pair_median (db);
+        fprintf (stdout, "#PairMedian\t%u\n", med);
+      }
 
-    if (stats) {
-      fprintf (stdout, "LENGTH\tGC\tTOTAL_KMERS\tLIST_KMERS\tLIST_KMER_GC\n");
-      fprintf (stdout, "%llu", snpq.n_nucl);
-      fprintf (stdout, "\t%.3f", (double) snpq.n_gc / snpq.n_nucl);
-      fprintf (stdout, "\t%llu", snpq.n_kmers_total);
-      fprintf (stdout, "\t%llu", snpq.n_kmers);
-      fprintf (stdout, "\t%.3f\n", (double) snpq.n_kmer_gc / (snpq.n_kmers * db->wordsize));
+      if (stats) {
+        fprintf (stdout, "LENGTH\tGC\tTOTAL_KMERS\tLIST_KMERS\tLIST_KMER_GC\n");
+        fprintf (stdout, "%llu", snpq.n_nucl);
+        fprintf (stdout, "\t%.3f", (double) snpq.n_gc / snpq.n_nucl);
+        fprintf (stdout, "\t%llu", snpq.n_kmers_total);
+        fprintf (stdout, "\t%llu", snpq.n_kmers);
+        fprintf (stdout, "\t%.3f\n", (double) snpq.n_kmer_gc / (snpq.n_kmers * db->wordsize));
+      }
     }
 
     if (index_name) {
@@ -403,6 +405,9 @@ main (int argc, const char *argv[])
 
     if (!silent) {
       print_counts (&snpq, db);
+    }
+    for (i = 0; i < snpq.n_free_tables; i++) {
+      snp_table_free (snpq.free_tables[i]);
     }
     /* Need queue for stats */
     az_instance_finalize (&snpq.lmq, GT4_TYPE_LISTMAKER_QUEUE);
@@ -491,7 +496,6 @@ write_index (SNPQueue *snpq, GT4GmerDB *db, const char *files[], unsigned int n_
   /* Build read index */
   unsigned long long max_name_pos = 0;
   unsigned int max_file_idx = 0, max_kmer_pos = 0;
-  unsigned long long read_start;
   unsigned int i;
   double last_time;
 
@@ -509,7 +513,6 @@ write_index (SNPQueue *snpq, GT4GmerDB *db, const char *files[], unsigned int n_
   db->index.read_blocks = (unsigned long long *) malloc (db->n_kmers * sizeof (unsigned long long));
 
   max_file_idx = n_files - 1;
-  read_start = 0;
   if (debug) fprintf (stderr, "Calculate bitsizes\n");
   unsigned int n_threads = snpq->lmq.queue.nthreads_total;
   unsigned int bsize = (db->index.n_kmers + n_threads - 1) / n_threads;
@@ -882,8 +885,6 @@ static int
 read_nucleotide (GT4FastaReader *reader, unsigned int nucl, void *data)
 {
   TaskRead *tt = (TaskRead *) data;
-  GT4ListMakerQueue *mq = (GT4ListMakerQueue *) tt->task.queue;
-  GT4LMQSource *src = &mq->sources[tt->idx];
   SNPTable *tbl = (SNPTable *) tt->data;
 
   tbl->n_nucl += 1;
