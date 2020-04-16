@@ -171,19 +171,20 @@ gt4_sequence_block_split (GT4SequenceBlock *blk, GT4SequenceBlock *child_blocks[
         }
         split += 1;
         if (!fastq) {
-          /* FastA name */
+          /* Break if FastA name */
           if ((split >= remaining_size) || (blk->cdata[current_pos + split] == '>')) break;
         } else {
-          /* FastQ separator */
-          if ((split < remaining_size) || (blk->cdata[current_pos + split] == '+')) {
-            split += 1;
-            if ((split < remaining_size) || (blk->cdata[current_pos + split] == '\n')) {
-              split += 1;
-              while ((split < remaining_size) && (blk->cdata[current_pos + split] != '\n')) split += 1;
-              if (split < remaining_size) split += 1;
-              /* FastQ name */
-              if ((split >= remaining_size) || (blk->cdata[current_pos + split] == '@')) break;
-            }
+          /* If FastQ separator search for @...\n...\n+ pattern */
+          if ((split < remaining_size) && (blk->cdata[current_pos + split] == '@')) {
+            unsigned int s = split + 1;
+            /* Skip name */
+            while ((s < remaining_size) && (blk->cdata[current_pos + s] != '\n')) s += 1;
+            s += 1;
+            /* Skip sequence */
+            while ((s < remaining_size) && (blk->cdata[current_pos + s] != '\n')) s += 1;
+            s += 1;
+            /* If next line starts with '+' we have found it */
+            if ((s < remaining_size) && (blk->cdata[current_pos + s] == '+')) break;
           }
         }
       }
