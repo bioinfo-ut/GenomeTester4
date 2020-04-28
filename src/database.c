@@ -380,14 +380,17 @@ read_database_from_binary (KMerDB *db, const unsigned char *cdata, unsigned long
   unsigned int version;
   unsigned int has_index = 0;
 
-  if (memcmp (cdata + cpos, DBKEY, 4)) return 0;
+  if (memcmp (cdata + cpos, DBKEY, 4)) {
+    fprintf (stderr, "read_database_from_binary: Invalid DB key\n");
+    return 0;
+  }
   cpos += 4;
   memcpy (&major, cdata + cpos, 2);
   cpos += 2;
   memcpy (&minor, cdata + cpos, 2);
   cpos += 2;
   version = (major << 16) | minor;
-  if (version < 1) return 0;
+  /* if (version < 1) return 0; */
   if (version >= 3) has_index = 1;
 
   memcpy (&db->wordsize, cdata + cpos, 4);
