@@ -82,6 +82,8 @@ struct _GT4LMQSource {
   /* Subsequence data */
   unsigned int n_subseqs;
   GT4SubSequence *subseqs;
+  /* For collation */
+  unsigned int first_subseq;
   /* Bookkeeping */
   unsigned int size_subseqs;
 };

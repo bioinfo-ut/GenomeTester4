@@ -138,7 +138,7 @@ fasta_reader_read_nwords (GT4FastaReader *reader, unsigned long long maxwords,
       }
       reader->state = FASTA_READER_STATE_NAME;
       reader->seq_npos = 0;
-      reader->name_pos = reader->cpos;
+      reader->name_pos = reader->cpos + 1;
       reader->name_length = 0;
       reader->cpos += 1;
       break;
@@ -185,7 +185,7 @@ fasta_reader_read_nwords (GT4FastaReader *reader, unsigned long long maxwords,
 	/* Start new name */
 	reader->state = FASTA_READER_STATE_NAME;
 	reader->seq_npos = 0;
-	reader->name_pos = reader->cpos;
+	reader->name_pos = reader->cpos + 1;
 	reader->name_length = 0;
       } else if ((reader->type == GT4FR_FASTQ) && (cval == '\n')) {
       	/* End of FastQ sequence */
@@ -278,7 +278,7 @@ fasta_reader_read_nwords (GT4FastaReader *reader, unsigned long long maxwords,
       	reader->cpos += 1;
 	reader->state = FASTA_READER_STATE_NAME;
 	reader->seq_npos = 0;
-	reader->name_pos = reader->cpos;
+	reader->name_pos = reader->cpos + 1;
 	reader->name_length = 0;
       }
       reader->cpos += 1;

@@ -51,6 +51,7 @@ LISTQUERY_SOURCES = \
 	utils.c utils.h \
 	word-array-sorted.c word-array-sorted.h \
 	word-dict.c word-dict.h \
+	word-index.c word-index.h \
 	word-list.c word-list.h \
 	word-list-sorted.c word-list-sorted.h \
         word-list-stream.c word-list-stream.h \
@@ -77,6 +78,7 @@ LISTCOMPARE_SOURCES = \
 	utils.c \
 	word-array-sorted.c word-array-sorted.h \
 	word-dict.c word-dict.h \
+	word-index.c word-index.h \
 	word-list.c word-list.h \
 	word-list-sorted.c word-list-sorted.h \
 	word-list-stream.c word-list-stream.h \
