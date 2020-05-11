@@ -51,6 +51,7 @@ struct QueryData {
 };
 
 static void search_one_query_string (GT4WordDictImplementation *impl, GT4WordDictInstance *inst, const char *querystring, unsigned int n_mm, unsigned int pm_3, unsigned int min_freq, unsigned int max_freq, int print_all);
+static void search_one_query_string_index (GT4IndexMap *imap, const char *query);
 static unsigned int search_n_query_strings (GT4WordDictImplementation *impl, GT4WordDictInstance *inst, const char *fname, unsigned int n_mm, unsigned int pm_3, unsigned int minfreq, unsigned int maxfreq, int printall);
 static unsigned int search_fasta (GT4WordDictImplementation *impl, GT4WordDictInstance *inst, const char *fname, unsigned int n_mm, unsigned int pm_3, unsigned int minfreq, unsigned int maxfreq, int printall);
 static unsigned int search_list (GT4WordDictImplementation *impl, GT4WordDictInstance *inst, const char *querylistfilename, unsigned int n_mm, unsigned int pm_3, unsigned int min_freq, unsigned int max_freq, int print_all);
@@ -61,7 +62,8 @@ void get_statistics (AZObject *obj);
 void print_median (AZObject *obj);
 void print_distro (AZObject *obj, unsigned int size);
 void print_gc (AZObject *obj);
-static int print_files (AZObject *obj);
+static void print_files (GT4IndexMap *imap);
+static void print_sequences (GT4IndexMap *imap);
 void print_help (int exitvalue);
 
 int debug = 0;
@@ -81,6 +83,8 @@ int main (int argc, const char *argv[])
   unsigned int minfreq = 0, maxfreq = UINT_MAX;
   unsigned int distro = 0;
   unsigned int gc = 0;
+  unsigned int files = 0;
+  unsigned int sequences = 0;
   unsigned int bloom = 0;
   
   for (argidx = 1; argidx < argc; argidx++) {
@@ -187,6 +191,10 @@ int main (int argc, const char *argv[])
       distro = strtol (argv[argidx], &end, 10);;
     } else if (!strcmp(argv[argidx], "-gc") || !strcmp(argv[argidx], "--gc")) {
       gc = 1;
+    } else if (!strcmp(argv[argidx], "--files")) {
+      files = 1;
+    } else if (!strcmp(argv[argidx], "--sequences")) {
+      sequences = 1;
     } else if (!strcmp(argv[argidx], "--bloom")) {
       bloom = 1;
     } else if (!strcmp(argv[argidx], "--disable_scouts")) {  
@@ -228,6 +236,8 @@ int main (int argc, const char *argv[])
   }
 
   AZObject *maps[MAX_LISTS + 1];
+  unsigned int has_lists = 0;
+  unsigned int has_indices = 0;
   for (i = 0; i < n_lists; i++) {
     FILE *ifs;
     unsigned int code = 0;
@@ -241,8 +251,10 @@ int main (int argc, const char *argv[])
     if (code == GT4_LIST_CODE) {
       maps[i] = (AZObject *) gt4_word_map_new (lists[i], VERSION_MAJOR, !getstat && use_scouts, !getstat && bloom);
       if (debug) fprintf (stderr, "List %s loaded\n", lists[i]);
+      has_lists = 1;
     } else if (code == GT4_INDEX_CODE) {
       maps[i] = (AZObject *) gt4_index_map_new (lists[i], VERSION_MAJOR, !getstat && use_scouts);
+      has_indices = 1;
     } else {
       fprintf (stderr, "Error: %s is not a valid GenomeTester4 list/index file\n", lists[i]);
       invalid = 1;
@@ -278,10 +290,33 @@ int main (int argc, const char *argv[])
     exit (0);
   }
 
+  if (files) {
+    if (has_lists || (n_lists > 1)) {
+      fprintf (stderr, "Error: Files can only be queried from single index\n");
+      exit (1);
+    }
+    print_files ((GT4IndexMap *) maps[0]);
+    exit (0);
+  }
+
+  if (sequences) {
+    if (has_lists || (n_lists > 1)) {
+      fprintf (stderr, "Error: Sequences can only be queried from single index\n");
+      exit (1);
+    }
+    print_sequences ((GT4IndexMap *) maps[0]);
+    exit (0);
+  }
+
   if (!seqfilename && !querylistfilename && !queryfilename && !querystring) {
     for (i = 0; i < n_lists; i++) {
       print_full_map (maps[i]);
     }
+    exit (0);
+  }
+
+  if (querystring && !nmm && GT4_IS_INDEX_MAP (maps[0])) {
+    search_one_query_string_index ((GT4IndexMap *) maps[0], querystring);
     exit (0);
   }
 
@@ -337,34 +372,76 @@ int main (int argc, const char *argv[])
   exit (0);
 }
 
-static int
-print_files (AZObject *obj)
+static void
+print_files (GT4IndexMap *imap)
 {
-        GT4FileArrayImplementation *impl;
-        GT4FileArrayInstance *inst;
-        unsigned int i;
-        impl = (GT4FileArrayImplementation *) az_object_get_interface (obj, GT4_TYPE_FILE_ARRAY, (void **) &inst);
-        for (i = 0; i < inst->num_files; i++) {
-                gt4_file_array_get_file (impl, inst, i);
-                fprintf (stderr, "%u\t%s\t%llu\t%llu\n", i, inst->file_name, inst->file_size, inst->n_sequences);
-        }
-        return 0;
+  unsigned int i;
+  GT4FileArrayImplementation *impl = GT4_INDEX_MAP_FILE_ARRAY_IMPL(imap);
+  GT4FileArrayInstance *inst = &imap->file_array_inst;
+  for (i = 0; i < inst->num_files; i++) {
+    gt4_file_array_get_file (impl, inst, i);
+    fprintf (stdout, "%u\t%s\t%llu\t%llu\n", i, inst->file_name, inst->file_size, inst->n_sequences);
+  }
+}
+
+static void
+print_sequences (GT4IndexMap *imap)
+{
+  unsigned int i;
+  GT4FileArrayImplementation *impl = GT4_INDEX_MAP_FILE_ARRAY_IMPL(imap);
+  GT4FileArrayInstance *inst = &imap->file_array_inst;
+  for (i = 0; i < inst->num_files; i++) {
+    unsigned int j;
+    gt4_file_array_get_file (impl, inst, i);
+    for (j = 0; j < inst->n_sequences; j++) {
+      unsigned char b[1024];
+      gt4_file_array_get_sequence (impl, inst, j);
+      gt4_index_map_get_sequence_name (imap, b, 1024, i, j);
+      fprintf (stdout, "%u\t%u\t%s\t%llu\t%llu\t%llu\n",i, j, b, inst->name_pos, inst->seq_pos, inst->seq_len);
+    }
+  }
+}
+
+static void
+print_index_info (GT4WordIndexImplementation *impl, GT4WordIndexInstance *inst, unsigned int reverse)
+{
+  unsigned int i;
+  for (i = 0; i < inst->n_locations; i++) {
+    gt4_word_index_get_location (impl, inst, i);
+    fprintf (stdout, "%u\t%u\t%llu\t%u\n", inst->file_idx, inst->seq_idx, inst->pos, !inst->dir != !reverse);
+  }
 }
 
 /* Print the whole list */
+
 int
 print_full_map (AZObject *obj)
 {
-        GT4WordSListImplementation *impl;
-        GT4WordSListInstance *inst;
-        impl = (GT4WordSListImplementation *) az_object_get_interface (obj, GT4_TYPE_WORD_SARRAY, (void **) &inst);
-        gt4_word_slist_get_first_word (impl, inst);
-        while (inst->idx < inst->num_words) {
-                char b[64];
-                word2string (b, inst->word, inst->word_length);
-                fprintf (stdout, "%s\t%u\n", b, inst->count);
-                gt4_word_slist_get_next_word (impl, inst);
-        }
+  if (!GT4_IS_INDEX_MAP (obj)) {
+    GT4WordSListImplementation *impl;
+    GT4WordSListInstance *inst;
+    impl = (GT4WordSListImplementation *) az_object_get_interface (obj, GT4_TYPE_WORD_SARRAY, (void **) &inst);
+    gt4_word_slist_get_first_word (impl, inst);
+    while (inst->idx < inst->num_words) {
+      char b[64];
+      word2string (b, inst->word, inst->word_length);
+      fprintf (stdout, "%s\t%u\n", b, inst->count);
+      gt4_word_slist_get_next_word (impl, inst);
+    }
+  } else {
+    GT4IndexMap *imap = GT4_INDEX_MAP(obj);
+    GT4WordIndexImplementation *impl;
+    GT4WordIndexInstance *inst;
+    impl = (GT4WordIndexImplementation *) az_object_get_interface ((AZObject *) imap, GT4_TYPE_WORD_INDEX, (void **) &inst);
+    gt4_word_slist_get_first_word (GT4_INDEX_MAP_SLIST_IMPLEMENTATION(imap), &imap->sarray_inst.slist_inst);
+    while (imap->sarray_inst.slist_inst.idx < imap->sarray_inst.slist_inst.num_words) {
+      char b[64];
+      word2string (b, imap->sarray_inst.slist_inst.word, imap->sarray_inst.slist_inst.word_length);
+      fprintf (stdout, "%s\t%u\n", b, imap->sarray_inst.slist_inst.count);
+      print_index_info (impl, inst, 0);
+      gt4_word_slist_get_next_word (GT4_INDEX_MAP_SLIST_IMPLEMENTATION(imap), &imap->sarray_inst.slist_inst);
+    }
+  }
   return 0;
 }
 
@@ -378,6 +455,27 @@ search_one_query_string (GT4WordDictImplementation *impl, GT4WordDictInstance *i
   if (gt4_word_dict_lookup_mm (impl, inst, word, n_mm, pm_3, 1, print_all, 0)) {
     /* Found it */
     if (!print_all && (inst->value >= min_freq) && (inst->value <= max_freq)) fprintf (stdout, "%s\t%u\n", query, inst->value);
+  }
+}
+
+static void
+search_one_query_string_index (GT4IndexMap *imap, const char *query)
+{
+  unsigned long long word, rword;
+  unsigned int reverse = 0;
+  word = string_to_word (query, imap->dict_inst.word_length);
+  rword = get_reverse_complement (word, imap->dict_inst.word_length);
+  if (rword < word) {
+    word = rword;
+    reverse = 1;
+  }
+  GT4WordIndexImplementation *impl;
+  GT4WordIndexInstance *inst;
+  impl = (GT4WordIndexImplementation *) az_object_get_interface ((AZObject *) imap, GT4_TYPE_WORD_INDEX, (void **) &inst);
+  if (gt4_index_map_lookup (imap, word)) {
+    /* Found it */
+    fprintf (stdout, "%s\t%u\t%u\n", query, imap->sarray_inst.slist_inst.count, reverse);
+    print_index_info (impl, inst, reverse);
   }
 }
 
@@ -677,10 +775,10 @@ void print_help (int exit_value)
   fprintf (stderr, "    -p, --perfectmatch NUMBER - specify number of 3' perfect matches (default 0)\n");
   fprintf (stderr, "    -min, --minfreq NUMBER    - minimum frequency of the printed words (default 0)\n");
   fprintf (stderr, "    -max, --maxfreq NUMBER    - maximum frequency of the printed words (default MAX_UINT)\n");
+  fprintf (stderr, "    --files                   - Print indexed files\n");
+  fprintf (stderr, "    --sequences               - Print indexed subsequences\n");
   fprintf (stderr, "    --bloom                   - use bloom filter to speed up lookups\n");
   fprintf (stderr, "    --all                     - in case of mismatches prints all found words\n");
   fprintf (stderr, "    -D                        - increase debug level\n");
   exit (exit_value);
 }
-
-

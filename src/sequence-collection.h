@@ -45,8 +45,8 @@ struct _GT4SubSequence {
   unsigned long long name_pos;
   unsigned int name_len;
   /* Start of sequence data relative to name */
-  unsigned int sequence_pos;
-  unsigned int sequence_len;
+  unsigned int seq_pos;
+  unsigned int seq_len;
 };
             
 struct _GT4SequenceCollectionInstance {
@@ -59,7 +59,7 @@ struct _GT4SequenceCollectionImplementation {
   AZImplementation implementation;
   unsigned int (*get_subsequence) (GT4SequenceCollectionImplementation *impl, GT4SequenceCollectionInstance *inst, unsigned int idx);
   int (*add_subsequence) (GT4SequenceCollectionImplementation *impl, GT4SequenceCollectionInstance *inst, unsigned long long name_pos, unsigned int name_len);
-  unsigned int (*set_subsequence) (GT4SequenceCollectionImplementation *impl, GT4SequenceCollectionInstance *inst, unsigned int idx, unsigned int sequence_pos, unsigned int sequence_len);
+  unsigned int (*set_subsequence) (GT4SequenceCollectionImplementation *impl, GT4SequenceCollectionInstance *inst, unsigned int idx, unsigned int seq_pos, unsigned int seq_len);
 };
 
 struct _GT4SequenceCollectionClass {
@@ -73,6 +73,6 @@ unsigned int gt4_sequence_collection_get_subsequence (GT4SequenceCollectionImple
 /* Returns new subsequence index, negative if error */
 int gt4_sequence_collection_add_subsequence (GT4SequenceCollectionImplementation *impl, GT4SequenceCollectionInstance *inst, unsigned long long name_pos, unsigned int name_len);
 /* Return 0 if error */
-unsigned int gt4_sequence_collection_set_subsequence (GT4SequenceCollectionImplementation *impl, GT4SequenceCollectionInstance *inst, unsigned int idx, unsigned int sequence_pos, unsigned int sequence_len);
+unsigned int gt4_sequence_collection_set_subsequence (GT4SequenceCollectionImplementation *impl, GT4SequenceCollectionInstance *inst, unsigned int idx, unsigned int seq_pos, unsigned int seq_len);
 
 #endif

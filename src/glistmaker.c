@@ -76,6 +76,15 @@ struct _Location {
   unsigned int pos;
 };
 
+typedef struct _IFile IFile;
+
+struct _IFile {
+  const char *name;
+  uint64_t size;
+  uint64_t n_subseqs;
+  GT4SubSequence **subseqs;
+};
+
 /* Main thread loop */
 static void process (GT4Queue *queue, unsigned int thread_idx, void *arg);
 /* Merge tables directly to disk */
@@ -83,7 +92,7 @@ static unsigned long long merge_tables_to_file (GT4WordTable *t[], unsigned int 
 static unsigned long long merge_tables_to_file_index (GT4WordTable *tables[], unsigned int ntables_in, int ofile);
 static unsigned long long collate_files_index (const char *files[], unsigned int n_files, int ofile);
 static void write_index_header (FILE *ofs, unsigned int wlen);
-static unsigned int write_index (FILE *ofs, const char *loc_files[], unsigned int n_loc_files, GT4ListMakerQueue *mq, const char *files[], unsigned int n_files);
+static unsigned int write_index (FILE *ofs, const char *loc_files[], unsigned int n_loc_files, GT4ListMakerQueue *mq, IFile i_files[], unsigned int n_i_files);
 /* Reading callback */
 static int start_sequence_index (GT4FastaReader *reader, void *data);
 static int end_sequence_index (GT4FastaReader *reader, void *data);
@@ -94,14 +103,15 @@ void print_help (int exitvalue);
 
 int debug = 0;
 int debug_threads = 0;
-unsigned int cutoff = DEFAULT_CUTOFF;
+unsigned int min = DEFAULT_CUTOFF;
+unsigned int max = 0xffffffff;
 const char *outputname = "out";
 const char *tmpdir = ".";
 unsigned int create_index = 0;
 
 /* For indexing */
-unsigned int max_lpos = 0;
-unsigned long long max_pos = 0;
+/* Maximum k-mer local position in sequence */
+unsigned long long max_lpos = 0;
 
 static unsigned int
 get_bitsize (unsigned long long max_value)
@@ -128,8 +138,8 @@ compare_source_ptrs (const void *lhs, const void *rhs)
 int 
 main (int argc, const char *argv[])
 {
-  const char *files[1024];
-  unsigned int n_files = 0;
+  IFile i_files[1024];
+  unsigned int n_i_files = 0;
   unsigned int i;
   char *end;
 
@@ -141,6 +151,8 @@ main (int argc, const char *argv[])
   unsigned int stream = 0;
 
   GT4ListMakerQueue mq;
+
+  memset (i_files, 0, sizeof (i_files));
 
   /* parsing commandline arguments */
   for (i = 1; i < argc; i++) {
@@ -160,9 +172,16 @@ main (int argc, const char *argv[])
         fprintf (stderr, "Error: Invalid word-length: %s! Must be an integer.\n", argv[i]);
         print_help (1);
       }
-    } else if (!strcmp (argv[i], "-c") || !strcmp (argv[i], "--cutoff")) {
+    } else if (!strcmp (argv[i], "-c") || !strcmp (argv[i], "--cutoff") || !strcmp (argv[i], "--min")) {
       if (++i >= argc) print_help (1);
-      cutoff = strtol (argv[i], &end, 10);
+      min = strtol (argv[i], &end, 10);
+      if (*end != 0) {
+        fprintf (stderr, "Error: Invalid frequency cut-off: %s! Must be an integer.\n", argv[i]);
+        print_help (1);
+      }
+    } else if (!strcmp (argv[i], "--max")) {
+      if (++i >= argc) print_help (1);
+      max = strtol (argv[i], &end, 10);
       if (*end != 0) {
         fprintf (stderr, "Error: Invalid frequency cut-off: %s! Must be an integer.\n", argv[i]);
         print_help (1);
@@ -203,15 +222,15 @@ main (int argc, const char *argv[])
       if ((argv[i][0] == '-') && argv[i][1]) {
         print_help (1);
       }
-      if (n_files >= 1024) continue;
-      files[n_files++] = argv[i];
+      if (n_i_files >= 1024) continue;
+      i_files[n_i_files++].name = argv[i];
     }
   }
 
   if (ntables > MAX_TABLES) ntables = MAX_TABLES;
 
   /* checking parameter values */
-  if (!n_files) {
+  if (!n_i_files) {
     fprintf (stderr, "Error: No FastA/FastQ file specified!\n");
     print_help (1);
   }
@@ -219,8 +238,12 @@ main (int argc, const char *argv[])
     fprintf (stderr, "Error: Invalid word-length %d (must be 1 - 32)!\n", wordlength);
     print_help (1);
   }
-  if (cutoff < 1) {
-    fprintf (stderr, "Error: Invalid frequency cut-off: %d! Must be positive.\n", cutoff);
+  if (min < 1) {
+    fprintf (stderr, "Error: Invalid frequency cut-off: %d! Must be positive.\n", min);
+    print_help (1);
+  }
+  if (max < min) {
+    fprintf (stderr, "Error: Invalid frequency range: %u-%u!\n", min, max);
     print_help (1);
   }
   if (strlen (outputname) > 200) {
@@ -228,13 +251,14 @@ main (int argc, const char *argv[])
     return 1;
   }
   if (nthreads > 256) nthreads = 256;
-  for (i = 0; i < n_files; i++) {
-    if (!strcmp (files[i], "-")) continue;
+  for (i = 0; i < n_i_files; i++) {
+    if (!strcmp (i_files[i].name, "-")) continue;
     struct stat s;
-    if (stat (files[i], &s)) {
-      fprintf (stderr, "main: No such file (cannot stat): %s\n", files[i]);
+    if (stat (i_files[i].name, &s)) {
+      fprintf (stderr, "main: No such file (cannot stat): %s\n", i_files[i].name);
       exit (1);
     }
+    i_files[i].size = s.st_size;
   }
   if (debug) {
     fprintf (stderr, "Num threads is %d\n", nthreads);
@@ -244,7 +268,7 @@ main (int argc, const char *argv[])
 
   /* Set up queue */
   maker_queue_setup (&mq, nthreads, wordlength, ntables, tablesize, (create_index) ? sizeof (Location) : 0);
-  for (i = 0; i < n_files; i++) maker_queue_add_file (&mq, files[i], stream, i);
+  for (i = 0; i < n_i_files; i++) maker_queue_add_file (&mq, i_files[i].name, stream, i);
   if (gt4_queue_create_threads (&mq.queue, process, &mq)) {
     fprintf (stderr, "main: Cannot create threads\n");
     exit (1);
@@ -261,7 +285,7 @@ main (int argc, const char *argv[])
 
   if (create_index) {
     for (i = 0; i < mq.n_sources; i++) {
-      fprintf (stderr, "%u: %s start %llu subseqs %u\n", i, files[i], mq.sources[i].start, mq.sources[i].n_subseqs);
+      fprintf (stderr, "%u: %s start %llu subseqs %u\n", i, i_files[i].name, mq.sources[i].start, mq.sources[i].n_subseqs);
     }
   }
 
@@ -283,7 +307,7 @@ main (int argc, const char *argv[])
 
   if (mq.n_final_files > 0) {
     if (create_index) {
-      write_index (ofs, (const char **) mq.final_files, mq.n_final_files, &mq, files, n_files);
+      write_index (ofs, (const char **) mq.final_files, mq.n_final_files, &mq, i_files, n_i_files);
     } else {
       AZObject *objs[4096];
       unsigned int i;
@@ -336,7 +360,7 @@ write_entry (const void *data, unsigned int size, unsigned int count, FILE *ofs,
 }
 
 static unsigned long long
-write_file_block (FILE *ofs, unsigned long long *pos, const char *files[], unsigned int n_files)
+write_file_block (FILE *ofs, unsigned long long *pos, IFile i_files[], unsigned int n_i_files)
 {
   unsigned long long len = 0;
   unsigned short version;
@@ -349,14 +373,29 @@ write_file_block (FILE *ofs, unsigned long long *pos, const char *files[], unsig
   version = VERSION_MINOR;
   fwrite (&version, 4, 1, ofs);
   len += 4;
-  fwrite (&n_files, 4, 1, ofs);
+  fwrite (&n_i_files, 4, 1, ofs);
   len += 4;
-  for (i = 0; i < n_files; i++) {
-    unsigned short nlen = (unsigned short) strlen (files[i]) + 1;
+  for (i = 0; i < n_i_files; i++) {
+    unsigned int j;
+    fwrite (&i_files[i].size, 8, 1, ofs);
+    len += 8;
+    fwrite (&i_files[i].n_subseqs, 8, 1, ofs);
+    len += 8;
+    unsigned short nlen = (unsigned short) strlen (i_files[i].name) + 1;
     fwrite (&nlen, 2, 1, ofs);
     len += 2;
-    fwrite (files[i], 1, nlen, ofs);
+    fwrite (i_files[i].name, 1, nlen, ofs);
     len += nlen;
+    for (j = 0; j < i_files[i].n_subseqs; j++) {
+      unsigned long long val;
+      fwrite (&i_files[i].subseqs[j]->name_pos, 8, 1, ofs);
+      fwrite (&i_files[i].subseqs[j]->name_len, 4, 1, ofs);
+      val = i_files[i].subseqs[j]->seq_pos;
+      fwrite (&val, 8, 1, ofs);
+      val = i_files[i].subseqs[j]->seq_len;
+      fwrite (&val, 8, 1, ofs);
+      len += 28;
+    }
   }
   if (len & 7) {
     char c[8] = { 0 };
@@ -430,7 +469,7 @@ write_kmers (FILE *ofs, const char *loc_files[], unsigned int n_loc_files, unsig
         i += 1;
       }
     }
-    if (n_locs) {
+    if ((n_locs >= min) && (n_locs <= max)) {
       write_entry (&current, 8, 1, ofs, pos);
       write_entry (&current_pos, 8, 1, ofs, pos);
       current_pos += n_locs;
@@ -444,7 +483,7 @@ write_kmers (FILE *ofs, const char *loc_files[], unsigned int n_loc_files, unsig
 }
 
 static unsigned long long
-write_locations (FILE *ofs, const char *loc_files[], unsigned int n_loc_files, GT4ListMakerQueue *mq, unsigned int n_pos_bits, unsigned long long *pos)
+write_locations (FILE *ofs, const char *loc_files[], unsigned int n_loc_files, GT4ListMakerQueue *mq, unsigned int n_subseq_bits, unsigned int n_pos_bits, unsigned long long *pos)
 {
   FILE *ifs[256];
   unsigned long long words_r[256];
@@ -484,8 +523,12 @@ write_locations (FILE *ofs, const char *loc_files[], unsigned int n_loc_files, G
     while (i < n_remaining) {
       while (words_r[i] == current) {
         GT4LMQSource *src = &mq->sources[locs_r[i].source];
-        unsigned long long wpos = src->start + src->subseqs[locs_r[i].seq].sequence_pos + locs_r[i].pos;
-        unsigned long long code = ((unsigned long long) src->file_idx << (n_pos_bits + 1)) | (wpos << 1) | locs_r[i].dir;
+        /* fprintf (stderr, "Loc %u %u %u %u\n", src->file_idx, src->first_subseq + locs_r[i].seq, locs_r[i].pos, locs_r[i].dir); */
+        /* unsigned long long wpos = src->start + src->subseqs[locs_r[i].seq].seq_pos + locs_r[i].pos; */
+        unsigned long long file = src->file_idx;
+        unsigned long long subseq = src->first_subseq + locs_r[i].seq;
+        unsigned long long pos = locs_r[i].pos;
+        unsigned long long code = (file << (n_subseq_bits + n_pos_bits + 1)) | (subseq << (n_pos_bits + 1)) | (pos << 1) | locs_r[i].dir;
         /* char b[256]; */
         /* word2string (b, word, mq->wordlen); */
         /* fprintf (stdout, "%s\t%u\t%llu\t%u\n", b, src->file_idx, wpos, loc.dir); */
@@ -519,7 +562,7 @@ write_locations (FILE *ofs, const char *loc_files[], unsigned int n_loc_files, G
 static void
 write_index_header (FILE *ofs, unsigned int wlen)
 {
-  unsigned int n_file_bits = 1, n_subseq_bits = 1, n_pos_bits = 1, n_lpos_bits = 1;
+  unsigned int n_file_bits = 1, n_subseq_bits = 1, n_pos_bits = 1;
   unsigned long long pos = 0;
   unsigned int version;
   unsigned long long file_block_loc, file_block_pos, kmer_list_loc, kmer_list_pos, locations_loc, locations_pos;
@@ -541,7 +584,7 @@ write_index_header (FILE *ofs, unsigned int wlen)
   write_entry (&n_file_bits, 4, 1, ofs, &pos);
   write_entry (&n_subseq_bits, 4, 1, ofs, &pos);
   write_entry (&n_pos_bits, 4, 1, ofs, &pos);
-  write_entry (&n_lpos_bits, 4, 1, ofs, &pos);
+  write_entry (zero, 4, 1, ofs, &pos);
   /* File block start */
   file_block_loc = pos;
   write_entry (zero, 8, 1, ofs, &pos);
@@ -569,22 +612,21 @@ write_index_header (FILE *ofs, unsigned int wlen)
 }
 
 static unsigned int
-write_index (FILE *ofs, const char *loc_files[], unsigned int n_loc_files, GT4ListMakerQueue *mq, const char *files[], unsigned int n_files)
+write_index (FILE *ofs, const char *loc_files[], unsigned int n_loc_files, GT4ListMakerQueue *mq, IFile i_files[], unsigned int n_i_files)
 {
-  unsigned int src_first_subseq[1024];
   unsigned int max_subseq = 0;
-  unsigned int n_file_bits, n_subseq_bits, n_pos_bits, n_lpos_bits;
+  unsigned int n_file_bits, n_subseq_bits, n_pos_bits;
   unsigned int i;
   unsigned long long pos = 0;
   unsigned int version;
   unsigned long long n_words_loc, n_words, n_locations_loc, n_locs, file_block_loc, file_block_pos, kmer_list_loc, kmer_list_pos, locations_loc, locations_pos;
   unsigned char zero[16] = { 0 };
   /* Determine file data */
-  for (i = 0; i < n_files; i++) {
+  for (i = 0; i < n_i_files; i++) {
     GT4LMQSource *sources[1024];
     unsigned int n_sources = 0, first_subseq = 0, j;
     /* Find all sources for this file */
-    if (debug) fprintf (stderr, "File %u: %s\n", i, files[i]);
+    if (debug) fprintf (stderr, "File %u: %s\n", i, i_files[i].name);
     for (j = 0; j < mq->n_sources; j++) {
       if (mq->sources[j].file_idx == i) {
         if (debug) fprintf (stderr, "  Source %u: start %llu\n", j, mq->sources[j].start);
@@ -595,22 +637,30 @@ write_index (FILE *ofs, const char *loc_files[], unsigned int n_loc_files, GT4Li
     qsort (sources, n_sources, sizeof (sources[0]), compare_source_ptrs);
     for (j = 0; j < n_sources; j++) {
       unsigned int idx = sources[j] - &mq->sources[0];
-      src_first_subseq[idx] = first_subseq;
-      if (debug) fprintf (stderr, "Source %u (global %u): start %llu first subseq %u\n", j, idx, sources[j]->start, src_first_subseq[idx]);
+      sources[j]->first_subseq = first_subseq;
+      if (debug) fprintf (stderr, "Source %u (global %u): start %llu first subseq %u\n", j, idx, sources[j]->start, sources[j]->first_subseq);
       first_subseq += sources[j]->n_subseqs;
+    }
+    /* Update files */
+    i_files[i].n_subseqs = first_subseq;
+    i_files[i].subseqs = (GT4SubSequence **) malloc (i_files[i].n_subseqs * sizeof (GT4SubSequence *));
+    for (j = 0; j < n_sources; j++) {
+      unsigned int k;
+      for (k = 0; k < sources[j]->n_subseqs; k++) {
+        i_files[i].subseqs[sources[j]->first_subseq + k] = &sources[j]->subseqs[k];
+      }
     }
   }
   /* Determine bitsizes */
   for (i = 0; i < mq->n_sources; i++) {
-    unsigned int last_subseq = src_first_subseq[i] + mq->sources[i].n_subseqs - 1;
+    unsigned int last_subseq = mq->sources[i].first_subseq + mq->sources[i].n_subseqs - 1;
     if (last_subseq > max_subseq) max_subseq = last_subseq;
   }
-  n_file_bits = get_bitsize (n_files - 1);
+  n_file_bits = get_bitsize (n_i_files - 1);
   n_subseq_bits = get_bitsize (max_subseq);
-  n_pos_bits = get_bitsize (max_pos);
-  n_lpos_bits = get_bitsize (max_lpos);
+  n_pos_bits = get_bitsize (max_lpos);
   if (debug) {
-    fprintf (stderr, "Bitsizes: file %u (%u) subseq %u (%u) pos %u (max %llu) lpos %u (max %u)\n", n_file_bits, n_files, n_subseq_bits, max_subseq + 1, n_pos_bits, max_pos, n_lpos_bits, max_lpos);
+    fprintf (stderr, "Bitsizes: file %u (%u) subseq %u (%u) pos %u (max %llu)\n", n_file_bits, n_i_files, n_subseq_bits, max_subseq + 1, n_pos_bits, max_lpos);
   }
 
   /* GT4I */
@@ -632,7 +682,7 @@ write_index (FILE *ofs, const char *loc_files[], unsigned int n_loc_files, GT4Li
   write_entry (&n_file_bits, 4, 1, ofs, &pos);
   write_entry (&n_subseq_bits, 4, 1, ofs, &pos);
   write_entry (&n_pos_bits, 4, 1, ofs, &pos);
-  write_entry (&n_lpos_bits, 4, 1, ofs, &pos);
+  write_entry (zero, 4, 1, ofs, &pos);
   /* File block start */
   file_block_loc = pos;
   write_entry (zero, 8, 1, ofs, &pos);
@@ -645,7 +695,7 @@ write_index (FILE *ofs, const char *loc_files[], unsigned int n_loc_files, GT4Li
 
   /* File block */
   file_block_pos = pos;
-  write_file_block (ofs, &pos, files, n_files);
+  write_file_block (ofs, &pos, i_files, n_i_files);
 
   /* Kmer list */
   kmer_list_pos = pos;
@@ -654,7 +704,7 @@ write_index (FILE *ofs, const char *loc_files[], unsigned int n_loc_files, GT4Li
 
   /* Locations */
   locations_pos = pos;
-  write_locations (ofs, loc_files, n_loc_files, mq, n_pos_bits, &pos);
+  write_locations (ofs, loc_files, n_loc_files, mq, n_subseq_bits, n_pos_bits, &pos);
   fprintf (stderr, "Wrote %llu locations\n", n_locs);
 
   /* Write positions */
@@ -807,7 +857,7 @@ read_table (GT4ListMakerQueue *mq, TaskRead *tr)
     for (i = 0; i < tbl->n_words; i++) {
       Location *loc = (Location *) tbl->data + i;
       if (loc->pos > max_lpos_tbl) max_lpos_tbl = loc->pos;
-      if ((src->start + src->subseqs[loc->seq].sequence_pos + loc->pos) > max_pos_tbl) max_pos_tbl = src->start + src->subseqs[loc->seq].sequence_pos + loc->pos;
+      if ((src->start + src->subseqs[loc->seq].seq_pos + loc->pos) > max_pos_tbl) max_pos_tbl = src->start + src->subseqs[loc->seq].seq_pos + loc->pos;
     }
   } else {
     fasta_reader_read_nwords (&tr->reader, tbl->n_word_slots, NULL, NULL, NULL, NULL, read_word, tr);
@@ -817,7 +867,6 @@ read_table (GT4ListMakerQueue *mq, TaskRead *tr)
   t2 = get_time ();
   gt4_queue_lock (&mq->queue);
   if (create_index) {
-    if (max_pos_tbl > max_pos) max_pos = max_pos_tbl;
     if (max_lpos_tbl > max_lpos) max_lpos = max_lpos_tbl;
   }
 
@@ -927,7 +976,7 @@ start_sequence_index (GT4FastaReader *reader, void *data)
   GT4ListMakerQueue *mq = (GT4ListMakerQueue *) tr->task.queue;
   GT4LMQSource *src = &mq->sources[tr->idx];
   maker_queue_add_subsequence (mq, tr->idx, reader->name_pos, reader->name_length);
-  src->subseqs[src->n_subseqs - 1].sequence_pos = reader->cpos;
+  src->subseqs[src->n_subseqs - 1].seq_pos = reader->cpos;
   return 0;
 }
 
@@ -937,7 +986,7 @@ end_sequence_index (GT4FastaReader *reader, void *data)
   TaskRead *tr = (TaskRead *) data;
   GT4ListMakerQueue *mq = (GT4ListMakerQueue *) tr->task.queue;
   GT4LMQSource *src = &mq->sources[tr->idx];
-  src->subseqs[src->n_subseqs - 1].sequence_len = reader->cpos - src->subseqs[src->n_subseqs - 1].sequence_pos;
+  src->subseqs[src->n_subseqs - 1].seq_len = reader->cpos - src->subseqs[src->n_subseqs - 1].seq_pos;
   return 0;
 }
 
@@ -952,7 +1001,8 @@ read_word_index (GT4FastaReader *reader, unsigned long long word, void *data)
   loc.source = tr->idx;
   loc.dir = (word != reader->wordfw);
   loc.seq = src->n_subseqs - 1;
-  loc.pos = reader->cpos - reader->name_pos + 1 - reader->wordlength;
+  /* loc.pos = reader->cpos - reader->name_pos + 1 - reader->wordlength; */
+  loc.pos = reader->seq_npos + 1 - reader->wordlength;
   gt4_word_table_add_word (table, word, &loc);
   return 0;
 }
@@ -1022,17 +1072,15 @@ merge_tables_to_file (GT4WordTable *tables[], unsigned int ntables_in, int ofile
         j += 1;
       }
     }
-    if (freq >= cutoff) {
-      memcpy (&b[bp], &word, 8);
-      memcpy (&b[bp + 8], &freq, 4);
-      bp += 12;
-      if (bp >= TMP_BUF_SIZE) {
-        write (ofile, b, bp);
-        bp = 0;
-      }
-      h.n_words += 1;
-      h.total_count += freq;
+    memcpy (&b[bp], &word, 8);
+    memcpy (&b[bp + 8], &freq, 4);
+    bp += 12;
+    if (bp >= TMP_BUF_SIZE) {
+      write (ofile, b, bp);
+      bp = 0;
     }
+    h.n_words += 1;
+    h.total_count += freq;
     word = next;
   }
   if (bp > 0) {
@@ -1204,7 +1252,10 @@ print_help (int exitvalue)
   fprintf (stderr, "    -v, --version           - print version information and exit\n");
   fprintf (stderr, "    -h, --help              - print this usage screen and exit\n");
   fprintf (stderr, "    -w, --wordlength NUMBER - specify index wordsize (1-32)\n");
-  fprintf (stderr, "    -c, --cutoff NUMBER     - specify frequency cut-off (default %u)\n", DEFAULT_CUTOFF);
+/*
+  fprintf (stderr, "    -c, --cutoff --min NUMBER - specify frequency cut-off (default %u)\n", min);
+  fprintf (stderr, "    --max NUMBER            - specify maximum k-mer count (default %u)\n", max);
+*/
   fprintf (stderr, "    -o, --outputname STRING - specify output name (default \"out\")\n");
   fprintf (stderr, "    --index                 - create index instead of list\n");
   fprintf (stderr, "    --num_threads           - number of threads (default %u)\n", DEFAULT_NUM_THREADS);

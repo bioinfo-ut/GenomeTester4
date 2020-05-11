@@ -46,8 +46,11 @@ static unsigned int index_map_get_first_word (GT4WordSListImplementation *impl, 
 static unsigned int index_map_get_next_word (GT4WordSListImplementation *impl, GT4WordSListInstance *inst);
 /* GT4WordDict implementation */
 static unsigned int index_map_lookup (GT4WordDictImplementation *impl, GT4WordDictInstance *inst, unsigned long long word);
+/* GT4WordIndexImplementation */
+static unsigned int index_map_get_location (GT4WordIndexImplementation *impl, GT4WordIndexInstance *inst, unsigned long long idx);
 /* GT4FileArrayImplementation */
 static unsigned int index_map_get_file (GT4FileArrayImplementation *impl, GT4FileArrayInstance *inst, unsigned int idx);
+static unsigned int index_map_get_sequence (GT4FileArrayImplementation *impl, GT4FileArrayInstance *inst, unsigned long long idx);
 
 static unsigned int index_map_type = 0;
 GT4IndexMapClass *gt4_index_map_class = NULL;
@@ -68,23 +71,32 @@ static void
 index_map_class_init (GT4IndexMapClass *klass)
 {
   klass->object_class.shutdown = index_map_shutdown;
-  az_class_set_num_interfaces ((AZClass *) klass, 3);
-  az_class_declare_interface ((AZClass *) klass, 0, GT4_TYPE_WORD_SARRAY, ARIKKEI_OFFSET (GT4IndexMapClass, sarray_implementation), ARIKKEI_OFFSET (GT4IndexMap, sarray_instance));
+  az_class_set_num_interfaces ((AZClass *) klass, 4);
+  az_class_declare_interface ((AZClass *) klass, 0, GT4_TYPE_WORD_SARRAY, ARIKKEI_OFFSET (GT4IndexMapClass, sarray_impl), ARIKKEI_OFFSET (GT4IndexMap, sarray_inst));
   az_class_declare_interface ((AZClass *) klass, 1, GT4_TYPE_WORD_DICT, ARIKKEI_OFFSET (GT4IndexMapClass, dict_impl), ARIKKEI_OFFSET (GT4IndexMap, dict_inst));
-  az_class_declare_interface ((AZClass *) klass, 2, GT4_TYPE_FILE_ARRAY, ARIKKEI_OFFSET (GT4IndexMapClass, file_array_impl), ARIKKEI_OFFSET (GT4IndexMap, file_array_inst));
+  az_class_declare_interface ((AZClass *) klass, 2, GT4_TYPE_WORD_INDEX, ARIKKEI_OFFSET (GT4IndexMapClass, index_impl), ARIKKEI_OFFSET (GT4IndexMap, index_inst));
+  az_class_declare_interface ((AZClass *) klass, 3, GT4_TYPE_FILE_ARRAY, ARIKKEI_OFFSET (GT4IndexMapClass, file_array_impl), ARIKKEI_OFFSET (GT4IndexMap, file_array_inst));
   /* GT4WordSList implementation */
-  klass->sarray_implementation.slist_impl.get_first_word = index_map_get_first_word;
-  klass->sarray_implementation.slist_impl.get_next_word = index_map_get_next_word;
+  klass->sarray_impl.slist_impl.get_first_word = index_map_get_first_word;
+  klass->sarray_impl.slist_impl.get_next_word = index_map_get_next_word;
   /* GT4WordDict implementation */
   klass->dict_impl.lookup = index_map_lookup;
+  /* GT4WordIndexImplementation */
+  klass->index_impl.get_location = index_map_get_location;
   /* GT4FileArrayImplementation */
   klass->file_array_impl.get_file = index_map_get_file;
+  klass->file_array_impl.get_sequence = index_map_get_sequence;
 }
 
 static void
 index_map_shutdown (AZObject *object)
 {
   GT4IndexMap *imap = (GT4IndexMap *) object;
+  if (imap->src_map) {
+    munmap ((void *) imap->src_map, imap->src_size);
+    imap->src_map = NULL;
+    imap->src_size = 0;
+  }
   if (imap->filename) {
     free (imap->filename);
     imap->filename = NULL;
@@ -124,7 +136,7 @@ index_map_get_first_word (GT4WordSListImplementation *impl, GT4WordSListInstance
 {
   GT4IndexMap *imap = GT4_INDEX_MAP_FROM_SARRAY_INSTANCE(inst);
   inst->word = imap_get_word (imap, 0);
-  inst->count = imap_get_count (imap, 0);
+  imap->sarray_inst.slist_inst.count = imap->dict_inst.value = imap->index_inst.n_locations = imap_get_count (imap, 0);
   return 1;
 }
 
@@ -133,7 +145,7 @@ index_map_get_next_word (GT4WordSListImplementation *impl, GT4WordSListInstance 
 {
   GT4IndexMap *imap = GT4_INDEX_MAP_FROM_SARRAY_INSTANCE(inst);
   inst->word = imap_get_word (imap, inst->idx);
-  inst->count = imap_get_count (imap, inst->idx);
+  imap->sarray_inst.slist_inst.count = imap->dict_inst.value = imap->index_inst.n_locations = imap_get_count (imap, inst->idx);
   __builtin_prefetch (imap->kmers + (inst->idx + 4) * 16);
   return 1;
 }
@@ -155,7 +167,9 @@ index_map_lookup (GT4WordDictImplementation *impl, GT4WordDictInstance *inst, un
       if (mid == 0) break;
       high = mid - 1;
     } else {
-      imap->dict_inst.value = imap_get_count (imap, mid);
+      imap->sarray_inst.slist_inst.idx = mid;
+      imap->sarray_inst.slist_inst.word = word;
+      imap->sarray_inst.slist_inst.count = imap->dict_inst.value = imap->index_inst.n_locations = imap_get_count (imap, mid);
       return 1;
     }
     mid = (low + high) / 2;
@@ -164,21 +178,123 @@ index_map_lookup (GT4WordDictImplementation *impl, GT4WordDictInstance *inst, un
 }
 
 static unsigned int
+index_map_get_location (GT4WordIndexImplementation *impl, GT4WordIndexInstance *inst, unsigned long long idx)
+{
+  GT4IndexMap *imap = GT4_INDEX_MAP_FROM_INDEX_INST(inst);
+  uint64_t loc, code;
+  loc = *((uint64_t *) (imap->kmers + imap->sarray_inst.slist_inst.idx * 16 + 8));
+  code = *((uint64_t *) (imap->locations + (loc + idx) * 8));
+  imap->index_inst.file_idx = (code >> (imap->header->n_subseq_bits + imap->header->n_pos_bits + 1)) & ((1ULL << imap->header->n_file_bits) - 1);
+  imap->index_inst.seq_idx = (code >> (imap->header->n_pos_bits + 1)) & ((1ULL << imap->header->n_subseq_bits) - 1);
+  imap->index_inst.pos = (code >> 1) & ((1ULL << imap->header->n_pos_bits) - 1);
+  imap->index_inst.dir = code & 1;
+  return 1;
+}
+
+static unsigned int
 index_map_get_file (GT4FileArrayImplementation *impl, GT4FileArrayInstance *inst, unsigned int idx)
 {
   GT4IndexMap *imap = GT4_INDEX_MAP_FROM_FILE_ARRAY_INST(inst);
-  const unsigned char *s = imap->files + 16;
   unsigned int i;
+  imap->file_ptr = imap->files + 16;
   for (i = 0; i < idx; i++) {
+    unsigned long long n_seqs;
     unsigned short len;
+    memcpy (&n_seqs, imap->file_ptr + 8, 8);
+    imap->file_ptr += 16;
+    memcpy (&len, imap->file_ptr, 2);
+    imap->file_ptr += 2;
+    imap->file_ptr += len;
+    imap->file_ptr = imap->file_ptr + n_seqs * 28;
+  }
+  memcpy (&inst->file_size, imap->file_ptr, 8);
+  memcpy (&inst->n_sequences, imap->file_ptr + 8, 8);
+  inst->file_name = imap->file_ptr + 18;
+  return 1;
+}
+
+static unsigned int
+index_map_get_sequence (GT4FileArrayImplementation *impl, GT4FileArrayInstance *inst, unsigned long long idx)
+{
+  GT4IndexMap *imap = GT4_INDEX_MAP_FROM_FILE_ARRAY_INST(inst);
+  const unsigned char *s = imap->file_ptr;
+  unsigned short len;
+  s += 16;
+  memcpy (&len, s, 2);
+  s += 2;
+  s += len;
+  memcpy (&inst->name_pos, s + idx * 28, 8);
+  memcpy (&inst->name_len, s + idx * 28 + 8, 4);
+  memcpy (&inst->seq_pos, s + idx * 28 + 12, 8);
+  memcpy (&inst->seq_len, s + idx * 28 + 20, 8);
+  return 1;
+}
+
+static unsigned int
+imap_map_src (GT4IndexMap *imap, unsigned int src_idx) {
+  const unsigned char *cdata, *s;
+  unsigned long long csize;
+  unsigned int i;
+  if ((src_idx == imap->src_idx) && imap->src_map) return 1;
+  if (imap->src_map) {
+    munmap ((void *) imap->src_map, imap->src_size);
+    imap->src_map = NULL;
+    imap->src_size = 0;
+  }
+  imap->src_idx = src_idx;
+  s = imap->files + 16;
+  for (i = 0; i < src_idx; i++) {
+    unsigned long long n_seqs;
+    unsigned short len;
+    memcpy (&n_seqs, s + 8, 8);
+    s += 16;
     memcpy (&len, s, 2);
     s += 2;
     s += len;
+    s = s + n_seqs * 28;
   }
-  inst->file_name = s + 2;
-  inst->file_size = 0;
-  inst->n_sequences = 0;
+  s += 18;
+  cdata = gt4_mmap ((const char *) s, &csize);
+  if (!cdata) {
+    fprintf (stderr, "imap_map_src: could not mmap file %s\n", s);
+    return 0;
+  }
+  imap->src_map = cdata;
+  imap->src_size = csize;
   return 1;
+}
+
+unsigned int
+gt4_index_map_get_sequence_name (GT4IndexMap *imap, unsigned char b[], unsigned int b_len, unsigned int file_idx, unsigned int seq_idx)
+{
+  unsigned int i;
+  const unsigned char *s = imap->files + 16;
+  unsigned short len;
+  unsigned long long name_pos;
+  unsigned int name_len;
+  if (!imap_map_src (imap, file_idx)) return 0;
+  for (i = 0; i < file_idx; i++) {
+    unsigned long long n_seqs;
+    unsigned short len;
+    memcpy (&n_seqs, s + 8, 8);
+    s += 16;
+    memcpy (&len, s, 2);
+    s += 2;
+    s += len;
+    s = s + n_seqs * 28;
+  }
+  s += 16;
+  memcpy (&len, s, 2);
+  s += 2;
+  s += len;
+  s = s + seq_idx * 28;
+  memcpy (&name_pos, s, 8);
+  memcpy (&name_len, s + 8, 4);
+  for (i = 0; (i < (b_len - 1)) && (i < name_len); i++) {
+    b[i] = imap->src_map[name_pos + i];
+  }
+  b[i] = 0;
+  return i;
 }
 
 GT4IndexMap * 
@@ -222,13 +338,15 @@ gt4_index_map_new (const char *listfilename, unsigned int major_version, unsigne
   }
 
   /* Set up sorted array interface */
-  imap->sarray_instance.slist_inst.num_words = imap->header->num_words;
-  imap->sarray_instance.slist_inst.sum_counts = imap->header->num_locations;
-  imap->sarray_instance.slist_inst.word_length = imap->header->word_length;
-  if (imap->sarray_instance.slist_inst.num_words > 0) {
-    imap->sarray_instance.slist_inst.word = imap_get_word (imap, 0);
-    imap->sarray_instance.slist_inst.count = imap_get_count (imap, 0);
+  imap->sarray_inst.slist_inst.num_words = imap->header->num_words;
+  imap->sarray_inst.slist_inst.sum_counts = imap->header->num_locations;
+  imap->sarray_inst.slist_inst.word_length = imap->header->word_length;
+  if (imap->sarray_inst.slist_inst.num_words > 0) {
+    imap->sarray_inst.slist_inst.word = imap_get_word (imap, 0);
+    imap->sarray_inst.slist_inst.count = imap_get_count (imap, 0);
   }
+  /* GT4WordDict instance */
+  imap->dict_inst.word_length = imap->header->word_length;
 
   /* Set up file array interface */
   memcpy (&imap->file_array_inst.num_files, imap->files + 12, 4);
@@ -259,3 +377,18 @@ gt4_index_map_lookup (GT4IndexMap *imap, unsigned long long query)
   }
   return 0;
 }
+
+unsigned int
+gt4_index_map_get_location (GT4IndexMap *imap, unsigned int kmer_idx, unsigned int loc_idx, unsigned int *file_idx, unsigned int *subseq_idx, unsigned long long *pos, unsigned int *dir)
+{
+  uint64_t loc, code;
+  loc = *((uint64_t *) (imap->kmers + kmer_idx * 16 + 8));
+  code = *((uint64_t *) (imap->locations + (loc + loc_idx) * 8));
+  /* fprintf (stdout, "\n%llu\n", code); */
+  *file_idx = (code >> (imap->header->n_subseq_bits + imap->header->n_pos_bits + 1)) & ((1ULL << imap->header->n_file_bits) - 1);
+  *subseq_idx = (code >> (imap->header->n_pos_bits + 1)) & ((1ULL << imap->header->n_subseq_bits) - 1);
+  *pos = (code >> 1) & ((1ULL << imap->header->n_pos_bits) - 1);
+  *dir = code & 1;
+  return 0;
+}
+

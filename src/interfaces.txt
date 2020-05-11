@@ -1,0 +1,47 @@
+GT4WordSList (word-list-sorted.h)
+	*Iterate over sequential list of words
+	get_first_word()
+	get_next_word()
+	idx
+	word
+	count
+
+	GT4WordSArray (word-array-sorted.h)
+		*Get word by index
+		get_word(idx)
+
+GT4WordDict (word-dict.h)
+	*Get value by word
+	lookup(word)
+	value
+
+GT4FileArray (file-array.h)
+	*Get file and subsequence data
+	get_file(idx)
+	get_sequence(idx)
+	file_name
+	file_size
+	n_sequences
+	name_pos
+	name_len
+	seq_pos
+	seq_len
+
+GT4SequenceSource (sequence-source.h)
+	*Read sequence data sequentially
+	open()
+	read()
+	close()
+	open
+	eof
+	error
+
+GT4SequenceCollection (sequence-collection.h)
+	*Access subsequences
+	get_subsequence(idx)
+	add_subsequence(name_pos, name_len)
+	set_subsequence(idx, seq_pos, seq_len)
+	name_pos
+	name_len
+	seq_pos
+	seq_len

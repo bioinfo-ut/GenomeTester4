@@ -41,10 +41,13 @@ typedef struct _GT4IndexHeader GT4IndexHeader;
 #define GT4_INDEX_MAP(o) (AZ_CHECK_INSTANCE_CAST ((o), GT4_TYPE_INDEX_MAP, GT4IndexMap))
 #define GT4_IS_INDEX_MAP(o) (AZ_CHECK_INSTANCE_TYPE ((o), GT4_TYPE_INDEX_MAP))
 
-#define GT4_INDEX_MAP_FROM_SARRAY_INSTANCE(i) (GT4IndexMap *) AZ_BASE_ADDRESS(GT4IndexMap,sarray_instance,i)
-#define GT4_INDEX_MAP_SARRAY_IMPLEMENTATION(o) &((GT4IndexMapClass *) ((AZObject *) (o))->klass)->sarray_implementation
+#define GT4_INDEX_MAP_FROM_SARRAY_INSTANCE(i) (GT4IndexMap *) AZ_BASE_ADDRESS(GT4IndexMap,sarray_inst,i)
+#define GT4_INDEX_MAP_SLIST_IMPLEMENTATION(o) &((GT4IndexMapClass *) ((AZObject *) (o))->klass)->sarray_impl.slist_impl
+#define GT4_INDEX_MAP_SARRAY_IMPLEMENTATION(o) &((GT4IndexMapClass *) ((AZObject *) (o))->klass)->sarray_impl
 #define GT4_INDEX_MAP_FROM_DICT_INST(i) (GT4IndexMap *) AZ_BASE_ADDRESS(GT4IndexMap,dict_inst,i)
 #define GT4_INDEX_MAP_DICT_IMPL(o) &((GT4IndexMapClass *) ((AZObject *) (o))->klass)->dict_impl
+#define GT4_INDEX_MAP_FROM_INDEX_INST(i) (GT4IndexMap *) AZ_BASE_ADDRESS(GT4IndexMap,index_inst,i)
+#define GT4_INDEX_MAP_INDEX_IMPL(o) &((GT4IndexMapClass *) ((AZObject *) (o))->klass)->index_impl
 #define GT4_INDEX_MAP_FROM_FILE_ARRAY_INST(i) (GT4IndexMap *) AZ_BASE_ADDRESS(GT4IndexMap,file_array_inst,i)
 #define GT4_INDEX_MAP_FILE_ARRAY_IMPL(o) &((GT4IndexMapClass *) ((AZObject *) (o))->klass)->file_array_impl
 
@@ -60,6 +63,7 @@ extern unsigned int debug_index_map;
 #include "file-array.h"
 #include "word-array-sorted.h"
 #include "word-dict.h"
+#include "word-index.h"
 
 struct _GT4IndexHeader {
   unsigned int code;
@@ -71,7 +75,7 @@ struct _GT4IndexHeader {
   unsigned int n_file_bits;
   unsigned int n_subseq_bits;
   unsigned int n_pos_bits;
-  unsigned int n_lpos_bits;
+  unsigned int filler0;
   unsigned long long files_start;
   unsigned long long kmers_start;
   unsigned long long locations_start;
@@ -86,21 +90,22 @@ struct _GT4IndexMap {
   const unsigned char *files;
   const unsigned char *kmers;
   const unsigned char *locations;
-  /* GT4WordSArray instance */
-  GT4WordSArrayInstance sarray_instance;
-  /* GT4WordDict instance */
+  const unsigned char *file_ptr;
+  /* Temporarily mapped source */
+  unsigned int src_idx;
+  const unsigned char *src_map;
+  unsigned long long src_size;
+  GT4WordSArrayInstance sarray_inst;
   GT4WordDictInstance dict_inst;
-  /* GT4FileArray instance */
+  GT4WordIndexInstance index_inst;
   GT4FileArrayInstance file_array_inst;
 };
 
 struct _GT4IndexMapClass {
   AZObjectClass object_class;
-  /* GT4WordSArray implementation */
-  GT4WordSArrayImplementation sarray_implementation;
-  /* GT4WordDict implementation */
+  GT4WordSArrayImplementation sarray_impl;
   GT4WordDictImplementation dict_impl;
-  /* GT4FileArrayImplementation */
+  GT4WordIndexImplementation index_impl;
   GT4FileArrayImplementation file_array_impl;
 };
 
@@ -114,5 +119,9 @@ void gt4_index_map_delete (GT4IndexMap *map);
 
 unsigned int gt4_index_map_lookup_canonical (GT4IndexMap *imap, unsigned long long query);
 unsigned int gt4_index_map_lookup (GT4IndexMap *imap, unsigned long long query);
+
+unsigned int gt4_index_map_get_location (GT4IndexMap *imap, unsigned int kmer_idx, unsigned int loc_idx, unsigned int *file_idx, unsigned int *subseq_idx, unsigned long long *pos, unsigned int *dir);
+
+unsigned int gt4_index_map_get_sequence_name (GT4IndexMap *imap, unsigned char b[], unsigned int b_len, unsigned int file_idx, unsigned int seq_idx);
 
 #endif

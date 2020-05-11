@@ -76,11 +76,11 @@ gt4_sequence_collection_add_subsequence (GT4SequenceCollectionImplementation *im
 }
 
 unsigned int
-gt4_sequence_collection_set_subsequence (GT4SequenceCollectionImplementation *impl, GT4SequenceCollectionInstance *inst, unsigned int idx, unsigned int sequence_pos, unsigned int sequence_len)
+gt4_sequence_collection_set_subsequence (GT4SequenceCollectionImplementation *impl, GT4SequenceCollectionInstance *inst, unsigned int idx, unsigned int seq_pos, unsigned int seq_len)
 {
   arikkei_return_val_if_fail (impl != NULL, 0);
   arikkei_return_val_if_fail (inst != NULL, 0);
   arikkei_return_val_if_fail (idx < inst->n_subseqs, 0);
-  return impl->set_subsequence (impl, inst, idx, sequence_pos, sequence_len);
+  return impl->set_subsequence (impl, inst, idx, seq_pos, seq_len);
 }
 
