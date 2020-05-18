@@ -62,7 +62,7 @@ int gt4_word_table_add_word_nofreq (GT4WordTable *table, unsigned long long word
 
 int wordtable_merge (GT4WordTable *table, GT4WordTable *other);
 
-void wordtable_sort (GT4WordTable *table, int sortfreqs);
+void wordtable_sort (GT4WordTable *table, int sort_data);
 
 int wordtable_find_frequencies (GT4WordTable *table);
 

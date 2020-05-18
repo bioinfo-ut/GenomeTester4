@@ -215,77 +215,71 @@ wordtable_merge (GT4WordTable *table, GT4WordTable *other)
 }
 
 void 
-wordtable_sort (GT4WordTable *table, int sortfreqs)
+wordtable_sort (GT4WordTable *table, int sort_data)
 {
-	unsigned int firstshift = 0;
-	if (table->n_words == 0) return;
-
-	/* calculate the number of shifted positions for making radix sort faster (no need to sort digits that are all zeros)*/
-	while (firstshift + 8 < table->wordlength * 2) {
-		firstshift += 8;
-	}
-
-	if (sortfreqs) {
-		hybridInPlaceRadixSort256 (table->words, table->words + table->n_words, table->data, table->data_size, firstshift);
-		return;
-	}
-	hybridInPlaceRadixSort256 (table->words, table->words + table->n_words, NULL, 0, firstshift);
-	return;
+  unsigned int shift = 0;
+  if (table->n_words == 0) return;
+  /* Calculate the number of shifted positions for making radix sort faster (no need to sort digits that are all zeros)*/
+  while (shift + 8 < table->wordlength * 2) {
+    shift += 8;
+  }
+  if (sort_data) {
+    hybridInPlaceRadixSort256 (table->words, table->words + table->n_words, table->data, table->data_size, shift);
+  } else {
+    hybridInPlaceRadixSort256 (table->words, table->words + table->n_words, NULL, 0, shift);
+  }
 }
 
 int 
 wordtable_find_frequencies (GT4WordTable *table)
 {
-	unsigned long long ri, wi, count;
-	unsigned int *freqs = (unsigned int *) table->data;
-	assert (table->data_size == 4);
+  unsigned long long ri, wi, count;
+  unsigned int *freqs = (unsigned int *) table->data;
+  assert (table->data_size == 4);
+  if (table->n_words == 0) return 0;
 
-	wi = 0;
-	count = 1;
-	if (table->n_words == 0) return 0;
+  wi = 0;
+  count = 1;
+  for (ri = 1; ri < table->n_words; ri++) {
+    if (table->words[ri] == table->words[ri - 1]) {
+      count += 1;
+    } else {
+      table->words[wi] = table->words[ri - 1];
+      freqs[wi] = count;
+      count = 1;
+      wi += 1;
+    }
+  }
 
-	for (ri = 1; ri < table->n_words; ri++) {
-		if (table->words[ri] == table->words[ri - 1]) {
-			count += 1;
-		} else {
-			table->words[wi] = table->words[ri - 1];
-			freqs[wi] = count;
-			count = 1;
-			wi += 1;
-		}
-	}
-
-	table->words[wi] = table->words[ri - 1];
-	freqs[wi] = count;
-	table->n_words = wi + 1;
-	return 0;
+  table->words[wi] = table->words[ri - 1];
+  freqs[wi] = count;
+  table->n_words = wi + 1;
+  return 0;
 }
 
 void 
 wordtable_merge_freqs (GT4WordTable *table)
 {
-	unsigned long long ri, wi, count;
-	unsigned int *freqs = (unsigned int *) table->data;
+  unsigned long long ri, wi, count;
+  unsigned int *freqs = (unsigned int *) table->data;
 
-	wi = 0;
-	if (table->n_words == 0) return;
+  wi = 0;
+  if (table->n_words == 0) return;
 
-	count = freqs[0];
-	for (ri = 1; ri < table->n_words; ri++) {
-		if (table->words[ri] == table->words[ri - 1]) {
-			count += freqs[ri];
-		} else {
-			table->words[wi] = table->words[ri - 1];
-			freqs[wi] = count;
-			count = freqs[ri];
-			wi += 1;
-		}
-	}
-
-	table->words[wi] = table->words[ri - 1];
-	freqs[wi] = count;
-	table->n_words = wi + 1;
-	return;
+  count = freqs[0];
+  for (ri = 1; ri < table->n_words; ri++) {
+    if (table->words[ri] == table->words[ri - 1]) {
+      count += freqs[ri];
+    } else {
+      table->words[wi] = table->words[ri - 1];
+      freqs[wi] = count;
+      count = freqs[ri];
+      wi += 1;
+    }
+  }
+  table->words[wi] = table->words[ri - 1];
+  freqs[wi] = count;
+  table->n_words = wi + 1;
 }
 
 unsigned long long 

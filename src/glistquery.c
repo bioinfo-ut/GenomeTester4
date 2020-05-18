@@ -57,7 +57,7 @@ static unsigned int search_fasta (GT4WordDictImplementation *impl, GT4WordDictIn
 static unsigned int search_list (GT4WordDictImplementation *impl, GT4WordDictInstance *inst, const char *querylistfilename, unsigned int n_mm, unsigned int pm_3, unsigned int min_freq, unsigned int max_freq, int print_all);
 unsigned int search_lists_multi (const char *list, const char *lists[], unsigned int n_lists);
 int process_word (GT4FastaReader *reader, unsigned long long word, void *data);
-int print_full_map (AZObject *obj);
+static unsigned int print_full_map (AZObject *obj);
 void get_statistics (AZObject *obj);
 void print_median (AZObject *obj);
 void print_distro (AZObject *obj, unsigned int size);
@@ -128,29 +128,27 @@ int main (int argc, const char *argv[])
       querystring = argv[argidx + 1];
       argidx += 1;
     } else if (!strcmp(argv[argidx], "-p") || !strcmp(argv[argidx], "--perfectmatch")) {
-      if (!argv[argidx + 1]) {
-        fprintf(stderr, "Warning: No number of 3 prime perfect matches specified! Using the default value: %d.\n", pm3);
-        argidx += 1;
-        continue;
-      }
-      pm3 = strtol (argv[argidx + 1], &end, 10);
-      if (*end != 0) {
-        fprintf(stderr, "Error: Invalid number of 3 prime perfect matches: %s! Must be an integer.\n", argv[argidx + 1]);
-        print_help (1);
-      }
       argidx += 1;
+      if (argidx >= argc) {
+        print_help (1);
+        break;
+      }
+      pm3 = strtol (argv[argidx], &end, 10);
+      if (*end || (pm3 < 0) || (pm3 > 32)) {
+        print_help (1);
+        break;
+      }
     } else if (!strcmp(argv[argidx], "-mm") || !strcmp(argv[argidx], "--mismatch")) {
-      if (!argv[argidx + 1]) {
-        fprintf(stderr, "Warning: No number of mismatches specified! Using the default value: %d.\n", nmm);
-        argidx += 1;
-        continue;
-      }
-      nmm = strtol (argv[argidx + 1], &end, 10);
-      if (*end != 0) {
-        fprintf(stderr, "Error: Invalid number of mismatches: %s! Must be an integer.\n", argv[argidx + 1]);
-        print_help (1);
-      }
       argidx += 1;
+      if (argidx >= argc) {
+        print_help (1);
+        break;
+      }
+      nmm = strtol (argv[argidx], &end, 10);
+      if (*end || (nmm < 0) || (nmm > 16)) {
+        print_help (1);
+        break;
+      }
     } else if (!strcmp(argv[argidx], "-min") || !strcmp(argv[argidx], "--minfreq")) { 
       if (!argv[argidx + 1]) {
         fprintf(stderr, "Warning: No minimum frequency specified! Using the default value: %d.\n", minfreq);
@@ -208,19 +206,11 @@ int main (int argc, const char *argv[])
   }
   
   if (!n_lists) {
-    fprintf(stderr, "Error: Missing a list file!\n");
+    fprintf(stderr, "No list/index files specified!\n");
     print_help (1);      
   }
 
-  /* checking the parameters */
-  if (nmm < 0) {
-    fprintf(stderr, "Error: Invalid number of mismatches: %d! Must be between 0 and the length of the query.\n", nmm);
-    print_help (1);
-  }
-  if (pm3 < 0) {
-    fprintf(stderr, "Error: Invalid number of 3 prime perfect matches: %d! Must be between 0 and the length of the query.\n", pm3);
-    print_help (1);
-  }
+  /* Checking the parameters */
   if (minfreq < 0) {
     fprintf(stderr, "Error: Invalid number of minimum frequency: %d! Must be positive integer.\n", minfreq);
     print_help (1);    
@@ -408,13 +398,13 @@ print_index_info (GT4WordIndexImplementation *impl, GT4WordIndexInstance *inst, 
   unsigned int i;
   for (i = 0; i < inst->n_locations; i++) {
     gt4_word_index_get_location (impl, inst, i);
-    fprintf (stdout, "%u\t%u\t%llu\t%u\n", inst->file_idx, inst->seq_idx, inst->pos, !inst->dir != !reverse);
+    fprintf (stdout, "%u\t%u\t%llu\t%u\n", inst->file_idx, inst->seq_idx, (unsigned long long) inst->pos, !inst->dir != !reverse);
   }
 }
 
 /* Print the whole list */
 
-int
+static unsigned int
 print_full_map (AZObject *obj)
 {
   if (!GT4_IS_INDEX_MAP (obj)) {
@@ -485,29 +475,38 @@ static unsigned int
 search_n_query_strings (GT4WordDictImplementation *impl, GT4WordDictInstance *inst, const char *queryfile, unsigned int n_mm, unsigned int pm_3, unsigned int min_freq, unsigned int max_freq, int print_all)
 {
   FILE *ifs;
-  char querystring[256];
   int beg = 1;
 
   ifs = fopen (queryfile, "r");
   if (ifs == NULL) {
-    fprintf (stderr, "Error: Cannot open file %s.\n", queryfile);
+    fprintf (stderr, "search_n_query_strings: Cannot open file %s.\n", queryfile);
     return 1;
   }
 
-  while (fscanf (ifs, "%s\n", querystring) != EOF) {
+  int val = fgetc (ifs);
+  while (val > 0) {
+    char c[256];
+    unsigned int i = 0;
+    while ((val > 0) && (i < 255) && (val != '\n')) {
+      c[i++] = (char) val;
+      val = fgetc (ifs);
+    }
+    c[i] = 0;
+    while ((val > 0) && (val != '\n')) val = fgetc (ifs);
+    while ((val > 0) && (val < 'A')) val = fgetc (ifs);
     if (beg) {
       /* Checking possible errors */
-      if (inst->word_length != strlen (querystring)) {
-        fprintf (stderr, "Error: Incompatible wordlengths! Wordlength in list: %u, query length: %lu\n", inst->word_length, strlen (querystring));
+      if (inst->word_length != strlen (c)) {
+        fprintf (stderr, "Error: Incompatible wordlengths! Wordlength in list: %u, query length: %lu\n", inst->word_length, strlen (c));
         return 1;
       }
       if ((inst->word_length - pm_3) < n_mm) {
-        fprintf (stderr, "Error: Number or mismatches specified is too large for %s with %d nucleotides long 3 prime perfect match.\n", querystring, pm_3);
+        fprintf (stderr, "Error: Number or mismatches specified is too large for %s with %d nucleotides long 3 prime perfect match.\n", c, pm_3);
         return 1;
       }
       beg = 0;
     }
-    search_one_query_string (impl, inst, querystring, n_mm, pm_3, min_freq, max_freq, print_all);
+    search_one_query_string (impl, inst, c, n_mm, pm_3, min_freq, max_freq, print_all);
   }
   fclose (ifs);
   return 0;
@@ -644,10 +643,10 @@ void get_statistics (AZObject *obj)
   az_object_get_interface (obj, GT4_TYPE_WORD_SLIST, (void **) &inst);
   if (GT4_IS_WORD_MAP (obj)) {
     GT4WordMap *map = GT4_WORD_MAP(obj);
-    fprintf (stdout, "Statistics of list file %s <<Built with glistmaker version %d.%d>>\n", map->filename, map->header->version_major, map->header->version_minor);
+    fprintf (stdout, "List %s: built with glistmaker version %d.%d\n", map->filename, map->header->version_major, map->header->version_minor);
   } else if (GT4_IS_INDEX_MAP (obj)) {
     GT4IndexMap *imap = GT4_INDEX_MAP(obj);
-    fprintf (stdout, "Statistics of index file %s <<Built with glistmaker version %d.%d>>\n", imap->filename, imap->header->version_major, imap->header->version_minor);
+    fprintf (stdout, "Index %s: built with glistmaker version %d.%d\n", imap->filename, imap->header->version_major, imap->header->version_minor);
   }
   fprintf (stdout, "Wordlength\t%u\n", inst->word_length);
   fprintf (stdout, "NUnique\t%llu\n", inst->num_words);
@@ -666,7 +665,7 @@ void print_median (AZObject *obj)
   gmax = 0;
   if (debug > 0) fprintf (stderr, "Finding min/max...");
   for (i = 0; i < inst->slist_inst.num_words; i++) {
-          gt4_word_sarray_get_word (impl, inst, i);
+    gt4_word_sarray_get_word (impl, inst, i);
     if (inst->slist_inst.count < gmin) gmin = inst->slist_inst.count;
     if (inst->slist_inst.count > gmax) gmax = inst->slist_inst.count;
   }
@@ -702,14 +701,13 @@ void print_median (AZObject *obj)
     }
     med = (min + max) / 2;
   }
-  
-        if (GT4_IS_WORD_MAP (obj)) {
-                GT4WordMap *map = GT4_WORD_MAP(obj);
-          fprintf (stdout, "Statistics of list file %s <<Built with glistmaker version %d.%d>>\n", map->filename, map->header->version_major, map->header->version_minor);
-        } else if (GT4_IS_INDEX_MAP (obj)) {
-                GT4IndexMap *imap = GT4_INDEX_MAP(obj);
-                fprintf (stdout, "Statistics of index file %s <<Built with glistmaker version %d.%d>>\n", imap->filename, imap->header->version_major, imap->header->version_minor);
-        }
+  if (GT4_IS_WORD_MAP (obj)) {
+    GT4WordMap *map = GT4_WORD_MAP(obj);
+    fprintf (stdout, "List %s: built with glistmaker version %d.%d\n", map->filename, map->header->version_major, map->header->version_minor);
+  } else if (GT4_IS_INDEX_MAP (obj)) {
+    GT4IndexMap *imap = GT4_INDEX_MAP(obj);
+    fprintf (stdout, "Index %s: built with glistmaker version %d.%d\n", imap->filename, imap->header->version_major, imap->header->version_minor);
+  }
   fprintf (stdout, "Wordlength\t%u\n", inst->slist_inst.word_length);
   fprintf (stdout, "NUnique\t%llu\n", inst->slist_inst.num_words);
   fprintf (stdout, "NTotal\t%llu\n", inst->slist_inst.sum_counts);
@@ -771,8 +769,8 @@ void print_help (int exit_value)
   fprintf (stderr, "    -f, --queryfile           - list of query words in a file\n");
   fprintf (stderr, "    -s, --seqfile             - FastA/FastQ file\n");
   fprintf (stderr, "    -l, --listfile            - list file made by glistmaker\n");
-  fprintf (stderr, "    -mm, --mismatch NUMBER    - specify number of mismatches (default 0)\n");
-  fprintf (stderr, "    -p, --perfectmatch NUMBER - specify number of 3' perfect matches (default 0)\n");
+  fprintf (stderr, "    -mm, --mismatch NUMBER    - specify number of mismatches (0-16; default 0)\n");
+  fprintf (stderr, "    -p, --perfectmatch NUMBER - specify number of 3' perfect matches (0-32; default 0)\n");
   fprintf (stderr, "    -min, --minfreq NUMBER    - minimum frequency of the printed words (default 0)\n");
   fprintf (stderr, "    -max, --maxfreq NUMBER    - maximum frequency of the printed words (default MAX_UINT)\n");
   fprintf (stderr, "    --files                   - Print indexed files\n");

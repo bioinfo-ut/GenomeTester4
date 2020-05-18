@@ -44,6 +44,8 @@ static void index_map_shutdown (AZObject *object);
 /* GT4WordSList implementation */
 static unsigned int index_map_get_first_word (GT4WordSListImplementation *impl, GT4WordSListInstance *inst);
 static unsigned int index_map_get_next_word (GT4WordSListImplementation *impl, GT4WordSListInstance *inst);
+/* GT4WordArraySorted implementation */
+static unsigned int index_map_get_word (GT4WordSArrayImplementation *impl, GT4WordSArrayInstance *inst, unsigned long long idx);
 /* GT4WordDict implementation */
 static unsigned int index_map_lookup (GT4WordDictImplementation *impl, GT4WordDictInstance *inst, unsigned long long word);
 /* GT4WordIndexImplementation */
@@ -79,6 +81,8 @@ index_map_class_init (GT4IndexMapClass *klass)
   /* GT4WordSList implementation */
   klass->sarray_impl.slist_impl.get_first_word = index_map_get_first_word;
   klass->sarray_impl.slist_impl.get_next_word = index_map_get_next_word;
+  /* GT4WordArraySorted implementation */
+  klass->sarray_impl.get_word = index_map_get_word;
   /* GT4WordDict implementation */
   klass->dict_impl.lookup = index_map_lookup;
   /* GT4WordIndexImplementation */
@@ -147,6 +151,15 @@ index_map_get_next_word (GT4WordSListImplementation *impl, GT4WordSListInstance 
   inst->word = imap_get_word (imap, inst->idx);
   imap->sarray_inst.slist_inst.count = imap->dict_inst.value = imap->index_inst.n_locations = imap_get_count (imap, inst->idx);
   __builtin_prefetch (imap->kmers + (inst->idx + 4) * 16);
+  return 1;
+}
+
+static unsigned int
+index_map_get_word (GT4WordSArrayImplementation *impl, GT4WordSArrayInstance *inst, unsigned long long idx)
+{
+  GT4IndexMap *imap = GT4_INDEX_MAP_FROM_SARRAY_INSTANCE(inst);
+  inst->slist_inst.word = imap_get_word (imap, inst->slist_inst.idx);
+  imap->sarray_inst.slist_inst.count = imap->dict_inst.value = imap->index_inst.n_locations = imap_get_count (imap, inst->slist_inst.idx);
   return 1;
 }
 
