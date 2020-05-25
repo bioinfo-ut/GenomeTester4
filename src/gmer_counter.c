@@ -738,7 +738,7 @@ process_table (SNPQueue *snpq, TaskTable *tt, unsigned int thread_idx)
     snpq->n_gc += tbl->n_gc;
     snpq->n_kmers_total += tbl->nwords;
   }
-  for (i = 0; i <  tbl->nwords; i++) {
+  for (i = 0; i < tbl->nwords; i++) {
     unsigned int code, node, kmer, kmer_idx;
     code = tbl->alleles[i];
     if (!code) continue;
@@ -846,7 +846,7 @@ start_sequence (GT4FastaReader *reader, void *data)
   GT4ListMakerQueue *mq = (GT4ListMakerQueue *) tt->task.queue;
   GT4LMQSource *src = &mq->sources[tt->idx];
   maker_queue_add_subsequence (mq, tt->idx, reader->name_pos, reader->name_length);
-  src->subseqs[src->n_subseqs - 1].sequence_pos = reader->cpos;
+  src->subseqs[src->n_subseqs - 1].seq_pos = reader->cpos;
   return 0;
 }
             
@@ -856,7 +856,7 @@ end_sequence (GT4FastaReader *reader, void *data)
   TaskRead *tt = (TaskRead *) data;
   GT4ListMakerQueue *mq = (GT4ListMakerQueue *) tt->task.queue;
   GT4LMQSource *src = &mq->sources[tt->idx];
-  src->subseqs[src->n_subseqs - 1].sequence_len = reader->cpos - src->subseqs[src->n_subseqs - 1].sequence_pos;
+  src->subseqs[src->n_subseqs - 1].seq_len = reader->cpos - src->subseqs[src->n_subseqs - 1].seq_pos;
   return 0;
 }
 
