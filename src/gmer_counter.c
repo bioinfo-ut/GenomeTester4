@@ -221,7 +221,7 @@ main (int argc, const char *argv[])
       lowmem = 0;
     } else if (!strcmp (argv[i], "--recover")) {
       recover = 1;
-    } else if (!strcmp (argv[i], "--stats")) {
+    } else if (!strcmp (argv[i], "--stats") || !strcmp (argv[i], "-stat")) {
       stats = 1;
     } else if (!strcmp (argv[i], "--count_trie_allocations")) {
       gt4_trie_debug |= GT4_TRIE_COUNT_ALLOCATIONS;
@@ -386,12 +386,11 @@ main (int argc, const char *argv[])
       }
 
       if (stats) {
-        fprintf (stdout, "LENGTH\tGC\tTOTAL_KMERS\tLIST_KMERS\tLIST_KMER_GC\n");
-        fprintf (stdout, "%llu", snpq.n_nucl);
-        fprintf (stdout, "\t%.3f", (double) snpq.n_gc / snpq.n_nucl);
-        fprintf (stdout, "\t%llu", snpq.n_kmers_total);
-        fprintf (stdout, "\t%llu", snpq.n_kmers);
-        fprintf (stdout, "\t%.3f\n", (double) snpq.n_kmer_gc / (snpq.n_kmers * db->wordsize));
+        fprintf (stdout, "#LENGTH\t%llu\n", snpq.n_nucl);
+        fprintf (stdout, "#GC\t%.3f\n", (double) snpq.n_gc / snpq.n_nucl);
+        fprintf (stdout, "#TOTAL_KMERS\t%llu\n", snpq.n_kmers_total);
+        fprintf (stdout, "#LIST_KMERS\t%llu\n", snpq.n_kmers);
+        fprintf (stdout, "#LIST_KMER_GC\t%.3f\n", (double) snpq.n_kmer_gc / (snpq.n_kmers * db->wordsize));
       }
     }
 

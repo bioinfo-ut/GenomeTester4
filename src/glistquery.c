@@ -177,7 +177,7 @@ int main (int argc, const char *argv[])
       debug += 1;
     } else if (!strcmp(argv[argidx], "--all") || !strcmp(argv[argidx], "-all")) {
       printall = 1;
-    } else if (!strcmp(argv[argidx], "--stat") || !strcmp(argv[argidx], "-stat")) {  
+    } else if (!strcmp(argv[argidx], "--stats") || !strcmp(argv[argidx], "--stat") || !strcmp(argv[argidx], "-stat")) {  
       getstat = 1;
     } else if (!strcmp(argv[argidx], "--median") || !strcmp(argv[argidx], "-median")) {
       getmed = 1;
@@ -761,7 +761,7 @@ void print_help (int exit_value)
   fprintf (stderr, "Options:\n");
   fprintf (stderr, "    -v, --version             - print version information and exit\n");
   fprintf (stderr, "    -h, --help                - print this usage screen and exit\n");
-  fprintf (stderr, "    --stat                    - print statistics of the list file and exit\n");
+  fprintf (stderr, "    -stat, --stats            - print statistics of the list file and exit\n");
   fprintf (stderr, "    --median                  - print min/max/median/average and exit\n");
   fprintf (stderr, "    --distribution MAX        - print distribution up to MAX\n");
   fprintf (stderr, "    --gc                      - print average GC content of all words\n");
