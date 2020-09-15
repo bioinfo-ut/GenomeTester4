@@ -46,6 +46,7 @@ gt4_write_union (AZObject *arrays[], unsigned int n_arrays, unsigned int cutoff,
   unsigned long long total = 0;
   unsigned int j;
 
+  arikkei_return_val_if_fail (n_arrays > 0, 1);
   arikkei_return_val_if_fail (n_arrays <= GT4_MAX_SETS, 1);
   
   n_sources = 0;

@@ -227,7 +227,7 @@ int main (int argc, const char *argv[])
 
   AZObject *maps[MAX_LISTS + 1];
   unsigned int has_lists = 0;
-  unsigned int has_indices = 0;
+  /* unsigned int has_indices = 0; */
   for (i = 0; i < n_lists; i++) {
     FILE *ifs;
     unsigned int code = 0;
@@ -244,7 +244,7 @@ int main (int argc, const char *argv[])
       has_lists = 1;
     } else if (code == GT4_INDEX_CODE) {
       maps[i] = (AZObject *) gt4_index_map_new (lists[i], VERSION_MAJOR, !getstat && use_scouts);
-      has_indices = 1;
+      /* has_indices = 1; */
     } else {
       fprintf (stderr, "Error: %s is not a valid GenomeTester4 list/index file\n", lists[i]);
       invalid = 1;

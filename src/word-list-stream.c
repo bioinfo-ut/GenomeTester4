@@ -133,7 +133,7 @@ gt4_word_list_stream_new (const char *filename, unsigned int major_version)
   arikkei_return_val_if_fail (filename != NULL, NULL);
 
   ifile = open (filename, O_RDONLY);
-  if (!ifile < 0) {
+  if (ifile < 0) {
     fprintf (stderr, "gt4_word_list_stream_new: could not open file %s\n", filename);
     return NULL;
   }
