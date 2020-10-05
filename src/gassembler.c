@@ -1,6 +1,7 @@
 #define __GASSEMBLER_C__
 
 #include <assert.h>
+#include <ctype.h>
 #include <string.h>
 #include <stdlib.h>
 #include <stdint.h>
@@ -59,9 +60,14 @@ static float coverage = 0;
 #define MAX_READS 4096
 #define MIN_READS 10
 #define MAX_ALIGNED_READS 1024
-#define MAX_READ_LENGTH 128
-#define MAX_REFERENCE_LENGTH 256
+#define MAX_READ_LENGTH max_read_length
+#define MAX_REFERENCE_LENGTH max_reference_length
 #define MAX_GROUPS MAX_ALIGNED_READS
+static unsigned int max_read_length = 200;
+static unsigned int max_reference_length = 200;
+
+/* For matrix indexing */
+#define A_COLS (MAX_REFERENCE_LENGTH * 2)
 
 typedef struct _GASMQueue GASMQueue;
 typedef struct _GASMRead GASMRead;
@@ -83,8 +89,8 @@ static void recalculate_and_call (AssemblyData *adata, Group *groups, unsigned i
 static unsigned int call (AssemblyData *adata, CallBlock *cb, unsigned int a_pos, unsigned int sub, CallExtra *extra, unsigned int *call_alignment, unsigned int homozygote);
 static int assemble (AssemblyData *adata, const char *kmers[], unsigned int nkmers, unsigned int print);
 static int assemble_recursive (GT4GmerDB *db, SeqFile *files, unsigned int ref_chr, unsigned int ref_start, unsigned int ref_end, const char *ref, const char *kmers[], unsigned int nkmers);
-unsigned int align_reads_to_reference (NSeq *ref_seq, GASMRead *reads[], unsigned int nreads, GASMRead *a_reads[], short a[][MAX_REFERENCE_LENGTH], SWCell *sw_matrix);
-unsigned int create_gapped_alignment (NSeq *ref_seq, unsigned int ref_start, GASMRead *a_reads[], unsigned int na, short a[][MAX_REFERENCE_LENGTH], unsigned int aligned_ref[], int ref_pos[], short _p[][MAX_REFERENCE_LENGTH * 2]);
+unsigned int align_reads_to_reference (NSeq *ref_seq, GASMRead *reads[], unsigned int nreads, GASMRead *a_reads[], short *a, SWCell *sw_matrix);
+unsigned int create_gapped_alignment (NSeq *ref_seq, unsigned int ref_start, GASMRead *a_reads[], unsigned int na, short *a, unsigned int aligned_ref[], int ref_pos[], short *ga);
 static void test_alignment (const char *a, const char *b);
 static float find_coverage (GT4Index *index);
 static double calc_p_mdetect (Call *call, CallExtra *extra, unsigned int kmer_cov);
@@ -186,11 +192,12 @@ struct _AssemblyData {
   /* Smith-Waterman table */
   SWCell *sw_matrix;
   /* Gapped alignment (nucleotide values) */
-  short (*alignment)[MAX_REFERENCE_LENGTH * 2];
+  //short (*alignment)[MAX_REFERENCE_LENGTH * 2];
+  short *alignment;
 
   GASMRead *aligned_reads[MAX_ALIGNED_READS];
-  unsigned int aligned_ref[MAX_REFERENCE_LENGTH * 2];
-  int ref_pos[MAX_REFERENCE_LENGTH * 2];
+  unsigned int *aligned_ref;
+  int *ref_pos;
   unsigned int na, p_len;
 
   /* Number of reads per position */
@@ -213,7 +220,7 @@ struct _CallBlock {
   unsigned int chr_cov;
   unsigned int haploid;
   /* Calls */
-  Call calls[MAX_REFERENCE_LENGTH * 2];
+  Call *calls;
 };
 
 struct _GASMQueue {
@@ -253,13 +260,17 @@ queue_get_call_block (GASMQueue *gq, unsigned int chr, unsigned int start, unsig
     gq->free_blocks = cb->next;
   } else {
     cb = (CallBlock *) malloc (sizeof (CallBlock));
+    memset (cb, 0, sizeof (CallBlock));
+    cb->calls = (Call *) malloc (MAX_REFERENCE_LENGTH * 2 * sizeof (Call));
   }
-  memset (cb, 0, sizeof (CallBlock));
+  memset (cb->calls, 0, MAX_REFERENCE_LENGTH * 2 * sizeof (Call));
+  cb->next = gq->processing_blocks;
   cb->chr = chr;
   cb->start = start;
   cb->end = end;
+  cb->n_calls = 0;
+  cb->chr_cov = 0;
   cb->haploid = (((sex == SEX_MALE) && ((chr == CHR_X) || (chr == CHR_Y))) || (chr == CHR_MT));
-  cb->next = gq->processing_blocks;
   gq->processing_blocks = cb;
   return cb;
 }
@@ -308,7 +319,11 @@ assembly_data_new (GT4GmerDB *db, SeqFile *files)
   adata->db = db;
   adata->files = files;
   adata->sw_matrix = (SWCell *) malloc ((MAX_REFERENCE_LENGTH + 1) * (MAX_READ_LENGTH + 1) * sizeof (SWCell));
-  adata->alignment = (short (*)[MAX_REFERENCE_LENGTH * 2]) malloc (MAX_ALIGNED_READS * MAX_REFERENCE_LENGTH * 2 * 2);
+  adata->alignment = (short *) malloc (MAX_ALIGNED_READS * MAX_REFERENCE_LENGTH * 2 * 2);
+  adata->aligned_ref = (unsigned int *) malloc (MAX_REFERENCE_LENGTH * 2 * 4);
+  memset (adata->aligned_ref, 0, MAX_REFERENCE_LENGTH * 2 * 4);
+  adata->ref_pos = (int *) malloc (MAX_REFERENCE_LENGTH * 2 * 4);
+  memset (adata->ref_pos, 0, MAX_REFERENCE_LENGTH * 2 * 4);
   adata->coverage = (short *) malloc (MAX_REFERENCE_LENGTH * 2 * 2);
   adata->nucl_counts = (short (*)[GAP + 1]) malloc (MAX_REFERENCE_LENGTH * 2 * (GAP + 1) * 2);
   adata->is_compat = (unsigned char (*)[MAX_GROUPS]) malloc (MAX_GROUPS * MAX_GROUPS);
@@ -609,7 +624,7 @@ const char *fp_db_name = NULL;
 const char *seq_dir = NULL;
 static unsigned int print_reads = 0;
 static unsigned int prefetch_db = 1;
-static unsigned int prefetch_seq = 1;
+static unsigned int prefetch_seq = 0;
 /* Advanced parameters */
 SNV *snvs = NULL;
 SNV *fps = NULL;
@@ -668,6 +683,10 @@ print_usage (FILE *ofs, unsigned int advanced, int exit_value)
     fprintf (ofs, "    --counts                         - output nucleotide counts\n");
     fprintf (ofs, "    --extra                          - output extra information about call\n");
     fprintf (ofs, "    --alternatives                   - output also homozygous variant for each heterozygous position\n");
+    fprintf (ofs, "    --max_read_length INTEGER        - maximum length of reads (default %u)\n", max_read_length);
+    fprintf (ofs, "    --max_reference_length INTEGER   - maximum length of reference region (default %u)\n", max_divergent);
+    fprintf (ofs, "    --prefetch_seq                   - Prefetch FastQ sequences (slightly faster but uses more virtual memory/IO)\n");
+    fprintf (ofs, "    --dont_prefetch_db               - Do not prefetch index (much slower but uses less memory/IO)\n");
     fprintf (ofs, "    -D                               - increase debug level\n");
     fprintf (ofs, "    -DG                              - increase group debug level\n");
   }
@@ -863,6 +882,18 @@ main (int argc, const char *argv[])
       print_extra = 2;
     } else if (!strcmp (argv[i], "--alternatives")) {
       alternative_calls = 1;
+    } else if (!strcmp (argv[i], "--max_read_length")) {
+      i += 1;
+      if (i >= argc) print_usage (stderr, 0, 1);
+      max_read_length = strtol (argv[i], NULL, 10);
+    } else if (!strcmp (argv[i], "--max_reference_length")) {
+      i += 1;
+      if (i >= argc) print_usage (stderr, 0, 1);
+      max_reference_length = strtol (argv[i], NULL, 10);
+    } else if (!strcmp (argv[i], "--prefetch_seq")) {
+      prefetch_seq = 1;
+    } else if (!strcmp (argv[i], "--dont_prefetch_db")) {
+      prefetch_db = 0;
     } else if (!strcmp (argv[i], "-D")) {
       debug += 1;
     } else if (!strcmp (argv[i], "-DG")) {
@@ -871,6 +902,10 @@ main (int argc, const char *argv[])
       test_alignment (argv[i + 1], argv[i + 2]);
       exit (0);
     } else  {
+      if (!isalpha (argv[i][0])) {
+        fprintf (stderr, "Invalid argument %s\n", argv[i]);
+        print_usage (stderr, 0, 1);
+      }
       if (nkmers < MAX_KMERS) kmers[nkmers++] = argv[i];
     }
   }
@@ -1019,6 +1054,10 @@ main (int argc, const char *argv[])
           if (start > only_pos) break;
           end = strtol ((const char *) tokenz[2], NULL, 10);
           if (end <= only_pos) continue;
+          if ((end - start) > max_reference_length) {
+            fprintf (stderr, "WARNING: Region %u-%u is longer than maximum allowed length (%u), skipping\n", start, end, max_reference_length);
+            continue;
+          }
           ref = (const char *) tokenz[3];
           nkmers = 0;
           for (i = 4; i < ntokenz; i++) {
@@ -1156,7 +1195,7 @@ static int
 align (AssemblyData *adata, const char *kmers[], unsigned int nkmers)
 {
   ReadInfo read_info[MAX_READS];
-  short (*alignment)[MAX_REFERENCE_LENGTH];
+  short *alignment;
   unsigned int i;
   adata->ref_seq = n_seq_new_length (adata->ref, adata->end - adata->start, WORDLEN);
   /* Check reference length */
@@ -1193,7 +1232,7 @@ align (AssemblyData *adata, const char *kmers[], unsigned int nkmers)
   }
   /* Align all reads to reference */
   if (debug > 1) fprintf (stderr, "Aligning reads to reference...");
-  alignment = (short (*)[MAX_REFERENCE_LENGTH]) malloc (MAX_ALIGNED_READS * MAX_REFERENCE_LENGTH * 2);
+  alignment = (short *) malloc (MAX_ALIGNED_READS * MAX_REFERENCE_LENGTH * 2);
   adata->na = align_reads_to_reference (adata->ref_seq, adata->reads, adata->nreads, adata->aligned_reads, alignment, adata->sw_matrix);
   if (debug > 1) fprintf (stderr, "\n");
   /* Generate gapped alignment */
@@ -1204,8 +1243,8 @@ align (AssemblyData *adata, const char *kmers[], unsigned int nkmers)
   for (i = 0; i < adata->p_len; i++) {
     unsigned int j;
     for (j = 0; j < adata->na; j++) {
-      if (adata->alignment[j][i] <= GAP) {
-        int nucl = adata->alignment[j][i];
+      if (adata->alignment[j * A_COLS + i] <= GAP) {
+        int nucl = adata->alignment[j * A_COLS + i];
         adata->nucl_counts[i][nucl] += 1;
         adata->coverage[i] += 1;
       }
@@ -1243,7 +1282,7 @@ align (AssemblyData *adata, const char *kmers[], unsigned int nkmers)
       }
       for (j = 0; j < adata->na; j++) {
         unsigned int ref = adata->aligned_ref[i];
-        unsigned int nucl = adata->alignment[j][i];
+        unsigned int nucl = adata->alignment[j * A_COLS + i];
         unsigned int mask = 7;
         /* Do not count single nucleotides */
         if ((nucl <= GAP) && (adata->nucl_counts[i][nucl] < cutoff)) mask = 0;
@@ -1283,7 +1322,7 @@ group (AssemblyData *adata, unsigned int print)
   for (i = 0; i < adata->p_len; i++) {
     unsigned int j;
     for (j = 0; j < adata->na; j++) {
-      int nucl = adata->alignment[j][i];
+      int nucl = adata->alignment[j * A_COLS + i];
       if (nucl <= GAP) {
         adata->nucl_counts[i][nucl] += 1;
         adata->coverage[i] += 1;
@@ -1380,7 +1419,7 @@ group (AssemblyData *adata, unsigned int print)
       unsigned int cov = 0;
       for (k = 0; k < adata->na; k++) {
         if (adata->aligned_reads[k]->group != i) continue;
-        if (adata->alignment[k][j] <= GAP) cov += 1;
+        if (adata->alignment[k * A_COLS + j] <= GAP) cov += 1;
       }
       if (cov < groups[i].min_cov) groups[i].min_cov = cov;
       if (cov > groups[i].max_cov) groups[i].max_cov = cov;
@@ -1404,7 +1443,7 @@ group (AssemblyData *adata, unsigned int print)
     for (i = 0; i < adata->p_len; i++) {
       unsigned int c[10] = { 0 };
       for (k = 0; k < adata->na; k++) {
-        if (adata->aligned_reads[k]->group == j) c[adata->alignment[k][i]] += 1;
+        if (adata->aligned_reads[k]->group == j) c[adata->alignment[k * A_COLS + i]] += 1;
       }
       unsigned int best = adata->aligned_ref[i];
       for (k = 0; k <= GAP; k++) {
@@ -1588,8 +1627,8 @@ recalculate_and_call (AssemblyData *adata, Group groups[], unsigned int n_groups
     for (j = 0; j < adata->na; j++) {
       unsigned int grp = adata->aligned_reads[j]->group;
       if (!groups[grp].included) continue;
-      if (adata->alignment[j][i] <= GAP) {
-        int nucl = adata->alignment[j][i];
+      if (adata->alignment[j * A_COLS + i] <= GAP) {
+        int nucl = adata->alignment[j * A_COLS + i];
         if (nucl != groups[grp].consensus[i]) continue;
         adata->nucl_counts[i][nucl] += 1;
         adata->coverage[i] += 1;
@@ -1675,7 +1714,7 @@ recalculate_and_call (AssemblyData *adata, Group groups[], unsigned int n_groups
           unsigned int k;
           fprintf (stdout, "  [%c%c] ", n2c[groups[j].consensus[a_i]], (groups[j].consensus[a_i] == adata->aligned_ref[a_i]) ? ' ' : '*');
           for (k = 0; k < adata->na; k++) {
-            if (adata->aligned_reads[k]->group == j) fprintf (stdout, "%c", n2c[adata->alignment[k][a_i]]);
+            if (adata->aligned_reads[k]->group == j) fprintf (stdout, "%c", n2c[adata->alignment[k * A_COLS + a_i]]);
           }
         }
       }
@@ -1856,7 +1895,7 @@ test_alignment (const char *a, const char *b)
 
 
 unsigned int
-align_reads_to_reference (NSeq *ref_seq, GASMRead *reads[], unsigned int nreads, GASMRead *a_reads[], short a[][MAX_REFERENCE_LENGTH], SWCell *sw_matrix)
+align_reads_to_reference (NSeq *ref_seq, GASMRead *reads[], unsigned int nreads, GASMRead *a_reads[], short *a, SWCell *sw_matrix)
 {
   unsigned int i;
   unsigned int na = 0;
@@ -1915,31 +1954,31 @@ align_reads_to_reference (NSeq *ref_seq, GASMRead *reads[], unsigned int nreads,
     a_reads[na] = reads[i];
 
     /* fixme: Remove this */
-    for (j = 0; j < ref_seq->len; j++) a[na][j] = -1000;
+    for (j = 0; j < ref_seq->len; j++) a[na * A_COLS + j] = -1000;
     /* Initial part */
     for (j = 0; j < ref_p[0]; j++) {
       int d = j - (int) ref_p[0];
       r_p = (int) read_p[0] + d;
-      a[na][j] = (r_p < 0) ? BEFORE : UNKNOWN;
+      a[na * A_COLS + j] = (r_p < 0) ? BEFORE : UNKNOWN;
     }
     /* Aligned part */
-    a[na][ref_p[0]] = read_p[0];
+    a[na * A_COLS + ref_p[0]] = read_p[0];
     last = ref_p[0];
     for (j = 1; j < align_len; j++) {
       unsigned int k;
-      for (k = last + 1; k < ref_p[j]; k++) a[na][k] = a[na][last];
-      if (ref_p[j] > ref_p[j - 1]) a[na][ref_p[j]] = read_p[j];
+      for (k = last + 1; k < ref_p[j]; k++) a[na * A_COLS + k] = a[na * A_COLS + last];
+      if (ref_p[j] > ref_p[j - 1]) a[na * A_COLS + ref_p[j]] = read_p[j];
       last = ref_p[j];
     }
     /* Final part */
     for (j = ref_p[align_len - 1] + 1; j < ref_seq->len; j++) {
       int d = j - (int) ref_p[align_len - 1];
       r_p = (int) read_p[align_len - 1] + d;
-      a[na][j] = (r_p >= a_reads[na]->nseq->len) ? AFTER : UNKNOWN;
+      a[na * A_COLS + j] = (r_p >= a_reads[na]->nseq->len) ? AFTER : UNKNOWN;
     }
     for (j = 0; j < ref_seq->len; j++) {
-      assert (a[na][j] >= -3);
-      assert (a[na][j] < 1000);
+      assert (a[na * A_COLS + j] >= -3);
+      assert (a[na * A_COLS + j] < 1000);
     }
     na += 1;
     if (na >= MAX_ALIGNED_READS) {
@@ -1952,7 +1991,7 @@ align_reads_to_reference (NSeq *ref_seq, GASMRead *reads[], unsigned int nreads,
 }
 
 unsigned int
-create_gapped_alignment (NSeq *ref_seq, unsigned int ref_start, GASMRead *a_reads[], unsigned int na, short a[][MAX_REFERENCE_LENGTH], unsigned int aligned_ref[], int ref_pos[], short _p[][MAX_REFERENCE_LENGTH * 2])
+create_gapped_alignment (NSeq *ref_seq, unsigned int ref_start, GASMRead *a_reads[], unsigned int na, short *a, unsigned int aligned_ref[], int ref_pos[], short *ga)
 {
   int ref_p, last_ref_p;
   int read_p[1024], last_read_p[1024];
@@ -1960,7 +1999,7 @@ create_gapped_alignment (NSeq *ref_seq, unsigned int ref_start, GASMRead *a_read
   unsigned int i;
   /* Set read positions to alignment start (+ skip) */
   for (i = 0; i < na; i++) {
-    read_p[i] = a[i][skip_end_align];
+    read_p[i] = a[i * A_COLS + skip_end_align];
     last_read_p[i] = UNKNOWN;
   }
   ref_p = skip_end_align;
@@ -1980,12 +2019,12 @@ create_gapped_alignment (NSeq *ref_seq, unsigned int ref_start, GASMRead *a_read
     /* Reads */
     for (i = 0; i < na; i++) {
       if ((read_p[i] >= 0) && ((last_read_p[i] < 0) || (read_p[i] > last_read_p[i]))) {
-        _p[i][p_len] = a_reads[i]->nseq->pos[read_p[i]].nucl;
+        ga[i * A_COLS + p_len] = a_reads[i]->nseq->pos[read_p[i]].nucl;
         last_read_p[i] = read_p[i];
       } else if (read_p[i] >= 0) {
-        _p[i][p_len] = GAP;
+        ga[i * A_COLS + p_len] = GAP;
       } else {
-        _p[i][p_len] = NONE;
+        ga[i * A_COLS + p_len] = NONE;
       }
     }
     /* Advance */
@@ -1993,7 +2032,7 @@ create_gapped_alignment (NSeq *ref_seq, unsigned int ref_start, GASMRead *a_read
     if (ref_p < (ref_seq->len - skip_end_align - 1)) {
       int next_ref_p = ref_p + 1;
       for (i = 0; i < na; i++) {
-        int next_read_p = a[i][next_ref_p];
+        int next_read_p = a[i * A_COLS + next_ref_p];
         if ((read_p[i] >= 0) && (next_read_p >= 0)) {
           int gap = next_read_p - read_p[i];
           if (gap > rgap) rgap = gap;
@@ -2003,7 +2042,7 @@ create_gapped_alignment (NSeq *ref_seq, unsigned int ref_start, GASMRead *a_read
     if (ref_p < (ref_seq->len - skip_end_align - 1)) {
       int next_ref_p = ref_p + 1;
       for (i = 0; i < na; i++) {
-        int next_read_p = a[i][next_ref_p];
+        int next_read_p = a[i * A_COLS + next_ref_p];
         if (next_read_p >= 0) {
           if (read_p[i] < 0) {
             if (rgap == 1) read_p[i] = next_read_p;
@@ -2597,7 +2636,10 @@ get_read_sequences (GASMRead *seqs[], const ReadInfo reads[], unsigned int nread
     p += 1;
     len = 0;
     while (p[len] >= 'A') len += 1;
-    if (len > 2047) len = 2047;
+    if (len > max_read_length) {
+      fprintf (stderr, "WARNING: Read is longer than maximum allowed length (%u, max %u), truncating\n", len, max_read_length);
+      len = max_read_length;
+    }
     memcpy (seq, p, len);
     seq[len] = 0;
     if (reads[i].dir) gt4_string_revcomp_inplace (seq, len);

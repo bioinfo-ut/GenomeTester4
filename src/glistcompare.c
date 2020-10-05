@@ -514,6 +514,7 @@ compare_wordmaps (AZObject *list1, AZObject *list2, int find_union, int find_int
   }
 
   /* creating output files */
+  gt4_list_header_init (&h_out, inst1->word_length);
   if (find_union && !countonly) {
     sprintf (fname[0], "%s_%d_union.list.tmp", out, inst1->word_length);
     outf[0] = fopen (fname[0], "w");
@@ -605,8 +606,6 @@ compare_wordmaps (AZObject *list1, AZObject *list2, int find_union, int find_int
       freq2 = inst2->count;
     }
   }
-
-  gt4_list_header_init (&h_out, inst1->word_length);
 
   /* add headers and close files */
   if (find_union && !countonly) {
