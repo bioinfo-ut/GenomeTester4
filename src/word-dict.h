@@ -58,6 +58,8 @@ unsigned int gt4_word_dict_get_type (void);
 
 /* All methods return 1 on success, 0 on error */
 unsigned int gt4_word_dict_lookup (GT4WordDictImplementation *impl, GT4WordDictInstance *inst, unsigned long long word, unsigned int canonize);
-unsigned int gt4_word_dict_lookup_mm (GT4WordDictImplementation *impl, GT4WordDictInstance *inst, unsigned long long word, unsigned int n_mm, unsigned int pm_3, unsigned int canonize, int print_all, unsigned int equal_mm_only);
+/* If callback returns 0 futher lookups will stop */
+unsigned int gt4_word_dict_lookup_mm (GT4WordDictImplementation *impl, GT4WordDictInstance *inst, unsigned long long word, unsigned int n_mm, unsigned int pm_3, unsigned int canonize, unsigned int equal_mm_only,
+  unsigned int (* callback) (unsigned long long, unsigned int, void *), void *cb_data);
 
 #endif

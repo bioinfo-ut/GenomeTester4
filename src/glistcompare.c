@@ -83,12 +83,14 @@ unsigned int stream = 0;
 
 int main (int argc, const char *argv[])
 {
-  int arg_idx, v;
-  const char *fnames[MAX_FILES];
+  int arg_idx, v, i;
   unsigned int nfiles = 0;
+  const char *fnames[MAX_FILES];
+  AZObject *objs[MAX_FILES];
   char *end;
   int rule = RULE_DEFAULT;
   long seed = -1;
+  unsigned int wlen = 0, err = 0;
 
   /* default values */
   unsigned int cutoff = 1, nmm = 0;
@@ -238,39 +240,66 @@ int main (int argc, const char *argv[])
   } else {
     srand48 (seed);
   }
-  /* Subset */
-  if (find_subset) {
-    AZObject *obj;
+
+  /* Subset is incompatible with --stream */
+  if (nmm || find_subset) {
+    if (stream) fprintf (stderr, "Warning: Subset and mismatches are incompatible with streaming, using mapping\n");
+    stream = 0;
+  }
+
+  /* Build list of objects */
+  for (i = 0; i < nfiles; i++) {
     GT4WordSListImplementation *impl;
     GT4WordSListInstance *inst;
     FILE *ifs;
     uint32_t code;
-    char out_name[2048], tmp_name[2048];
 
-    if (nfiles != 1) {
-      fprintf (stderr, "Error: Subset requires exactly one imput list\n");
-      exit (1);
-    }
-    ifs = fopen (fnames[0], "r");
+    ifs = fopen (fnames[i], "r");
     if (!ifs) {
-      fprintf (stderr, "Error: Cannot open list %s\n", fnames[0]);
-      exit (1);
+      fprintf (stderr, "Error: Cannot open %s\n", fnames[i]);
+      err = 1;
     }
     fread (&code, 4, 1, ifs);
     fclose (ifs);
     if (code == GT4_LIST_CODE) {
-      obj = (AZObject *) gt4_word_map_new (fnames[0], VERSION_MAJOR, 0, 0);
+      if (stream) {
+        objs[i] = (AZObject *) gt4_word_list_stream_new (fnames[0], VERSION_MAJOR);
+      } else {
+        objs[i] = (AZObject *) gt4_word_map_new (fnames[i], VERSION_MAJOR, use_scouts, 0);
+      }
     } else if (code == GT4_INDEX_CODE) {
-      obj = (AZObject *) gt4_index_map_new (fnames[0], VERSION_MAJOR, 0);
+      objs[i] = (AZObject *) gt4_index_map_new (fnames[i], VERSION_MAJOR, 0);
     } else {
-      fprintf (stderr, "Error: Invalid list format\n");
-      exit (1);
+      fprintf (stderr, "Error: File %s has unknown format\n", fnames[i]);
+      err = 1;
     }
-    impl = (GT4WordSListImplementation *) az_object_get_interface (obj, GT4_TYPE_WORD_SLIST, (void **) &inst);
+    impl = (GT4WordSListImplementation *) az_object_get_interface (objs[i], GT4_TYPE_WORD_SLIST, (void **) &inst);
     if (!impl) {
-      fprintf (stderr, "Invalid or corrupted list file\n");
+      fprintf (stderr, "Error: File %s is invalid or corrupted\n", fnames[i]);
+      err = 1;
+    }
+    if (!wlen) {
+      wlen = inst->word_length;
+    } else if (inst->word_length != wlen) {
+      fprintf (stderr, "Error: File %s has different word length (%u != %u)\n", fnames[i], inst->word_length, wlen);
+      err = 1;
+    }
+  }
+  if (err) {
+    fprintf (stderr, "Stopping...\n");
+    exit (1);
+  }
+  
+  /* Subset */
+  if (find_subset) {
+    GT4WordSListImplementation *impl;
+    GT4WordSListInstance *inst;
+    char out_name[2048], tmp_name[2048];
+    if (nfiles != 1) {
+      fprintf (stderr, "Error: Subsetting multiple files is not supported\n");
       exit (1);
     }
+    impl = (GT4WordSListImplementation *) az_object_get_interface (objs[0], GT4_TYPE_WORD_SLIST, (void **) &inst);
     if (((subset_method == RAND_UNIQUE) || (subset_method == RAND_WEIGHTED_UNIQUE)) && (subset_size > inst->num_words)) {
       fprintf (stderr, "Error: Unique subset size (%llu) is bigger than number of unique kmers (%llu)\n", subset_size, inst->num_words);
       exit (1);
@@ -281,12 +310,10 @@ int main (int argc, const char *argv[])
     snprintf (out_name, 2048, "%s_subset_%u.list", outputname, inst->word_length);
     out_name[2047] = 0;
     if (rename (tmp_name, out_name)) {
-      fprintf (stderr, "Cannot rename %s to %s\n", tmp_name, out_name);
-      exit (1);
+      fprintf (stderr, "Error: cannot rename %s to %s\n", tmp_name, out_name);
     }
     return 0;
   }
-
 
   if (nfiles < 2) {
     fprintf (stderr, "Error: At least 2 list/index files are needed\n");
@@ -356,60 +383,36 @@ int main (int argc, const char *argv[])
     gt4_word_map_delete (map1);
     gt4_word_map_delete (map2);
   } else if (nfiles == 2) {
-    AZObject *list1, *list2;
-    if (stream) {
-      list1 = (AZObject *) gt4_word_list_stream_new (fnames[0], VERSION_MAJOR);
-      list2 = (AZObject *) gt4_word_list_stream_new (fnames[1], VERSION_MAJOR);
-    } else {
-      list1 = (AZObject *) gt4_word_map_new (fnames[0], VERSION_MAJOR, use_scouts, 0);
-      list2 = (AZObject *) gt4_word_map_new (fnames[1], VERSION_MAJOR, use_scouts, 0);
-    }
-    if (!list1 || !list2) {
-      fprintf (stderr, "Error: Creating the wordmap failed!\n");
-      exit (1);
-    }
-    v = compare_wordmaps (AZ_OBJECT(list1), AZ_OBJECT(list2), find_union, find_intrsec, find_diff, find_ddiff, subtraction, countonly, outputname, cutoff, rule);
-    az_object_shutdown (AZ_OBJECT (list1));
-    az_object_shutdown (AZ_OBJECT (list2));
+    v = compare_wordmaps (objs[0], objs[1], find_union, find_intrsec, find_diff, find_ddiff, subtraction, countonly, outputname, cutoff, rule);
   } else {
-    AZObject *maps[MAX_FILES];
-    GT4WordSListInstance *inst;
     GT4ListHeader header;
-    unsigned int i;
     char out_name[2048], tmp_name[2048];
     int ofile = 0;
-    for (i = 0; i < nfiles; i++) {
-      if (stream) {
-        maps[i] = (AZObject *) gt4_word_list_stream_new (fnames[i], VERSION_MAJOR);
-        if (!maps[i]) exit (1);
-      } else {
-        maps[i] = (AZObject *) gt4_word_map_new (fnames[i], VERSION_MAJOR, use_scouts, 0);
-        if (!maps[i]) exit (1);
-      }
-    }
-    az_object_get_interface (maps[0], GT4_TYPE_WORD_SLIST, (void **) &inst);
     if (!countonly) {
-      snprintf (tmp_name, 2048, "%s_%d_union.list.tmp", outputname, inst->word_length);
+      snprintf (tmp_name, 2048, "%s_%d_union.list.tmp", outputname, wlen);
       tmp_name[2047] = 0;
       ofile = creat (tmp_name, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
       if (ofile < 0) {
-        fprintf (stderr, "Creating output file %s failed\n", tmp_name);
+        fprintf (stderr, "Error: Cannot create output file %s\n", tmp_name);
         exit (1);
       }
     }
-    v = union_multi (maps, nfiles, cutoff, ofile, &header);
+    v = union_multi (objs, nfiles, cutoff, ofile, &header);
     if (ofile > 0) {
       close (ofile);
-      snprintf (out_name, 2048, "%s_%d_union.list", outputname, inst->word_length);
+      snprintf (out_name, 2048, "%s_%d_union.list", outputname, wlen);
       out_name[2047] = 0;
       if (rename (tmp_name, out_name)) {
-        fprintf (stderr, "Cannot rename %s to %s\n", tmp_name, out_name);
+        fprintf (stderr, "Error: Cannot rename %s to %s\n", tmp_name, out_name);
         exit (1);
       }
     }
-    fprintf (stdout, "NUnique\t%llu\nNTotal\t%llu\n", header.n_words, header.total_count);
+    if (debug) fprintf (stdout, "NUnique\t%llu\nNTotal\t%llu\n", header.n_words, header.total_count);
   }
   if (v) return print_error_message (v);
+  for (i = 0; i < nfiles; i++) {
+    az_object_shutdown (objs[i]);
+  }
 
   delete_scouts ();
   

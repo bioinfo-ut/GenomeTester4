@@ -251,6 +251,7 @@ main (int argc, const char *argv[])
     return 1;
   }
   if (nthreads > 256) nthreads = 256;
+  unsigned long long total_size = 0;
   for (i = 0; i < n_i_files; i++) {
     if (!strcmp (i_files[i].name, "-")) continue;
     struct stat s;
@@ -259,8 +260,11 @@ main (int argc, const char *argv[])
       exit (1);
     }
     i_files[i].size = s.st_size;
+    total_size += s.st_size;
   }
+  if (total_size < 100000) nthreads = 1;
   if (debug) {
+    fprintf (stderr, "Total file size %lld\n", total_size);
     fprintf (stderr, "Num threads is %d\n", nthreads);
     fprintf (stderr, "Num tables is %d\n", ntables);
     fprintf (stderr, "Table size is %lld\n", tablesize);
@@ -318,11 +322,12 @@ main (int argc, const char *argv[])
       }
       ofile = fileno (ofs);
       gt4_write_union (objs, mq.n_final_files, 1, ofile, &header);
-      /* close (ofile); */
       for (i = 0; i < mq.n_final_files; i++) {
         gt4_word_list_stream_delete (GT4_WORD_LIST_STREAM (objs[i]));
-        unlink (mq.final_files[i]);
       }
+    }
+    for (i = 0; i < mq.n_final_files; i++) {
+      unlink (mq.final_files[i]);
     }
   } else {
     if (create_index) {

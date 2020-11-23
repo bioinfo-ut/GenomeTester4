@@ -72,7 +72,8 @@ gt4_word_dict_lookup (GT4WordDictImplementation *impl, GT4WordDictInstance *inst
 }
 
 unsigned int
-gt4_word_dict_lookup_mm (GT4WordDictImplementation *impl, GT4WordDictInstance *inst, unsigned long long word, unsigned int n_mm, unsigned int pm_3, unsigned int canonize, int print_all, unsigned int equal_mm_only)
+gt4_word_dict_lookup_mm (GT4WordDictImplementation *impl, GT4WordDictInstance *inst, unsigned long long word, unsigned int n_mm, unsigned int pm_3, unsigned int canonize, unsigned int equal_mm_only,
+  unsigned int (* callback) (unsigned long long, unsigned int, void *), void *cb_data)
 {
   static GT4WordTable mm_table = {0};
   unsigned long long i;
@@ -80,7 +81,11 @@ gt4_word_dict_lookup_mm (GT4WordDictImplementation *impl, GT4WordDictInstance *i
 
   /* If no mismatches (last resursion) */
   if (!n_mm) {
-    return gt4_word_dict_lookup (impl, inst, word, canonize);
+    if (gt4_word_dict_lookup (impl, inst, word, canonize)) {
+      if (callback) callback (word, inst->value, cb_data);
+      return 1;
+    }
+    return 0;
   }
   if (!mm_table.n_word_slots) {
     gt4_word_table_setup (&mm_table, inst->word_length, 256, 0);
@@ -90,8 +95,8 @@ gt4_word_dict_lookup_mm (GT4WordDictImplementation *impl, GT4WordDictInstance *i
     if (gt4_word_dict_lookup (impl, inst, mm_table.words[i], 0)) {
       /* Found it */
       count += inst->value;
-      if (print_all) {
-        fprintf (stdout, "%s\t%u\n", word_to_string (mm_table.words[i], mm_table.wordlength), inst->value);
+      if (callback) {
+        if (!callback (mm_table.words[i], inst->value, cb_data)) break;
       }
     }
   }
