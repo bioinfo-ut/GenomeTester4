@@ -359,16 +359,7 @@ int main (int argc, const char *argv[])
   }
 
   if (nmm) {
-    GT4WordMap *map1, *map2;
-    map1 = gt4_word_map_new (fnames[0], VERSION_MAJOR, USE_SCOUTS, 0);
-    map2 = gt4_word_map_new (fnames[1], VERSION_MAJOR, USE_SCOUTS, 0);
-    if (!map1 || !map2) {
-      fprintf (stderr, "Error: Creating the wordmap failed!\n");
-      exit (1);
-    }
     v = compare_wordmaps_mm (objs[0], objs[1], find_diff, find_ddiff, subtraction, countonly, outputname, cutoff, nmm, rule);
-    gt4_word_map_delete (map1);
-    gt4_word_map_delete (map2);
   } else if (nfiles == 2) {
     v = compare_wordmaps (objs[0], objs[1], find_union, find_intrsec, find_diff, find_ddiff, subtraction, countonly, outputname, cutoff, rule);
   } else {
