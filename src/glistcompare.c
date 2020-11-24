@@ -63,15 +63,14 @@ enum SubsetMethods {
   RAND_WEIGHTED_UNIQUE
 };
 
-static int compare_word_map_headers (GT4ListHeader *h1, GT4ListHeader *h2);
 /* Wordmap correctness is not tested */
 static int compare_wordmaps (AZObject *list1, AZObject *list2, int find_union, int find_intrsec, int find_diff, int find_ddiff, int subtract, int countonly, const char *out, unsigned int cutoff, int rule);
+static int compare_wordmaps_mm (AZObject *list1, AZObject *list2, int find_diff, int find_ddiff, int subtract, int countonly, const char *out, unsigned int cutoff, unsigned int nmm, int rule);
 /* No actual writing will be done if ofile is 0 */
 /* Upon completion list header is filled regardless of whether actual writing was performed */
 static unsigned int union_multi (AZObject *m[], unsigned int nmaps, unsigned int cutoff, int ofile, GT4ListHeader *header);
 static unsigned int subset (GT4WordSListImplementation *impl, GT4WordSListInstance *inst, unsigned int subset_method, unsigned long long subset_size, const char *filename);
-static int compare_wordmaps_mm (GT4WordMap *map1, GT4WordMap *map2, int find_diff, int find_ddiff, int subtract, int countonly, const char *out, unsigned int cutoff, unsigned int nmm, int rule);
-static unsigned long long fetch_relevant_words (GT4WordTable *table, GT4WordMap *map, GT4WordMap *querymap, unsigned int cutoff, unsigned int nmm, FILE *f, int subtract, int countonly, unsigned long long *totalfreq);
+static unsigned long long fetch_relevant_words (GT4WordTable *table, AZObject *map, AZObject *querymap, unsigned int cutoff, unsigned int nmm, FILE *f, int subtract, int countonly, unsigned long long *totalfreq);
 static void print_help (int exitvalue);
 
 #define MAX_FILES 1024
@@ -361,25 +360,13 @@ int main (int argc, const char *argv[])
 
   if (nmm) {
     GT4WordMap *map1, *map2;
-    int cinf;
     map1 = gt4_word_map_new (fnames[0], VERSION_MAJOR, USE_SCOUTS, 0);
     map2 = gt4_word_map_new (fnames[1], VERSION_MAJOR, USE_SCOUTS, 0);
     if (!map1 || !map2) {
       fprintf (stderr, "Error: Creating the wordmap failed!\n");
       exit (1);
     }
-    cinf = compare_word_map_headers (map1->header, map2->header);
-    if (cinf == -1) {
-      fprintf (stdout, "Error: %s is not a glistmaker v.4 list!\n", map1->filename);
-      exit (1);
-    } else if (cinf == -2) {
-      fprintf (stdout, "Error: %s is not a glistmaker v.4 list!\n", map2->filename);
-      exit (1);
-    } else if (cinf) {
-      print_error_message (cinf);
-      exit (1);
-    }
-    v = compare_wordmaps_mm (map1, map2, find_diff, find_ddiff, subtraction, countonly, outputname, cutoff, nmm, rule);
+    v = compare_wordmaps_mm (objs[0], objs[1], find_diff, find_ddiff, subtraction, countonly, outputname, cutoff, nmm, rule);
     gt4_word_map_delete (map1);
     gt4_word_map_delete (map2);
   } else if (nfiles == 2) {
@@ -488,176 +475,6 @@ write_word_to_file (unsigned long long word, unsigned freq, FILE *f)
   fwrite (&freq, sizeof (unsigned int), 1, f);
 }
                         
-static int
-compare_wordmaps (AZObject *list1, AZObject *list2, int find_union, int find_intrsec, int find_diff, int find_ddiff, int subtract, int countonly, const char *out, unsigned int cutoff, int rule)
-{
-  GT4WordSListImplementation *impl1, *impl2;
-  GT4WordSListInstance *inst1, *inst2;
-  FILE *outf[4] = { 0 };
-  /* the length is limited in main(..) method */
-  char fname[300][4], name[256];
-  GT4ListHeader h_out;
-
-  unsigned long long word1, word2;
-  unsigned int freq1, freq2;
-  unsigned long long c_union = 0L, c_inters = 0L, c_diff1 = 0L, c_diff2 = 0L;
-  unsigned long long freqsum_union = 0L, freqsum_inters = 0L, freqsum_diff1 = 0L, freqsum_diff2 = 0L;
-
-  impl1 = (GT4WordSListImplementation *) az_object_get_interface (list1, GT4_TYPE_WORD_SLIST, (void **) &inst1);
-  impl2 = (GT4WordSListImplementation *) az_object_get_interface (list2, GT4_TYPE_WORD_SLIST, (void **) &inst2);
-
-  if (inst1->word_length != inst2->word_length) {
-    fprintf (stderr, "compare_wordmaps: Word lengths of lists differ: %u != %u\n", inst1->word_length, inst2->word_length);
-    return 1;
-  }
-  
-  if (debug) {
-     fprintf (stderr, "compare_wordmaps: List 1: %llu entries\n", inst1->num_words);
-     fprintf (stderr, "compare_wordmaps; List 2: %llu entries\n", inst2->num_words);
-  }
-
-  /* creating output files */
-  gt4_list_header_init (&h_out, inst1->word_length);
-  if (find_union && !countonly) {
-    sprintf (fname[0], "%s_%d_union.list.tmp", out, inst1->word_length);
-    outf[0] = fopen (fname[0], "w");
-    fwrite (&h_out, sizeof (GT4ListHeader), 1, outf[0]);
-  }
-  if (find_intrsec && !countonly) {
-    sprintf (fname[1], "%s_%d_intrsec.list.tmp", out, inst1->word_length);
-    outf[1] = fopen (fname[1], "w");
-    fwrite (&h_out, sizeof (GT4ListHeader), 1, outf[1]);
-  }
-  if (find_diff && !countonly) {
-    sprintf (fname[2], "%s_%d_0_diff1.list.tmp", out, inst1->word_length);
-    outf[2] = fopen (fname[2], "w");
-    fwrite (&h_out, sizeof (GT4ListHeader), 1, outf[2]);
-  }
-  if (find_ddiff && !countonly) {
-    sprintf (fname[3], "%s_%d_0_diff2.list.tmp", out, inst1->word_length);
-    outf[3] = fopen (fname[3], "w");
-    fwrite (&h_out, sizeof (GT4ListHeader), 1, outf[3]);
-  }
-
-  gt4_word_slist_get_first_word (impl1, inst1);
-  word1 = inst1->word;
-  freq1 = inst1->count;
-  gt4_word_slist_get_first_word (impl2, inst2);
-  word2 = inst2->word;
-  freq2 = inst2->count;
-
-  while ((inst1->idx < inst1->num_words) || (inst2->idx < inst2->num_words)) {
-    unsigned int freq = 0;
-    if ((inst1->idx < inst1->num_words) && (inst2->idx < inst2->num_words) && (word1 == word2)) {
-            /* Two words are equal */
-      if (find_union && include_in_union (freq1, freq2, &freq, rule, cutoff)) {
-        if (!countonly) write_word_to_file (word1, freq, outf[0]);
-        c_union += 1;
-        freqsum_union += freq;
-      }
-      if (find_intrsec && include_in_intersection (freq1, freq2, &freq, rule, cutoff)) {
-        if (!countonly) write_word_to_file (word1, freq, outf[1]);
-        c_inters += 1;
-        freqsum_inters += freq;
-      }
-      if (find_diff && include_in_complement (freq1, freq2, &freq, rule, cutoff, subtract)) {
-        if (!countonly) write_word_to_file (word1, freq, outf[2]);
-        freqsum_diff1 += freq;
-        c_diff1 += 1;
-      }
-      if (find_ddiff && include_in_complement (freq2, freq1, &freq, rule, cutoff, 0)) {
-        if (!countonly) write_word_to_file (word2, freq, outf[3]);
-        freqsum_diff2 += freq;
-        c_diff2 += 1;
-      }
-      gt4_word_slist_get_next_word (impl1, inst1);
-      word1 = inst1->word;
-      freq1 = inst1->count;
-      gt4_word_slist_get_next_word (impl2, inst2);
-      word2 = inst2->word;
-      freq2 = inst2->count;
-    } else if ((inst1->idx < inst1->num_words) && ((inst2->idx >= inst2->num_words) || (word1 < word2))) {
-      /* Second is EOF or first is smaller than second */
-      if (find_union && include_in_union (freq1, 0, &freq, rule, cutoff)) {
-        if (!countonly) write_word_to_file (word1, freq, outf[0]);
-        c_union += 1;
-        freqsum_union += freq;
-      }
-      if (find_diff && include_in_complement (freq1, 0, &freq, rule, cutoff, subtract)) {
-        if (!countonly) write_word_to_file (word1, freq, outf[2]);
-        freqsum_diff1 += freq;
-        c_diff1 += 1;
-        
-      }
-      gt4_word_slist_get_next_word (impl1, inst1);
-      word1 = inst1->word;
-      freq1 = inst1->count;
-    } else if ((inst2->idx < inst2->num_words) && ((inst1->idx >= inst1->num_words) || (word2 < word1))) {
-      /* First is EOF or second is smaller than first */
-      if (find_union && include_in_union (0, freq2, &freq, rule, cutoff)) {
-        if (!countonly) write_word_to_file (word2, freq, outf[0]);
-        c_union += 1;
-        freqsum_union += freq;
-      }
-      if (find_ddiff && include_in_complement (freq2, 0, &freq, rule, cutoff, 0)) {
-        if (!countonly) write_word_to_file (word2, freq, outf[3]);
-        freqsum_diff2 += freq;
-        c_diff2 += 1;
-      }
-      gt4_word_slist_get_next_word (impl2, inst2);
-      word2 = inst2->word;
-      freq2 = inst2->count;
-    }
-  }
-
-  /* add headers and close files */
-  if (find_union && !countonly) {
-    h_out.n_words = c_union;
-    h_out.total_count = freqsum_union;
-    fseek (outf[0], 0, SEEK_SET);
-    fwrite (&h_out, sizeof (GT4ListHeader), 1, outf[0]);
-    fclose (outf[0]);
-    sprintf (name, "%s_%d_union.list", out, inst1->word_length);
-    rename (fname[0], name);
-  } else if (find_union) {
-    fprintf (stdout, "NUnique\t%llu\nNTotal\t%llu\n", c_union, freqsum_union);
-  }
-  if (find_intrsec && !countonly) {
-    h_out.n_words = c_inters;
-    h_out.total_count = freqsum_inters;
-    fseek (outf[1], 0, SEEK_SET);
-    fwrite (&h_out, sizeof (GT4ListHeader), 1, outf[1]);
-    fclose (outf[1]);
-    sprintf (name, "%s_%d_intrsec.list", out, inst1->word_length);
-    rename (fname[1], name);
-  } else if (find_intrsec) {
-    fprintf (stdout, "NUnique\t%llu\nNTotal\t%llu\n", c_inters, freqsum_inters);
-  }
-  if (find_diff && !countonly) {
-    h_out.n_words = c_diff1;
-    h_out.total_count = freqsum_diff1;
-    fseek (outf[2], 0, SEEK_SET);
-    fwrite (&h_out, sizeof (GT4ListHeader), 1, outf[2]);
-    fclose (outf[2]);
-    sprintf (name, "%s_%d_0_diff1.list", out, inst1->word_length);
-    rename (fname[2], name);
-  } else if (find_diff) {
-    fprintf (stdout, "NUnique\t%llu\nNTotal\t%llu\n", c_diff1, freqsum_diff1);
-  }
-  if (find_ddiff && !countonly) {
-    h_out.n_words = c_diff2;
-    h_out.total_count = freqsum_diff2;
-    fseek (outf[3], 0, SEEK_SET);
-    fwrite (&h_out, sizeof (GT4ListHeader), 1, outf[3]);
-    fclose (outf[3]);
-    sprintf (name, "%s_%d_0_diff2.list", out, inst1->word_length);
-    rename (fname[3], name);
-  } else if (find_ddiff) {
-    fprintf (stdout, "NUnique\t%llu\nNTotal\t%llu\n", c_diff2, freqsum_diff2);
-  }
-  return 0;
-}
-
 #define TMP_BUF_SIZE (256 * 12)
 
 static unsigned int
@@ -819,74 +636,227 @@ subset (GT4WordSListImplementation *impl, GT4WordSListInstance *inst, unsigned i
 }
 
 static int
-compare_wordmaps_mm (GT4WordMap *map1, GT4WordMap *map2, int find_diff, int find_ddiff, int subtract, int countonly, const char *out, unsigned int cutoff, unsigned int nmm, int rule)
+compare_wordmaps (AZObject *list1, AZObject *list2, int find_union, int find_intrsec, int find_diff, int find_ddiff, int subtract, int countonly, const char *out, unsigned int cutoff, int rule)
 {
-
+  GT4WordSListImplementation *impl1, *impl2;
+  GT4WordSListInstance *inst1, *inst2;
   FILE *outf[4] = { 0 };
+  /* the length is limited in main(..) method */
+  char fname[300][4], name[256];
   GT4ListHeader h_out;
 
-  unsigned long long i = 0L, j = 0L, word1, word2;
+  unsigned long long word1, word2;
   unsigned int freq1, freq2;
-  unsigned long long c_diff1 = 0L, c_diff2 = 0L;
-  unsigned long long freqsum_diff1 = 0L, freqsum_diff2 = 0L;
-  int cinf, v;
-  char fname[300][2], name[256]; /* the length is limited in main(..) method */
+  unsigned long long c_union = 0L, c_inters = 0L, c_diff1 = 0L, c_diff2 = 0L;
+  unsigned long long freqsum_union = 0L, freqsum_inters = 0L, freqsum_diff1 = 0L, freqsum_diff2 = 0L;
 
-  /* wordtables for -diff and -ddiff in case we want to use mismatches */
-  GT4WordTable tables[2];
-  GT4WordTable *difftable = &tables[0];
-  GT4WordTable *ddifftable = &tables[1];
+  impl1 = (GT4WordSListImplementation *) az_object_get_interface (list1, GT4_TYPE_WORD_SLIST, (void **) &inst1);
+  impl2 = (GT4WordSListImplementation *) az_object_get_interface (list2, GT4_TYPE_WORD_SLIST, (void **) &inst2);
 
-  cinf = compare_word_map_headers (map1->header, map2->header);
-  if (cinf == -1) {
-    fprintf (stdout, "Error: %s is not a glistmaker v.4 list!\n", map1->filename);
-    return 1;
-  }
-  if (cinf == -2) {
-    fprintf (stdout, "Error: %s is not a glistmaker v.4 list!\n", map2->filename);
-    return 1;
-  }
-  if (cinf) v = print_error_message (cinf);
-  else v = 0;
-  if (v) return v;
-
-  /* filling wordtables */
-  memset (difftable, 0, sizeof (GT4WordTable));
-  memset (ddifftable, 0, sizeof (GT4WordTable));
-  if (nmm && find_diff) {
-    difftable->wordlength = map1->header->word_length;
-  }
-  if (nmm && find_ddiff) {
-    ddifftable->wordlength = map2->header->word_length;
+  if (debug) {
+     fprintf (stderr, "compare_wordmaps: List 1: %llu entries\n", inst1->num_words);
+     fprintf (stderr, "compare_wordmaps; List 2: %llu entries\n", inst2->num_words);
   }
 
   /* creating output files */
+  gt4_list_header_init (&h_out, inst1->word_length);
+  if (find_union && !countonly) {
+    sprintf (fname[0], "%s_%d_union.list.tmp", out, inst1->word_length);
+    outf[0] = fopen (fname[0], "w");
+    fwrite (&h_out, sizeof (GT4ListHeader), 1, outf[0]);
+  }
+  if (find_intrsec && !countonly) {
+    sprintf (fname[1], "%s_%d_intrsec.list.tmp", out, inst1->word_length);
+    outf[1] = fopen (fname[1], "w");
+    fwrite (&h_out, sizeof (GT4ListHeader), 1, outf[1]);
+  }
   if (find_diff && !countonly) {
-    sprintf (fname[0], "%s_%d_%d_diff1.list.tmp", out, map1->header->word_length, nmm);
-    outf[2] = fopen (fname[0], "w");
+    sprintf (fname[2], "%s_%d_0_diff1.list.tmp", out, inst1->word_length);
+    outf[2] = fopen (fname[2], "w");
     fwrite (&h_out, sizeof (GT4ListHeader), 1, outf[2]);
   }
   if (find_ddiff && !countonly) {
-    sprintf (fname[1], "%s_%d_%d_diff2.list.tmp", out, map1->header->word_length, nmm);
-    outf[3] = fopen (fname[1], "w");
+    sprintf (fname[3], "%s_%d_0_diff2.list.tmp", out, inst1->word_length);
+    outf[3] = fopen (fname[3], "w");
     fwrite (&h_out, sizeof (GT4ListHeader), 1, outf[3]);
   }
 
-  word1 = *((unsigned long long *) (map1->wordlist + i * WORDMAP_ELEMENT_SIZE));
-  word2 = *((unsigned long long *) (map2->wordlist + j * WORDMAP_ELEMENT_SIZE));
-  freq1 = *((unsigned int *) (map1->wordlist + i * WORDMAP_ELEMENT_SIZE + sizeof (unsigned long long)));
-  freq2 = *((unsigned int *) (map2->wordlist + j * WORDMAP_ELEMENT_SIZE + sizeof (unsigned long long)));
+  gt4_word_slist_get_first_word (impl1, inst1);
+  word1 = inst1->word;
+  freq1 = inst1->count;
+  gt4_word_slist_get_first_word (impl2, inst2);
+  word2 = inst2->word;
+  freq2 = inst2->count;
+
+  while ((inst1->idx < inst1->num_words) || (inst2->idx < inst2->num_words)) {
+    unsigned int freq = 0;
+    if ((inst1->idx < inst1->num_words) && (inst2->idx < inst2->num_words) && (word1 == word2)) {
+      /* Two words are equal */
+      if (find_union && include_in_union (freq1, freq2, &freq, rule, cutoff)) {
+        if (!countonly) write_word_to_file (word1, freq, outf[0]);
+        c_union += 1;
+        freqsum_union += freq;
+      }
+      if (find_intrsec && include_in_intersection (freq1, freq2, &freq, rule, cutoff)) {
+        if (!countonly) write_word_to_file (word1, freq, outf[1]);
+        c_inters += 1;
+        freqsum_inters += freq;
+      }
+      if (find_diff && include_in_complement (freq1, freq2, &freq, rule, cutoff, subtract)) {
+        if (!countonly) write_word_to_file (word1, freq, outf[2]);
+        freqsum_diff1 += freq;
+        c_diff1 += 1;
+      }
+      if (find_ddiff && include_in_complement (freq2, freq1, &freq, rule, cutoff, 0)) {
+        if (!countonly) write_word_to_file (word2, freq, outf[3]);
+        freqsum_diff2 += freq;
+        c_diff2 += 1;
+      }
+      gt4_word_slist_get_next_word (impl1, inst1);
+      word1 = inst1->word;
+      freq1 = inst1->count;
+      gt4_word_slist_get_next_word (impl2, inst2);
+      word2 = inst2->word;
+      freq2 = inst2->count;
+    } else if ((inst1->idx < inst1->num_words) && ((inst2->idx >= inst2->num_words) || (word1 < word2))) {
+      /* Second is EOF or first is smaller than second */
+      if (find_union && include_in_union (freq1, 0, &freq, rule, cutoff)) {
+        if (!countonly) write_word_to_file (word1, freq, outf[0]);
+        c_union += 1;
+        freqsum_union += freq;
+      }
+      if (find_diff && include_in_complement (freq1, 0, &freq, rule, cutoff, subtract)) {
+        if (!countonly) write_word_to_file (word1, freq, outf[2]);
+        freqsum_diff1 += freq;
+        c_diff1 += 1;
+        
+      }
+      gt4_word_slist_get_next_word (impl1, inst1);
+      word1 = inst1->word;
+      freq1 = inst1->count;
+    } else if ((inst2->idx < inst2->num_words) && ((inst1->idx >= inst1->num_words) || (word2 < word1))) {
+      /* First is EOF or second is smaller than first */
+      if (find_union && include_in_union (0, freq2, &freq, rule, cutoff)) {
+        if (!countonly) write_word_to_file (word2, freq, outf[0]);
+        c_union += 1;
+        freqsum_union += freq;
+      }
+      if (find_ddiff && include_in_complement (freq2, 0, &freq, rule, cutoff, 0)) {
+        if (!countonly) write_word_to_file (word2, freq, outf[3]);
+        freqsum_diff2 += freq;
+        c_diff2 += 1;
+      }
+      gt4_word_slist_get_next_word (impl2, inst2);
+      word2 = inst2->word;
+      freq2 = inst2->count;
+    }
+  }
+
+  /* add headers and close files */
+  if (find_union && !countonly) {
+    h_out.n_words = c_union;
+    h_out.total_count = freqsum_union;
+    fseek (outf[0], 0, SEEK_SET);
+    fwrite (&h_out, sizeof (GT4ListHeader), 1, outf[0]);
+    fclose (outf[0]);
+    sprintf (name, "%s_%d_union.list", out, inst1->word_length);
+    rename (fname[0], name);
+  } else if (find_union) {
+    fprintf (stdout, "NUnique\t%llu\nNTotal\t%llu\n", c_union, freqsum_union);
+  }
+  if (find_intrsec && !countonly) {
+    h_out.n_words = c_inters;
+    h_out.total_count = freqsum_inters;
+    fseek (outf[1], 0, SEEK_SET);
+    fwrite (&h_out, sizeof (GT4ListHeader), 1, outf[1]);
+    fclose (outf[1]);
+    sprintf (name, "%s_%d_intrsec.list", out, inst1->word_length);
+    rename (fname[1], name);
+  } else if (find_intrsec) {
+    fprintf (stdout, "NUnique\t%llu\nNTotal\t%llu\n", c_inters, freqsum_inters);
+  }
+  if (find_diff && !countonly) {
+    h_out.n_words = c_diff1;
+    h_out.total_count = freqsum_diff1;
+    fseek (outf[2], 0, SEEK_SET);
+    fwrite (&h_out, sizeof (GT4ListHeader), 1, outf[2]);
+    fclose (outf[2]);
+    sprintf (name, "%s_%d_0_diff1.list", out, inst1->word_length);
+    rename (fname[2], name);
+  } else if (find_diff) {
+    fprintf (stdout, "NUnique\t%llu\nNTotal\t%llu\n", c_diff1, freqsum_diff1);
+  }
+  if (find_ddiff && !countonly) {
+    h_out.n_words = c_diff2;
+    h_out.total_count = freqsum_diff2;
+    fseek (outf[3], 0, SEEK_SET);
+    fwrite (&h_out, sizeof (GT4ListHeader), 1, outf[3]);
+    fclose (outf[3]);
+    sprintf (name, "%s_%d_0_diff2.list", out, inst1->word_length);
+    rename (fname[3], name);
+  } else if (find_ddiff) {
+    fprintf (stdout, "NUnique\t%llu\nNTotal\t%llu\n", c_diff2, freqsum_diff2);
+  }
+  return 0;
+}
+
+static int
+compare_wordmaps_mm (AZObject *list1, AZObject *list2, int find_diff, int find_ddiff, int subtract, int countonly, const char *out, unsigned int cutoff, unsigned int nmm, int rule)
+{
+  GT4WordSListImplementation *impl1, *impl2;
+  GT4WordSListInstance *inst1, *inst2;
+  GT4WordTable tbl_diff, tbl_ddiff;
+  FILE *outf[4] = { 0 };
+  GT4ListHeader h_out;
+  unsigned long long word1, word2;
+  unsigned int freq1, freq2;
+  unsigned long long c_diff1 = 0L, c_diff2 = 0L;
+  unsigned long long freqsum_diff1 = 0L, freqsum_diff2 = 0L;
+  /* the length is limited in main(..) method */
+  char fname[2][300], name[256];
+
+  impl1 = (GT4WordSListImplementation *) az_object_get_interface (list1, GT4_TYPE_WORD_SLIST, (void **) &inst1);
+  impl2 = (GT4WordSListImplementation *) az_object_get_interface (list2, GT4_TYPE_WORD_SLIST, (void **) &inst2);
 
   if (debug) {
-    fprintf (stderr, "Table 1: %llu entries\n", map1->header->n_words);
-    fprintf (stderr, "Table 2: %llu entries\n", map2->header->n_words);
-        }
-  while (i < map1->header->n_words || j < map2->header->n_words) {
+     fprintf (stderr, "compare_wordmaps: List 1: %llu entries\n", inst1->num_words);
+     fprintf (stderr, "compare_wordmaps; List 2: %llu entries\n", inst2->num_words);
+  }
+
+  gt4_list_header_init (&h_out, inst1->word_length);
+  if (find_diff) {
+    gt4_word_table_setup (&tbl_diff, inst1->word_length, 16384, 4);
+    if (!countonly) {
+      sprintf (fname[0], "%s_%d_%d_diff1.list.tmp", out, inst1->word_length, nmm);
+      outf[2] = fopen (fname[0], "w");
+      fwrite (&h_out, sizeof (GT4ListHeader), 1, outf[2]);
+    }
+  }
+  if (find_ddiff) {
+    gt4_word_table_setup (&tbl_ddiff, inst1->word_length, 16384, 4);
+    if (!countonly) {
+      sprintf (fname[1], "%s_%d_%d_diff2.list.tmp", out, inst1->word_length, nmm);
+      outf[3] = fopen (fname[1], "w");
+      fwrite (&h_out, sizeof (GT4ListHeader), 1, outf[3]);
+    }
+  }
+
+  gt4_word_slist_get_first_word (impl1, inst1);
+  word1 = inst1->word;
+  freq1 = inst1->count;
+  gt4_word_slist_get_first_word (impl2, inst2);
+  word2 = inst2->word;
+  freq2 = inst2->count;
+
+  if (debug) {
+    fprintf (stderr, "Table 1: %llu entries\n", inst1->num_words);
+    fprintf (stderr, "Table 2: %llu entries\n", inst2->num_words);
+  }
+  while ((inst1->idx < inst1->num_words) || (inst2->idx < inst2->num_words)) {
     unsigned int first_ge_cutoff = (freq1 >= cutoff);
     unsigned int second_ge_cutoff = (freq2 >= cutoff);
-
-    if (word1 == word2) {
-            /* Two words are equal */
+    if ((inst1->idx < inst1->num_words) && (inst2->idx < inst2->num_words) && (word1 == word2)) {
+      /* Two words are equal */
       if (find_diff) {
         if (subtract) {
           if (freq1 <= freq2) {
@@ -895,72 +865,61 @@ compare_wordmaps_mm (GT4WordMap *map1, GT4WordMap *map2, int find_diff, int find
         }
         if (first_ge_cutoff && !second_ge_cutoff) {
           unsigned int freq = freq1 - freq2;
-          gt4_word_table_add_word (difftable, word1, &freq);
+          gt4_word_table_add_word (&tbl_diff, word1, &freq);
           c_diff1 += 1;
         }
       }
       if (find_ddiff && second_ge_cutoff && !first_ge_cutoff) {
         unsigned int freq = freq2 - freq1;
-        gt4_word_table_add_word (ddifftable, word2, &freq);
+        gt4_word_table_add_word (&tbl_ddiff, word2, &freq);
         c_diff2 += 1;
       }
-
-    /* first word is smaller */
-    } else if (word1 < word2) {
+      gt4_word_slist_get_next_word (impl1, inst1);
+      word1 = inst1->word;
+      freq1 = inst1->count;
+      gt4_word_slist_get_next_word (impl2, inst2);
+      word2 = inst2->word;
+      freq2 = inst2->count;
+    } else if ((inst1->idx < inst1->num_words) && ((inst2->idx >= inst2->num_words) || (word1 < word2))) {
+      /* Second is EOF or first is smaller than second */
       if (find_diff && first_ge_cutoff && !subtract) {
-        gt4_word_table_add_word (difftable, word1, &freq1);
+        gt4_word_table_add_word (&tbl_diff, word1, &freq1);
         c_diff1 += 1;
-        
       }
-    /* second word is smaller */
-    } else {
+      gt4_word_slist_get_next_word (impl1, inst1);
+      word1 = inst1->word;
+      freq1 = inst1->count;
+    } else if ((inst2->idx < inst2->num_words) && ((inst1->idx >= inst1->num_words) || (word2 < word1))) {
+      /* First is EOF or second is smaller than first */
       if (find_ddiff && second_ge_cutoff) {
-        gt4_word_table_add_word (ddifftable, word2, &freq2);
+        gt4_word_table_add_word (&tbl_ddiff, word2, &freq2);
         c_diff2 += 1;
       }
-    }
-    /* advance relevant indices */
-    if (word1 <= word2) {
-      i += 1;
-      if (i < map1->header->n_words) {
-        word1 = *((unsigned long long *) (map1->wordlist + i * WORDMAP_ELEMENT_SIZE));
-        freq1 = *((unsigned int *) (map1->wordlist + i * WORDMAP_ELEMENT_SIZE + sizeof (unsigned long long)));
-      } else {
-        word1 = ~0L;
-        freq1 = 0;
-      }
-    }
-    if (word2 <= word1) {
-      j += 1;
-      if (j < map2->header->n_words) {
-        word2 = *((unsigned long long *) (map2->wordlist + j * WORDMAP_ELEMENT_SIZE));
-        freq2 = *((unsigned int *) (map2->wordlist + j * WORDMAP_ELEMENT_SIZE + sizeof (unsigned long long)));
-      } else {
-        word2 = ~0L;
-        freq2 = 0;
-      }
+      gt4_word_slist_get_next_word (impl2, inst2);
+      word2 = inst2->word;
+      freq2 = inst2->count;
     }
   }
 
   /* finding the mismatches */
   if (find_diff) {
-    if (debug > 0) fprintf (stderr, "Finding diff with mismatches (%llu entries)\n", difftable->n_words);
-    c_diff1 = fetch_relevant_words (difftable, map2, map1, cutoff, nmm, outf[2], subtract, countonly, &freqsum_diff1);
+    if (debug > 0) {
+      fprintf (stderr, "Finding diff with mismatches (%llu entries)\n", tbl_diff.n_words);
+    }
+    c_diff1 = fetch_relevant_words (&tbl_diff, list2, list1, cutoff, nmm, outf[2], subtract, countonly, &freqsum_diff1);
   }
   if (find_ddiff) {
-    c_diff2 = fetch_relevant_words (ddifftable, map1, NULL, cutoff, nmm, outf[3], subtract, countonly, &freqsum_diff2);
+    c_diff2 = fetch_relevant_words (&tbl_ddiff, list1, NULL, cutoff, nmm, outf[3], subtract, countonly, &freqsum_diff2);
   }
 
-  gt4_list_header_init (&h_out, map1->header->word_length);
-
-  /* add headers and close files */
+  /* Add headers and close files */
   if (find_diff && !countonly) {
     h_out.n_words = c_diff1;
     h_out.total_count = freqsum_diff1;
     fseek (outf[2], 0, SEEK_SET);
     fwrite (&h_out, sizeof (GT4ListHeader), 1, outf[2]);
     fclose (outf[2]);
-    sprintf (name, "%s_%d_%d_diff1.list", out, map1->header->word_length, nmm);
+    sprintf (name, "%s_%d_%d_diff1.list", out, inst1->word_length, nmm);
     rename (fname[0], name);
   } else if (find_diff) {
     fprintf (stdout, "NUnique\t%llu\nNTotal\t%llu\n", c_diff1, freqsum_diff1);
@@ -971,35 +930,74 @@ compare_wordmaps_mm (GT4WordMap *map1, GT4WordMap *map2, int find_diff, int find
     fseek (outf[3], 0, SEEK_SET);
     fwrite (&h_out, sizeof (GT4ListHeader), 1, outf[3]);
     fclose (outf[3]);
-    sprintf (name, "%s_%d_%d_diff2.list", out, map1->header->word_length, nmm);
-    rename (fname[0], name);
+    sprintf (name, "%s_%d_%d_diff2.list", out, inst1->word_length, nmm);
+    rename (fname[1], name);
   } else if (find_ddiff) {
     fprintf (stdout, "NUnique\t%llu\nNTotal\t%llu\n", c_diff2, freqsum_diff2);
   }
   return 0;
 }
 
-static unsigned long long
-fetch_relevant_words (GT4WordTable *table, GT4WordMap *map, GT4WordMap *querymap, unsigned int cutoff, unsigned int nmm, FILE *f, int subtract, int countonly, unsigned long long *totalfreq)
+static unsigned int 
+search_query (GT4WordDictImplementation *impl_m, GT4WordDictInstance *inst_m, unsigned long long query, unsigned int n_mm, unsigned int equalmmonly,
+  unsigned int dosubtraction, GT4WordDictImplementation *impl_q, GT4WordDictInstance *inst_q)
 {
+  static GT4WordTable mm_table = {0};
+  unsigned long long i;
+  unsigned int count = 0L, currentcount = 0L, querycount = 0L;
+
+  if (!mm_table.data_size) {
+    gt4_word_table_setup (&mm_table, inst_m->word_length, 16384, 0);
+  }
+
+  gt4_word_table_generate_mismatches (&mm_table, query, NULL, n_mm, 0, 0, 0, equalmmonly);
+  if (debug_wordmap > 1) {
+    fprintf (stderr, "MM Table size %llu\n", mm_table.n_words);
+  }
+
+  for (i = 0; i < mm_table.n_words; i++) {
+    if (dosubtraction) {
+      querycount = gt4_word_dict_lookup (impl_q, inst_q, mm_table.words[i], 1);
+      currentcount = gt4_word_dict_lookup (impl_m, inst_m, mm_table.words[i], 1);
+      if (currentcount > querycount) {
+        if (debug_wordmap > 1) {
+          fprintf (stderr, "%llu %llu %llu querycount %u currentcount %u\n", query, i, mm_table.words[i], querycount, currentcount);
+        }
+        mm_table.n_words = 0;
+        return ~0L;
+      }
+      count += (currentcount - querycount);
+    } else {
+      currentcount = gt4_word_dict_lookup (impl_m, inst_m, mm_table.words[i], 1);
+      count += currentcount;
+    }
+  }
+  gt4_word_table_clear (&mm_table);
+  return count;
+}
+
+static unsigned long long
+fetch_relevant_words (GT4WordTable *table, AZObject *map, AZObject *querymap, unsigned int cutoff, unsigned int nmm, FILE *f, int subtract, int countonly, unsigned long long *totalfreq)
+{
+  GT4WordDictImplementation *impl_q = NULL, *impl_m;
+  GT4WordDictInstance *inst_q = NULL, *inst_m;
   unsigned long long ri, wi, word, sumfreq = 0L, count = 0L;
   unsigned int freq, cnmm;
   unsigned int *freqs = (unsigned int *) table->data;
 
   if (table->n_words == 0) return 0;
+  impl_m = (GT4WordDictImplementation *) az_object_get_interface (map, GT4_TYPE_WORD_DICT, (void **) &inst_m);
+  if (querymap) impl_q = (GT4WordDictImplementation *) az_object_get_interface (querymap, GT4_TYPE_WORD_DICT, (void **) &inst_q);
 
   for (cnmm = 1; cnmm <= nmm; cnmm++) {
-    wi = 0L;
-
-    for (ri = 0L; ri < table->n_words; ri++) {
-            if (debug > 2) {
-              fprintf (stderr, "cnmm %u ri %llu wi %llu\n", cnmm, ri, wi);
-            }
+    wi = 0;
+    for (ri = 0; ri < table->n_words; ri++) {
+      if (debug > 2) {
+        fprintf (stderr, "cnmm %u ri %llu wi %llu\n", cnmm, ri, wi);
+      }
       word = table->words[ri];
       freq = freqs[ri];      
-      sumfreq = word_map_search_query (map, word, cnmm, 0, 0, 1, subtract, querymap);
-      
-      
+      sumfreq = search_query (impl_m, inst_m, word, cnmm, 1, subtract, impl_q, inst_q);
       if (cnmm == nmm && sumfreq < cutoff) {
         if (!countonly) write_word_to_file (word, freq, f);
         count += 1;
@@ -1010,22 +1008,10 @@ fetch_relevant_words (GT4WordTable *table, GT4WordMap *map, GT4WordMap *querymap
         freqs[wi] = freq;
         wi += 1;
       }
-
     }
     table->n_words = wi;
   }
   return count;
-}
-
-static int
-compare_word_map_headers (GT4ListHeader *h1, GT4ListHeader *h2)
-{
-  if (h1->code != GT4_LIST_CODE) return -1;
-  if (h2->code != GT4_LIST_CODE) return -2;
-  if (h1->word_length != h2->word_length) return GT_INCOMPATIBLE_WORDLENGTH_ERROR;
-  if (h1->version_major != h2->version_major) return GT_INCOMPATIBLE_VERSION_WARNING;
-  if (h1->version_minor != h2->version_minor) return GT_INCOMPATIBLE_VERSION_WARNING;
-  return 0;
 }
 
 static void
