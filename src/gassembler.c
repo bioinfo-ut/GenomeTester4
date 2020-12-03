@@ -684,7 +684,7 @@ print_usage (FILE *ofs, unsigned int advanced, int exit_value)
     fprintf (ofs, "    --extra                          - output extra information about call\n");
     fprintf (ofs, "    --alternatives                   - output also homozygous variant for each heterozygous position\n");
     fprintf (ofs, "    --max_read_length INTEGER        - maximum length of reads (default %u)\n", max_read_length);
-    fprintf (ofs, "    --max_reference_length INTEGER   - maximum length of reference region (default %u)\n", max_divergent);
+    fprintf (ofs, "    --max_reference_length INTEGER   - maximum length of reference region (default %u)\n", max_reference_length);
     fprintf (ofs, "    --prefetch_seq                   - Prefetch FastQ sequences (slightly faster but uses more virtual memory/IO)\n");
     fprintf (ofs, "    --dont_prefetch_db               - Do not prefetch index (much slower but uses less memory/IO)\n");
     fprintf (ofs, "    -D                               - increase debug level\n");
