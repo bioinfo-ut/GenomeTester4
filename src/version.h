@@ -25,8 +25,8 @@
  */
 
 #define VERSION_MAJOR 4
-#define VERSION_MINOR 1
-#define VERSION_MICRO 29
-#define VERSION_QUALIFIER "unstable"
+#define VERSION_MINOR 2
+#define VERSION_MICRO 0
+#define VERSION_QUALIFIER "prerelease"
 
 #endif
