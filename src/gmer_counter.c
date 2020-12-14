@@ -103,7 +103,8 @@ print_usage (FILE *ofs) {
   fprintf (ofs, "    -w FILENAME      - write binary database to file\n");
   fprintf (ofs, "    -32              - use 32-bit integeres for counts (default 16-bit)\n");
   fprintf (ofs, "    --max_kmers NUM  - maximum number of kmers per node\n");
-  fprintf (ofs, "    --silent         - do not output kmer counts (useful if only compiling db or index is needed\n");
+  fprintf (ofs, "    --silent         - do not print kmer counts (default for index and binary database compilation)\n");
+  fprintf (ofs, "    --verbose        - print kmer counts (default for counting)\n");
   fprintf (ofs, "    --header         - print header row\n");
   fprintf (ofs, "    --total          - print the total number of kmers per node\n");
   fprintf (ofs, "    --unique         - print the number of nonzero kmers per node\n");
@@ -131,7 +132,7 @@ main (int argc, const char *argv[])
   const char *dbb = NULL;
   const char *wdb = NULL;
   unsigned int max_kmers_per_node = 1000000000;
-  unsigned int silent = 0, big = 0, dm = 0;
+  unsigned int silent = 0, verbose = 0, big = 0, dm = 0;
   unsigned int lowmem = 1;
   unsigned int nseqs = 0;
   const char *seqnames[1024];
@@ -183,6 +184,8 @@ main (int argc, const char *argv[])
       max_kmers_per_node = strtol (argv[i], NULL, 10);
     } else if (!strcmp (argv[i], "--silent")) {
       silent = 1;
+    } else if (!strcmp (argv[i], "--verbose")) {
+      verbose = 1;
     } else if (!strcmp (argv[i], "--header")) {
       header = 1;
     } else if (!strcmp (argv[i], "--total")) {
@@ -258,6 +261,9 @@ main (int argc, const char *argv[])
     print_usage (stderr);
     exit (1);
   }
+  if (index_name && !verbose) {
+    silent = 1;
+  }
   if (!total && !unique && !distro) {
     kmers = 1;
   }
@@ -323,9 +329,7 @@ main (int argc, const char *argv[])
   if (wdb) {
     /* Write binary database */
     FILE *ofs;
-    if (debug) {
-      fprintf (stderr, "Writing binary database to %s\n", wdb);
-    }
+    if (debug) fprintf (stderr, "Writing binary database to %s\n", wdb);
     ofs = (fopen (wdb, "w+"));
     if (!ofs) {
       fprintf (stderr, "Cannot open %s for writing\n", wdb);

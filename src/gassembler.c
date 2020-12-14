@@ -647,27 +647,27 @@ static void
 print_usage (FILE *ofs, unsigned int advanced, int exit_value)
 {
   fprintf (ofs, "gassembler version %u.%u.%u (%s)\n", VERSION_MAJOR, VERSION_MINOR, VERSION_MICRO, VERSION_QUALIFIER);
-  fprintf (ofs, "Usage: gassembler [OPTIONS] [KMERS...]\n");
-  fprintf (ofs, "Options:\n");
-  fprintf (ofs, "    -v, --version                      - print version information and exit\n");
-  fprintf (ofs, "    -h, --help                         - print this usage screen and exit\n");
-  fprintf (ofs, "    --dbi FILENAME                      - index of sequenced reads\n");
-  fprintf (ofs, "    --seq_dir DIRECTORY                - directory of fastq files (overrides location in index)\n");
-  fprintf (ofs, "    --region CHR START END SEQ         - reference region to be called\n");
-  fprintf (ofs, "    --region_file FILENAME             - read reference region and kmers from file (one line at time)\n");
-  fprintf (ofs, "    --min_coverage INTEGER             - minimum coverage for a call (default %u)\n", min_coverage);
-  fprintf (ofs, "    --sex male|female|auto             - sex of the individual (default auto)\n");
+  fprintf (ofs, "Usage: gassembler --dbi FILENAME --region_file FILENAME [ARGUMENTS]\n");
+  fprintf (ofs, "Common options:\n");
+  fprintf (ofs, "    -v, --version                    - print version information and exit\n");
+  fprintf (ofs, "    -h, --help                       - print this usage screen and exit\n");
+  fprintf (ofs, "    --dbi FILENAME                   - index of sequenced reads (mandatory)\n");
+  fprintf (ofs, "    --region_file FILENAME           - reference and kmer database (mandatory)\n");
+  fprintf (ofs, "    --sex male|female|auto           - sex of the individual (default auto)\n");
   fprintf (ofs, "    --coverage FLOAT | median | local | ignore - average sequencing depth (default - median, local - use local number of reads)\n");
-  fprintf (ofs, "    --num_threads                      - number of threads to use (default %u)\n", n_threads);
-  fprintf (ofs, "    --min_p FLOAT                      - minimum call quality (default %.2f)\n", min_p);
-  fprintf (ofs, "    --min_pmut FLOAT                   - minimum reference call quality (default %.2f)\n", min_pmut);
-  fprintf (ofs, "    --exome                            - Disable quality models (needed if coverage variability is high)\n");
-  fprintf (ofs, "    --advanced                         - print advanced usage options\n");
+  fprintf (ofs, "    --num_threads                    - number of threads to use (default %u)\n", n_threads);
+  fprintf (ofs, "    --min_p FLOAT                    - minimum call quality (default %.2f)\n", min_p);
+  fprintf (ofs, "    --min_pmut FLOAT                 - minimum reference call quality (default %.2f)\n", min_pmut);
+  fprintf (ofs, "    --exome                          - Disable quality models (needed if coverage variability is high)\n");
+  fprintf (ofs, "    --advanced                       - print advanced usage options\n");
   if (advanced) {
     fprintf (ofs, "Advanced options:\n");
-    fprintf (ofs, "    --snvs FILENAME                  - gmer_caller called SNVs\n");
-    fprintf (ofs, "    --fp FILENAME                    - List of known false positives\n");
-    fprintf (ofs, "    --error_prob FLOAT               - Probability of error (default %f)\n", error_prob);
+    fprintf (ofs, "    --seq_dir DIRECTORY              - directory of fastq files (overrides location in index)\n");
+    fprintf (ofs, "    --region CHR START END SEQ       - call single reference region\n");
+    fprintf (ofs, "    --min_coverage INTEGER           - minimum coverage for a call (default %u)\n", min_coverage);
+    fprintf (ofs, "    --output poly | best | all       - output type (only polymorphisms, best calls for positon, all calls) (default poly)\n");
+    fprintf (ofs, "    --counts                         - output nucleotide counts\n");
+    fprintf (ofs, "    --extra                          - output extra information about call\n");
     fprintf (ofs, "    --min_confirming INTEGER         - minimum confirming nucleotide count for a call (default %u)\n", min_confirming);
     fprintf (ofs, "    --min_group_coverage INTEGER     - minimum coverage of group (default %u)\n", min_group_coverage);
     fprintf (ofs, "    --max_divergent INTEGER          - maximum number of mismatches per read (default %u)\n", max_divergent);
@@ -679,16 +679,18 @@ print_usage (FILE *ofs, unsigned int advanced, int exit_value)
     fprintf (ofs, "    --skip_end_align INTEGER         - skip nucleotides at region ends during alignment (default %u)\n", skip_end_align);
     fprintf (ofs, "    --skip_end_call INTEGER          - skip nucleotides at alignment ends (default %u)\n", skip_end_call);
     fprintf (ofs, "    --allow_one_dir                  - Allow calling if all confirming reads have the same dir\n");
-    fprintf (ofs, "    --output poly | best | all       - output type (only polymorphisms, best calls for positon, all calls) (default poly)\n");
-    fprintf (ofs, "    --counts                         - output nucleotide counts\n");
-    fprintf (ofs, "    --extra                          - output extra information about call\n");
     fprintf (ofs, "    --alternatives                   - output also homozygous variant for each heterozygous position\n");
     fprintf (ofs, "    --max_read_length INTEGER        - maximum length of reads (default %u)\n", max_read_length);
     fprintf (ofs, "    --max_reference_length INTEGER   - maximum length of reference region (default %u)\n", max_reference_length);
+    fprintf (ofs, "    --error_prob FLOAT               - Probability of error (default %f)\n", error_prob);
     fprintf (ofs, "    --prefetch_seq                   - Prefetch FastQ sequences (slightly faster but uses more virtual memory/IO)\n");
     fprintf (ofs, "    --dont_prefetch_db               - Do not prefetch index (much slower but uses less memory/IO)\n");
     fprintf (ofs, "    -D                               - increase debug level\n");
     fprintf (ofs, "    -DG                              - increase group debug level\n");
+    /*
+     * fprintf (ofs, "    --snvs FILENAME                  - gmer_caller called SNVs\n");
+     * fprintf (ofs, "    --fp FILENAME                    - List of known false positives\n");
+     */
   }
   exit (exit_value);
 }
@@ -915,6 +917,9 @@ main (int argc, const char *argv[])
 
   /* Check arguments */
   if (!db_name) {
+    print_usage (stderr, 0, 1);
+  }
+  if (!input_name && !ref) {
     print_usage (stderr, 0, 1);
   }
 
