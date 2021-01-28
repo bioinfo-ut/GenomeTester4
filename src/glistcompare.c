@@ -50,8 +50,7 @@ enum Rules {
   RULE_MAX,
   RULE_FIRST,
   RULE_SECOND,
-  RULE_ONE,
-  RULE_TWO
+  RULE_NUMBER
 };
 
 enum SubsetMethods {
@@ -79,6 +78,7 @@ int debug = 0;
 
 unsigned int use_scouts = 1;
 unsigned int stream = 0;
+static unsigned int count_override = 1;
 
 int main (int argc, const char *argv[])
 {
@@ -166,25 +166,24 @@ int main (int argc, const char *argv[])
       if (arg_idx >= argc) {
         print_help (1);
       }
-      if (!strcmp (argv[arg_idx], "default")) {
+      if ((*argv[arg_idx] >= '1') && (*argv[arg_idx] <= '9')) {
+        rule = RULE_NUMBER;
+        count_override = strtol (argv[arg_idx], &end, 10);
+      } else if (!strcmp (argv[arg_idx], "default")) {
         rule = RULE_DEFAULT;
-                        } else if (!strcmp (argv[arg_idx], "add")) {
+      } else if (!strcmp (argv[arg_idx], "add")) {
         rule = RULE_ADD;
-                        } else if (!strcmp (argv[arg_idx], "subtract")) {
+      } else if (!strcmp (argv[arg_idx], "subtract")) {
         rule = RULE_SUBTRACT;
-                        } else if (!strcmp (argv[arg_idx], "min")) {
+      } else if (!strcmp (argv[arg_idx], "min")) {
         rule = RULE_MIN;
-                        } else if (!strcmp (argv[arg_idx], "max")) {
+      } else if (!strcmp (argv[arg_idx], "max")) {
         rule = RULE_MAX;
-                        } else if (!strcmp (argv[arg_idx], "first")) {
+      } else if (!strcmp (argv[arg_idx], "first")) {
         rule = RULE_FIRST;
-                        } else if (!strcmp (argv[arg_idx], "second")) {
+      } else if (!strcmp (argv[arg_idx], "second")) {
         rule = RULE_SECOND;        
-                        } else if (!strcmp (argv[arg_idx], "1")) {
-        rule = RULE_ONE;        
-                        } else if (!strcmp (argv[arg_idx], "2")) {
-        rule = RULE_TWO;        
-                        }
+      }
     } else if (!strcmp (argv[arg_idx], "-ss") || !strcmp (argv[arg_idx], "--subset")) {
       find_subset = 1;
       arg_idx += 1;
@@ -415,10 +414,8 @@ calculate_freq (unsigned int freq1, unsigned int freq2, int rule)
     return freq1;
   case RULE_SECOND:
     return freq2;
-  case RULE_ONE:
-    return 1;
-  case RULE_TWO:
-    return 2;
+  case RULE_NUMBER:
+    return count_override;
   default:
     break;
   }

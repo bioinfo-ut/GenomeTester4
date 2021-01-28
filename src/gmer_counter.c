@@ -138,6 +138,7 @@ main (int argc, const char *argv[])
   const char *seqnames[1024];
   unsigned long long i;
   double start_time, last_time;
+  unsigned int export_reads = 0;
 
   unsigned int nthreads = DEFAULT_NUM_THREADS;
   SNPQueue snpq;
@@ -206,6 +207,8 @@ main (int argc, const char *argv[])
         exit (1);
       }
       index_name = argv[i];
+    } else if (!strcmp (argv[i], "--export_reads")) {
+      export_reads = 1;
     } else if (!strcmp (argv[i], "--distribution")) {
       i += 1;
       if (i >= argc) {
@@ -354,7 +357,7 @@ main (int argc, const char *argv[])
     snpq.n_free_tables = DEFAULT_NUM_TABLES;
     snpq.free_tables = (SNPTable **) malloc (DEFAULT_NUM_TABLES * sizeof (SNPTable *));
     for (i = 0; i < DEFAULT_NUM_TABLES; i++) {
-      snpq.free_tables[i] = snp_table_new (index_name != NULL);
+      snpq.free_tables[i] = snp_table_new (index_name || export_reads);
     }
     snpq.full_tables = (SNPTable **) malloc (DEFAULT_NUM_TABLES * sizeof (SNPTable *));
     /* Read files */
@@ -406,6 +409,9 @@ main (int argc, const char *argv[])
       last_time = get_time();
     }
 
+    if (export_reads) {
+    }
+  
     if (!silent) {
       print_counts (&snpq, db);
     }
