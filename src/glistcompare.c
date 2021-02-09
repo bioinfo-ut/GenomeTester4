@@ -67,7 +67,8 @@ static int compare_wordmaps (AZObject *list1, AZObject *list2, int find_union, i
 static int compare_wordmaps_mm (AZObject *list1, AZObject *list2, int find_diff, int find_ddiff, int subtract, int countonly, const char *out, unsigned int cutoff, unsigned int nmm, int rule);
 /* No actual writing will be done if ofile is 0 */
 /* Upon completion list header is filled regardless of whether actual writing was performed */
-static unsigned int union_multi (AZObject *m[], unsigned int nmaps, unsigned int cutoff, int ofile, GT4ListHeader *header);
+static unsigned int union_multi (AZObject *m[], unsigned int nmaps, unsigned int cutoff, unsigned int rule, int ofile, GT4ListHeader *header);
+static unsigned int intersect_multi (AZObject *m[], unsigned int nmaps, unsigned int cutoff, unsigned int rule, int ofile, GT4ListHeader *header);
 static unsigned int subset (GT4WordSListImplementation *impl, GT4WordSListInstance *inst, unsigned int subset_method, unsigned long long subset_size, const char *filename);
 static unsigned long long fetch_relevant_words (GT4WordTable *table, AZObject *map, AZObject *querymap, unsigned int cutoff, unsigned int nmm, FILE *f, int subtract, int countonly, unsigned long long *totalfreq);
 static void print_help (int exitvalue);
@@ -82,7 +83,7 @@ static unsigned int count_override = 1;
 
 int main (int argc, const char *argv[])
 {
-  int arg_idx, v, i;
+  int arg_idx, v = 0, i;
   unsigned int nfiles = 0;
   const char *fnames[MAX_FILES];
   AZObject *objs[MAX_FILES];
@@ -319,16 +320,12 @@ int main (int argc, const char *argv[])
   }
 
   if (nfiles > 2) {
-    if (!find_union || find_intrsec || find_diff || find_ddiff) {
+    if (!(find_union || find_intrsec) || find_diff || find_ddiff) {
       fprintf(stderr, "Error: Algorithm incompatible with multiple files!\n");
       print_help (1);
     }
     if (nmm) {
       fprintf(stderr, "Error: Multiple files are not compatible with mismatches!\n");
-      print_help (1);
-    }
-    if (rule != RULE_DEFAULT) {
-      fprintf(stderr, "Error: Explicit rule incompatible with multiple files!\n");
       print_help (1);
     }
   }
@@ -365,26 +362,58 @@ int main (int argc, const char *argv[])
     GT4ListHeader header;
     char out_name[2048], tmp_name[2048];
     int ofile = 0;
-    if (!countonly) {
-      snprintf (tmp_name, 2048, "%s_%d_union.list.tmp", outputname, wlen);
-      tmp_name[2047] = 0;
-      ofile = creat (tmp_name, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
-      if (ofile < 0) {
-        fprintf (stderr, "Error: Cannot create output file %s\n", tmp_name);
-        exit (1);
+    if (find_union) {
+      if (!countonly) {
+        snprintf (tmp_name, 2048, "%s_%d_union.list.tmp", outputname, wlen);
+        tmp_name[2047] = 0;
+        ofile = creat (tmp_name, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
+        if (ofile < 0) {
+          fprintf (stderr, "Error: Cannot create output file %s\n", tmp_name);
+          exit (1);
+        }
       }
-    }
-    v = union_multi (objs, nfiles, cutoff, ofile, &header);
-    if (ofile > 0) {
-      close (ofile);
-      snprintf (out_name, 2048, "%s_%d_union.list", outputname, wlen);
-      out_name[2047] = 0;
-      if (rename (tmp_name, out_name)) {
-        fprintf (stderr, "Error: Cannot rename %s to %s\n", tmp_name, out_name);
-        exit (1);
+      v = union_multi (objs, nfiles, cutoff, rule, ofile, &header);
+      if (ofile > 0) {
+        close (ofile);
+        if (!v) {
+          snprintf (out_name, 2048, "%s_%d_union.list", outputname, wlen);
+          out_name[2047] = 0;
+          if (rename (tmp_name, out_name)) {
+            fprintf (stderr, "Error: Cannot rename %s to %s\n", tmp_name, out_name);
+            exit (1);
+          }
+        } else {
+          unlink (tmp_name);
+        }
       }
+      if (countonly || debug) fprintf (stdout, "NUnique\t%llu\nNTotal\t%llu\n", header.n_words, header.total_count);
     }
-    if (debug) fprintf (stdout, "NUnique\t%llu\nNTotal\t%llu\n", header.n_words, header.total_count);
+    if (find_intrsec) {
+      if (!countonly) {
+        snprintf (tmp_name, 2048, "%s_%d_intrsec.list.tmp", outputname, wlen);
+        tmp_name[2047] = 0;
+        ofile = creat (tmp_name, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
+        if (ofile < 0) {
+          fprintf (stderr, "Error: Cannot create output file %s\n", tmp_name);
+          exit (1);
+        }
+      }
+      v = intersect_multi (objs, nfiles, cutoff, rule, ofile, &header);
+      if (ofile > 0) {
+        close (ofile);
+        if (!v) {
+          snprintf (out_name, 2048, "%s_%d_intrsec.list", outputname, wlen);
+          out_name[2047] = 0;
+          if (rename (tmp_name, out_name)) {
+            fprintf (stderr, "Error: Cannot rename %s to %s\n", tmp_name, out_name);
+            exit (1);
+          }
+        } else {
+          unlink (tmp_name);
+        }
+      }
+      if (countonly || debug) fprintf (stdout, "NUnique\t%llu\nNTotal\t%llu\n", header.n_words, header.total_count);
+    }
   }
   if (v) return print_error_message (v);
   for (i = 0; i < nfiles; i++) {
@@ -466,7 +495,7 @@ write_word_to_file (unsigned long long word, unsigned freq, FILE *f)
 #define TMP_BUF_SIZE (256 * 12)
 
 static unsigned int
-union_multi (AZObject *m[], unsigned int nmaps, unsigned int cutoff, int ofile, GT4ListHeader *header)
+union_multi (AZObject *m[], unsigned int nmaps, unsigned int cutoff, unsigned int rule, int ofile, GT4ListHeader *header)
 {
   GT4WordSListImplementation *impls[MAX_FILES];
   GT4WordSListInstance *insts[MAX_FILES];
@@ -477,7 +506,18 @@ union_multi (AZObject *m[], unsigned int nmaps, unsigned int cutoff, int ofile, 
   unsigned int bp = 0;
   unsigned long long total = 0;
   double t_s, t_e;
+
+  /*
+   * Allowed rules ADD, MAX, NUMBER
+   * Default - ADD
+   */
   
+  if (rule == RULE_DEFAULT) {
+    rule = RULE_ADD;
+  } else if ((rule != RULE_ADD) && (rule != RULE_MAX) && (rule != RULE_NUMBER)) {
+    fprintf (stderr, "union_multi: Invalid rule %u (only ADD, MAX and NUMBER allowed)\n", rule);
+    return 1;
+  }
   n_sources = 0;
   for (j = 0; j < nmaps; j++) {
     impls[n_sources] = (GT4WordSListImplementation *) az_object_get_interface (AZ_OBJECT(m[j]), GT4_TYPE_WORD_SLIST, (void **) &insts[n_sources]);
@@ -505,7 +545,13 @@ union_multi (AZObject *m[], unsigned int nmaps, unsigned int cutoff, int ofile, 
     j = 0;
     while (j < n_sources) {
       if (insts[j]->word == word) {
-        freq += insts[j]->count;
+        if (rule == RULE_ADD) {
+          freq += insts[j]->count;
+        } else if (rule == RULE_MAX) {
+          if (insts[j]->count > freq) freq = insts[j]->count;
+        } else {
+          freq = count_override;
+        }
         if (!gt4_word_slist_get_next_word (impls[j], insts[j])) {
           n_sources -= 1;
           if (n_sources > 0) {
@@ -539,6 +585,120 @@ union_multi (AZObject *m[], unsigned int nmaps, unsigned int cutoff, int ofile, 
       }
     }
     word = next;
+  }
+  if (ofile) {
+    if (bp) write (ofile, b, bp);
+    pwrite (ofile, header, sizeof (GT4ListHeader), 0);
+  }
+  t_e = get_time ();
+
+  if (debug > 0) {
+    fprintf (stderr, "Combined %u maps: input %llu (%.3f Mwords/s) output %llu (%.3f Mwords/s)\n", nmaps, total, total / (1000000 * (t_e - t_s)), header->n_words, header->n_words / (1000000 * (t_e - t_s)));
+  }
+  
+  return 0;
+}
+
+static unsigned int
+intersect_multi (AZObject *m[], unsigned int nmaps, unsigned int cutoff, unsigned int rule, int ofile, GT4ListHeader *header)
+{
+  GT4WordSListImplementation *impls[MAX_FILES];
+  GT4WordSListInstance *insts[MAX_FILES];
+  unsigned int j;
+  unsigned long long word;
+  unsigned char b[TMP_BUF_SIZE];
+  unsigned int bp = 0;
+  unsigned long long total = 0;
+  double t_s, t_e;
+  
+  /*
+   * Allowed rules MIN, MAX, ADD, NUMBER
+   * Default - MIN
+   */
+  
+  if (rule == RULE_DEFAULT) {
+    rule = RULE_MIN;
+  } else if ((rule != RULE_ADD) && (rule != RULE_MIN) && (rule != RULE_MAX) && (rule != RULE_NUMBER)) {
+    fprintf (stderr, "intersect_multi: Invalid rule %u (only ADD, MIN, MAX and NUMBER allowed)\n", rule);
+    return 1;
+  }
+  unsigned int finished = 0;
+  for (j = 0; j < nmaps; j++) {
+    impls[j] = (GT4WordSListImplementation *) az_object_get_interface (AZ_OBJECT(m[j]), GT4_TYPE_WORD_SLIST, (void **) &insts[j]);
+    if (insts[j]->num_words) {
+      gt4_word_slist_get_first_word (impls[j], insts[j]);
+    } else {
+      finished = 1;
+      break;
+    }
+  }
+
+  gt4_list_header_init (header, insts[0]->word_length);
+
+  t_s = get_time ();
+
+  if (ofile) write (ofile, header, sizeof (GT4ListHeader));
+
+  word = 0;
+
+  while (!finished) {
+    unsigned int freq = 0;
+    unsigned int n_equal = 0;
+    /* Pick largest current word */
+    for (j = 0; j < nmaps; j++) {
+      if (insts[j]->word > word) word = insts[j]->word;
+    }
+    /* Forward all lists, updating largest if word not found */
+    for (j = 0; j < nmaps; j++) {
+      while (insts[j]->word < word) {
+        if (!gt4_word_slist_get_next_word (impls[j], insts[j])) {
+          finished = 1;
+          break;
+        }
+      }
+      if (finished) break;
+      if (insts[j]->word > word) {
+        word = insts[j]->word;
+        break;
+      } else {
+        n_equal += 1;
+        if (rule == RULE_MIN) {
+          if (!freq || (insts[j]->count < freq)) freq = insts[j]->count;
+        } else if (rule == RULE_MAX) {
+          if (insts[j]->count > freq) freq = insts[j]->count;
+        } else if (rule == RULE_ADD) {
+          freq += insts[j]->count;
+        } else {
+          freq = count_override;
+        }
+      }
+    }
+    /* fprintf (stdout, "world %llu n_equal %u freq %u rule %u\n", word, n_equal, freq, rule); */
+    if (n_equal == nmaps) {
+      /* Is present in all lists */
+      if (freq >= cutoff) {
+        if (ofile) {
+          memcpy (&b[bp], &word, 8);
+          memcpy (&b[bp + 8], &freq, 4);
+          bp += 12;
+          if (bp >= TMP_BUF_SIZE) {
+            write (ofile, b, bp);
+            bp = 0;
+          }
+        }
+        header->n_words += 1;
+        header->total_count += freq;
+      }
+      /* Pick next largest word */
+      for (j = 0; j < nmaps; j++) {
+        if (!gt4_word_slist_get_next_word (impls[j], insts[j])) {
+          finished = 1;
+          break;
+        } else {
+          if (insts[j]->word > word) word = insts[j]->word;
+        }
+      }
+    }
   }
   if (ofile) {
     if (bp) write (ofile, b, bp);
