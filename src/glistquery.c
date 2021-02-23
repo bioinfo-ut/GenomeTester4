@@ -58,6 +58,8 @@ int debug = 0;
 
 static unsigned int use_scouts = 1;
 static unsigned int locations = 0;
+static unsigned int use_3p = 0;
+static unsigned int use_5p = 0;
 
 enum {
   QUERY,
@@ -193,6 +195,10 @@ int main (int argc, const char *argv[])
       command = SEQUENCES;
     } else if (!strcmp(argv[argidx], "--locations")) {
       locations = 1;
+    } else if (!strcmp(argv[argidx], "--3p")) {
+      use_3p = 1;
+    } else if (!strcmp(argv[argidx], "--5p")) {
+      use_5p = 1;
     } else if (!strcmp(argv[argidx], "--bloom")) {
       bloom = 1;
     } else if (!strcmp(argv[argidx], "--disable_scouts")) {  
@@ -507,11 +513,24 @@ search_one_query_string (AZObject *obj, const char *query, unsigned int n_mm, un
 {
   QueryData qd = { 0 };
   unsigned long long word;
+  unsigned int len;
 
   qd.dict_impl = (GT4WordDictImplementation *) az_object_get_interface (obj, GT4_TYPE_WORD_DICT, (void **) &qd.dict_inst);
-  if ((unsigned int) strlen (query) != qd.dict_inst->word_length) {
-    fprintf (stderr, "Error: Wrong query length (%u), list word length is %u\n", (unsigned int) strlen (query), qd.dict_inst->word_length);
-    return 1;
+  len = (unsigned int) strlen (query);
+  if (len != qd.dict_inst->word_length) {
+    if (len < qd.dict_inst->word_length) {
+      fprintf (stderr, "search_one_query_string: Word too short (%u < %u)\n", qd.dict_inst->word_length, len);
+      return 1;
+    } else if (use_3p) {
+      word = string_to_word (query + (len - qd.dict_inst->word_length), qd.dict_inst->word_length);
+    } else if (use_5p) {
+      word = string_to_word (query, qd.dict_inst->word_length);
+    } else {
+      fprintf (stderr, "search_one_query_string: Wrong query length (%u != %u) - use --3p or --5p\n", qd.dict_inst->word_length, len);
+      return 1;
+    }
+  } else {
+    word = string_to_word (query, qd.dict_inst->word_length);
   }
   if (GT4_IS_INDEX_MAP (obj) && locations) {
     qd.index_impl = (GT4WordIndexImplementation *) az_object_get_interface (obj, GT4_TYPE_WORD_INDEX, (void **) &qd.index_inst);
@@ -521,7 +540,7 @@ search_one_query_string (AZObject *obj, const char *query, unsigned int n_mm, un
   qd.min_freq = min_freq;
   qd.max_freq = max_freq;
   qd.print_all_words = print_all_words;
-  word = string_to_word (query, qd.dict_inst->word_length);
+
   search_one_word (&qd, word);
   return 0;
 }
@@ -533,7 +552,6 @@ search_n_query_strings (AZObject *obj, const char *queryfile, unsigned int n_mm,
 {
   QueryData qd = { 0 };
   FILE *ifs;
-  unsigned int beg = 1;
 
   ifs = fopen (queryfile, "r");
   if (ifs == NULL) {
@@ -553,7 +571,7 @@ search_n_query_strings (AZObject *obj, const char *queryfile, unsigned int n_mm,
   int val = fgetc (ifs);
   while (val > 0) {
     char c[256];
-    unsigned int i = 0;
+    unsigned int i = 0, len;
     unsigned long long word;
     while ((val > 0) && (i < 255) && (val != '\n')) {
       c[i++] = (char) val;
@@ -562,15 +580,22 @@ search_n_query_strings (AZObject *obj, const char *queryfile, unsigned int n_mm,
     c[i] = 0;
     while ((val > 0) && (val != '\n')) val = fgetc (ifs);
     while ((val > 0) && (val < 'A')) val = fgetc (ifs);
-    if (beg) {
-      /* Checking possible errors */
-      if (qd.dict_inst->word_length != strlen (c)) {
-        fprintf (stderr, "Error: Incompatible wordlengths! Wordlength in list: %u, query length: %u\n", qd.dict_inst->word_length, (unsigned int) strlen (c));
+    len = (unsigned int) strlen (c);
+    if (len != qd.dict_inst->word_length) {
+      if (len < qd.dict_inst->word_length) {
+        fprintf (stderr, "search_n_query_strings: Word too short (%u < %u)\n", qd.dict_inst->word_length, len);
+        return 1;
+      } else if (use_3p) {
+        word = string_to_word (c + (len - qd.dict_inst->word_length), qd.dict_inst->word_length);
+      } else if (use_5p) {
+         word = string_to_word (c, qd.dict_inst->word_length);
+      } else {
+        fprintf (stderr, "search_n_query_strings: Wrong query length (%u != %u) - use --3p or --5p\n", qd.dict_inst->word_length, len);
         return 1;
       }
-      beg = 0;
+    } else {
+      word = string_to_word (c, qd.dict_inst->word_length);
     }
-    word = string_to_word (c, qd.dict_inst->word_length);
     search_one_word (&qd, word);
   }
   fclose (ifs);
@@ -846,6 +871,8 @@ void print_help (int exit_value)
   fprintf (stderr, "    --bloom                   - use bloom filter to speed up lookups\n");
   fprintf (stderr, "    --all                     - in case of mismatches prints all found words\n");
   fprintf (stderr, "    --locations               - in case of index print all word locations\n");
+  fprintf (stderr, "    --3p                      - if query is longer than word use 3' end\n");
+  fprintf (stderr, "    --5p                      - if query is longer than word use 5' end\n");
   fprintf (stderr, "    -D                        - increase debug level\n");
   exit (exit_value);
 }

@@ -172,7 +172,7 @@ int main (int argc, const char *argv[])
         count_override = strtol (argv[arg_idx], &end, 10);
       } else if (!strcmp (argv[arg_idx], "default")) {
         rule = RULE_DEFAULT;
-      } else if (!strcmp (argv[arg_idx], "add")) {
+      } else if (!strcmp (argv[arg_idx], "add") || !strcmp (argv[arg_idx], "sum")) {
         rule = RULE_ADD;
       } else if (!strcmp (argv[arg_idx], "subtract")) {
         rule = RULE_SUBTRACT;
@@ -262,7 +262,7 @@ int main (int argc, const char *argv[])
     fclose (ifs);
     if (code == GT4_LIST_CODE) {
       if (stream) {
-        objs[i] = (AZObject *) gt4_word_list_stream_new (fnames[0], VERSION_MAJOR);
+        objs[i] = (AZObject *) gt4_word_list_stream_new (fnames[i], VERSION_MAJOR);
       } else {
         objs[i] = (AZObject *) gt4_word_map_new (fnames[i], VERSION_MAJOR, use_scouts, 0);
       }
@@ -348,7 +348,7 @@ int main (int argc, const char *argv[])
 
   if (print_operation) {
     unsigned int i;
-    fprintf (stdout, "Operation\t%s%s%s%s\nFiles\t%u\n", (find_union) ? "U" : "", (find_intrsec) ? "I" : "", (find_diff) ? "D" : "", (find_ddiff) ? "X" : "", nfiles);
+    fprintf (stdout, "Operation\t%s%s%s%s\trule\t%u\nFiles\t%u\n", (find_union) ? "U" : "", (find_intrsec) ? "I" : "", (find_diff) ? "D" : "", (find_ddiff) ? "X" : "", rule, nfiles);
     for (i = 0; i < nfiles; i++) {
       fprintf (stdout, "%u\t%s\n", i, fnames[i]);
     }
