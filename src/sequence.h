@@ -24,6 +24,10 @@
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #ifndef __SEQUENCE_CPP__
 extern const char *alphabet;
 extern const char *chr_names[];
@@ -55,5 +59,9 @@ void gt4_string_revcomp_inplace (char *s, unsigned int length);
 void word_to_bitstring (unsigned long long word);
 
 unsigned int gt4_chr_from_string (const char *str);
+
+#ifdef __cplusplus
+};
+#endif
 
 #endif /* SEQUENCE_H_ */
