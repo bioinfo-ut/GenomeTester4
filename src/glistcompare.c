@@ -386,7 +386,7 @@ int main (int argc, const char *argv[])
           unlink (tmp_name);
         }
       }
-      if (countonly || debug) fprintf (stdout, "NUnique\t%llu\nNTotal\t%llu\n", header.n_words, header.total_count);
+      if (countonly || debug) fprintf (stdout, "NUnique\t%llu\nNTotal\t%llu\n", (unsigned long long) header.n_words, (unsigned long long) header.total_count);
     }
     if (find_intrsec) {
       if (!countonly) {
@@ -412,7 +412,7 @@ int main (int argc, const char *argv[])
           unlink (tmp_name);
         }
       }
-      if (countonly || debug) fprintf (stdout, "NUnique\t%llu\nNTotal\t%llu\n", header.n_words, header.total_count);
+      if (countonly || debug) fprintf (stdout, "NUnique\t%llu\nNTotal\t%llu\n", (unsigned long long) header.n_words, (unsigned long long) header.total_count);
     }
   }
   if (v) return print_error_message (v);
@@ -593,7 +593,7 @@ union_multi (AZObject *m[], unsigned int nmaps, unsigned int cutoff, unsigned in
   t_e = get_time ();
 
   if (debug > 0) {
-    fprintf (stderr, "Combined %u maps: input %llu (%.3f Mwords/s) output %llu (%.3f Mwords/s)\n", nmaps, total, total / (1000000 * (t_e - t_s)), header->n_words, header->n_words / (1000000 * (t_e - t_s)));
+    fprintf (stderr, "Combined %u maps: input %llu (%.3f Mwords/s) output %llu (%.3f Mwords/s)\n", nmaps, total, total / (1000000 * (t_e - t_s)), (unsigned long long) header->n_words, header->n_words / (1000000 * (t_e - t_s)));
   }
   
   return 0;
@@ -707,7 +707,7 @@ intersect_multi (AZObject *m[], unsigned int nmaps, unsigned int cutoff, unsigne
   t_e = get_time ();
 
   if (debug > 0) {
-    fprintf (stderr, "Combined %u maps: input %llu (%.3f Mwords/s) output %llu (%.3f Mwords/s)\n", nmaps, total, total / (1000000 * (t_e - t_s)), header->n_words, header->n_words / (1000000 * (t_e - t_s)));
+    fprintf (stderr, "Combined %u maps: input %llu (%.3f Mwords/s) output %llu (%.3f Mwords/s)\n", nmaps, total, total / (1000000 * (t_e - t_s)), (unsigned long long) header->n_words, header->n_words / (1000000 * (t_e - t_s)));
   }
   
   return 0;
@@ -790,7 +790,7 @@ compare_wordmaps (AZObject *list1, AZObject *list2, int find_union, int find_int
   GT4WordSListInstance *inst1, *inst2;
   FILE *outf[4] = { 0 };
   /* the length is limited in main(..) method */
-  char fname[300][4], name[256];
+  char fname[4][1024], name[256];
   GT4ListHeader h_out;
 
   unsigned long long word1, word2;
@@ -802,6 +802,7 @@ compare_wordmaps (AZObject *list1, AZObject *list2, int find_union, int find_int
   impl2 = (GT4WordSListImplementation *) az_object_get_interface (list2, GT4_TYPE_WORD_SLIST, (void **) &inst2);
 
   if (debug) {
+     fprintf (stderr, "compare_wordmaps: methods %u/%u/%u/%u\n", find_union, find_intrsec, find_diff, find_ddiff);
      fprintf (stderr, "compare_wordmaps: List 1: %llu entries\n", inst1->num_words);
      fprintf (stderr, "compare_wordmaps; List 2: %llu entries\n", inst2->num_words);
   }
@@ -930,6 +931,7 @@ compare_wordmaps (AZObject *list1, AZObject *list2, int find_union, int find_int
     fwrite (&h_out, sizeof (GT4ListHeader), 1, outf[2]);
     fclose (outf[2]);
     sprintf (name, "%s_%d_0_diff1.list", out, inst1->word_length);
+    if (debug) fprintf (stderr, "Renaming %s to %s\n", fname[2], name);
     rename (fname[2], name);
   } else if (find_diff) {
     fprintf (stdout, "NUnique\t%llu\nNTotal\t%llu\n", c_diff1, freqsum_diff1);
@@ -941,6 +943,7 @@ compare_wordmaps (AZObject *list1, AZObject *list2, int find_union, int find_int
     fwrite (&h_out, sizeof (GT4ListHeader), 1, outf[3]);
     fclose (outf[3]);
     sprintf (name, "%s_%d_0_diff2.list", out, inst1->word_length);
+    if (debug) fprintf (stderr, "Renaming %s to %s\n", fname[3], name);
     rename (fname[3], name);
   } else if (find_ddiff) {
     fprintf (stdout, "NUnique\t%llu\nNTotal\t%llu\n", c_diff2, freqsum_diff2);

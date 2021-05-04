@@ -93,7 +93,6 @@ word_map_shutdown (AZObject *object)
     wmap->file_map = NULL;
     wmap->file_size = 0;
   }
-  wmap->header = NULL;
   wmap->wordlist = NULL;
   if (wmap->bloom) {
     gt4_bloom_delete (wmap->bloom);
@@ -116,7 +115,7 @@ word_map_get_next_word (GT4WordSListImplementation *impl, GT4WordSListInstance *
   GT4WordMap *wmap = GT4_WORD_MAP_FROM_SARRAY_INST(inst);
   inst->word = WORDMAP_WORD(wmap,inst->idx);
   inst->count = WORDMAP_FREQ(wmap,inst->idx);
-  __builtin_prefetch (&WORDMAP_WORD(wmap,inst->idx + 4), 0, 0);
+  __builtin_prefetch (gt4_word_map_get_word_ptr (wmap,inst->idx + 4), 0, 0);
   return 1;
 }
 
@@ -142,7 +141,7 @@ word_map_lookup (GT4WordDictImplementation *impl, GT4WordDictInstance *inst, uns
   }
   wmap->pass += 1;
   low = 0;
-  high = wmap->header->n_words - 1;
+  high = wmap->header.n_words - 1;
   mid = (low + high) / 2;
   while (low <= high) {
     current = WORDMAP_WORD (wmap, mid);
@@ -164,12 +163,24 @@ GT4WordMap *
 gt4_word_map_new (const char *listfilename, unsigned int major_version, unsigned int scout, unsigned int create_bloom)
 {
   const unsigned char *cdata;
-  unsigned long long csize, start;
+  unsigned long long csize;
   GT4WordMap *wmap;
+  GT4ListHeader *hdr;
 
   cdata = gt4_mmap (listfilename, &csize);
   if (!cdata) {
     fprintf (stderr, "gt4_word_map_new: could not mmap file %s\n", listfilename);
+    return NULL;
+  }
+
+  /* Check compatibility */
+  hdr = (GT4ListHeader *) cdata;
+  if (hdr->code != GT4_LIST_CODE) {
+    fprintf (stderr, "gt4_word_map_new: invalid file tag (%x, should be %x)\n", hdr->code, GT4_LIST_CODE);
+    return NULL;
+  }
+  if (hdr->version_major != major_version) {
+    fprintf (stderr, "gt4_word_map_new: incompatible major version %u (required %u)\n", hdr->version_major, major_version);
     return NULL;
   }
 
@@ -178,29 +189,24 @@ gt4_word_map_new (const char *listfilename, unsigned int major_version, unsigned
     fprintf (stderr, "gt4_word_map_new: could not allocate map\n");
     return NULL;
   }
-
   wmap->filename = strdup (listfilename);
   wmap->file_map = cdata;
   wmap->file_size = csize;
-  wmap->header = (GT4ListHeader *) cdata;
-  if (wmap->header->code != GT4_LIST_CODE) {
-    fprintf (stderr, "gt4_word_map_new: invalid file tag (%x, should be %x)\n", wmap->header->code, GT4_LIST_CODE);
-    gt4_word_map_delete (wmap);
-    return NULL;
-  }
-  if (wmap->header->version_major != major_version) {
-    fprintf (stderr, "gt4_word_map_new: incompatible major version %u (required %u)\n", wmap->header->version_major, major_version);
-    gt4_word_map_delete (wmap);
-    return NULL;
-  }
-  if ((wmap->header->version_major == 4) && (wmap->header->version_minor == 0)) {
-    start = sizeof (GT4ListHeader);
+  if (hdr->version_minor == 0) {
+    memcpy (&wmap->header, hdr, sizeof (struct _GT4ListHeader_4_0));
+    wmap->header.list_start = sizeof (GT4ListHeader);
+    wmap->header.word_bytes = 8;
+    wmap->header.count_bytes = 4;
+  } else if (hdr->version_minor <= 2) {
+    memcpy (&wmap->header, hdr, sizeof (struct _GT4ListHeader_4_2));
+    wmap->header.word_bytes = 8;
+    wmap->header.count_bytes = 4;
   } else {
-    start = wmap->header->list_start;
+    memcpy (&wmap->header, hdr, sizeof (struct _GT4ListHeader_4_4));
   }
-  wmap->wordlist = cdata + start;
-  if (csize < start + wmap->header->n_words * 12) {
-    fprintf (stderr, "gt4_word_map_new: file size too small (%llu, should be at least %llu)\n", csize, start + wmap->header->n_words * 12);
+  wmap->wordlist = cdata + wmap->header.list_start;
+  if (csize < wmap->header.list_start + wmap->header.n_words * (wmap->header.word_bytes + wmap->header.count_bytes)) {
+    fprintf (stderr, "gt4_word_map_new: file size too small (%llu, should be at least %llu)\n", csize, (unsigned long long) (wmap->header.list_start + wmap->header.n_words * (wmap->header.word_bytes + wmap->header.count_bytes)));
     gt4_word_map_delete (wmap);
     return NULL;
   }
@@ -209,14 +215,14 @@ gt4_word_map_new (const char *listfilename, unsigned int major_version, unsigned
   }
 
   /* Set up sorted array interface */
-  wmap->sarray_inst.slist_inst.num_words = wmap->header->n_words;
-  wmap->sarray_inst.slist_inst.sum_counts = wmap->header->total_count;
-  wmap->sarray_inst.slist_inst.word_length = wmap->header->word_length;
+  wmap->sarray_inst.slist_inst.num_words = wmap->header.n_words;
+  wmap->sarray_inst.slist_inst.sum_counts = wmap->header.total_count;
+  wmap->sarray_inst.slist_inst.word_length = wmap->header.word_length;
   if (wmap->sarray_inst.slist_inst.num_words > 0) {
     wmap->sarray_inst.slist_inst.word = WORDMAP_WORD(wmap,0);
     wmap->sarray_inst.slist_inst.count = WORDMAP_FREQ(wmap,0);
   }
-  wmap->dict_inst.word_length = wmap->header->word_length;
+  wmap->dict_inst.word_length = wmap->header.word_length;
 
   if (create_bloom) {
     unsigned long long i;
@@ -248,7 +254,7 @@ word_map_search_query (GT4WordMap *map, unsigned long long query, unsigned int n
   }
 
   if (!mm_table.data_size) {
-    gt4_word_table_setup (&mm_table, map->header->word_length, 256, 0);
+    gt4_word_table_setup (&mm_table, map->header.word_length, 256, 0);
   }
 
   gt4_word_table_generate_mismatches (&mm_table, query, NULL, n_mm, pm_3, 0, 0, equalmmonly);
@@ -297,3 +303,22 @@ gt4_word_map_lookup (GT4WordMap *wmap, unsigned long long query)
   }
   return 0;
 }
+
+uint64_t
+gt4_word_map_get_word (const GT4WordMap *wmap, uint64_t idx)
+{
+  return *((uint64_t *) (wmap->wordlist + 12 * idx));
+}
+
+uint32_t
+gt4_word_map_get_count (const GT4WordMap *wmap, uint64_t idx)
+{
+  return *((uint32_t *) (wmap->wordlist + 12 * idx + 8));
+}
+
+uint64_t *
+gt4_word_map_get_word_ptr (const GT4WordMap *wmap, uint64_t idx)
+{
+  return (uint64_t *) (wmap->wordlist + 12 * idx);
+}
+

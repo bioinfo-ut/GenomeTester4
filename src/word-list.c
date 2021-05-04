@@ -39,4 +39,6 @@ gt4_list_header_init (GT4ListHeader *hdr, unsigned int word_length)
   hdr->version_minor = VERSION_MINOR;
   hdr->word_length = word_length;
   hdr->list_start = sizeof (GT4ListHeader);
+  hdr->word_bytes = 8;
+  hdr->count_bytes = 4;
 }

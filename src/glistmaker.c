@@ -1093,7 +1093,7 @@ merge_tables_to_file (GT4WordTable *tables[], unsigned int ntables_in, int ofile
   }
   pwrite (ofile, &h, sizeof (GT4ListHeader), 0);
   if (debug) {
-    fprintf (stderr, "Words %llu, unique %llu\n", h.total_count, h.n_words);
+    fprintf (stderr, "Words %llu, unique %llu\n", (unsigned long long) h.total_count, (unsigned long long) h.n_words);
   }
 
   return h.n_words;

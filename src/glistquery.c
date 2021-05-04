@@ -736,7 +736,7 @@ void get_statistics (AZObject *obj)
   az_object_get_interface (obj, GT4_TYPE_WORD_SLIST, (void **) &inst);
   if (GT4_IS_WORD_MAP (obj)) {
     GT4WordMap *map = GT4_WORD_MAP(obj);
-    fprintf (stdout, "List %s: built with glistmaker version %d.%d\n", map->filename, map->header->version_major, map->header->version_minor);
+    fprintf (stdout, "List %s: built with glistmaker version %d.%d\n", map->filename, map->header.version_major, map->header.version_minor);
   } else if (GT4_IS_INDEX_MAP (obj)) {
     GT4IndexMap *imap = GT4_INDEX_MAP(obj);
     fprintf (stdout, "Index %s: built with glistmaker version %d.%d\n", imap->filename, imap->header->version_major, imap->header->version_minor);
@@ -796,7 +796,7 @@ void print_median (AZObject *obj)
   }
   if (GT4_IS_WORD_MAP (obj)) {
     GT4WordMap *map = GT4_WORD_MAP(obj);
-    fprintf (stdout, "List %s: built with glistmaker version %d.%d\n", map->filename, map->header->version_major, map->header->version_minor);
+    fprintf (stdout, "List %s: built with glistmaker version %d.%d\n", map->filename, map->header.version_major, map->header.version_minor);
   } else if (GT4_IS_INDEX_MAP (obj)) {
     GT4IndexMap *imap = GT4_INDEX_MAP(obj);
     fprintf (stdout, "Index %s: built with glistmaker version %d.%d\n", imap->filename, imap->header->version_major, imap->header->version_minor);

@@ -66,9 +66,6 @@ struct _GT4WordListStreamClass {
 
 unsigned int gt4_word_list_stream_get_type (void);
 
-#define WORDMAP_WORD(w,i) (*((unsigned long long *) ((w)->wordlist + 12 * (i))))
-#define WORDMAP_FREQ(w,i) (*((unsigned int *) ((w)->wordlist + 12 * (i) + 8)))
-
 GT4WordListStream *gt4_word_list_stream_new (const char *filename, unsigned int major_version);
 void gt4_word_list_stream_delete (GT4WordListStream *map);
 

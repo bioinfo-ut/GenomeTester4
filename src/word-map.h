@@ -61,8 +61,8 @@ struct _GT4WordMap {
   char *filename;
   const unsigned char *file_map;
   unsigned long long file_size;
-  GT4ListHeader *header;
   const unsigned char *wordlist;
+  GT4ListHeader header;
   /* GT4WordSArray instance */
   GT4WordSArrayInstance sarray_inst;
   /* GT4WordDict instance */
@@ -83,9 +83,30 @@ struct _GT4WordMapClass {
 
 unsigned int gt4_word_map_get_type (void);
 
+inline extern uint64_t
+gt4_word_map_get_word (const GT4WordMap *wmap, uint64_t idx)
+{
+  return *((uint64_t *) (wmap->wordlist + 12 * idx));
+}
+
+inline extern uint32_t
+gt4_word_map_get_count (const GT4WordMap *wmap, uint64_t idx)
+{
+  return *((uint32_t *) (wmap->wordlist + 12 * idx + 8));
+}
+
+inline extern uint64_t *
+gt4_word_map_get_word_ptr (const GT4WordMap *wmap, uint64_t idx)
+{
+  return (uint64_t *) (wmap->wordlist + 12 * idx);
+}
+
+#define WORDMAP_WORD gt4_word_map_get_word
+#define WORDMAP_FREQ gt4_word_map_get_count
+/*
 #define WORDMAP_WORD(w,i) (*((unsigned long long *) ((w)->wordlist + 12 * (i))))
 #define WORDMAP_FREQ(w,i) (*((unsigned int *) ((w)->wordlist + 12 * (i) + 8)))
-
+*/
 /* Creates new GT4WordMap by memory-mapping file, returns NULL if error */
 /* If "scout" is true, a new thread is created that sequentially prefetces the map into virtual memory */
 GT4WordMap *gt4_word_map_new (const char *listfilename, unsigned int major_version, unsigned int scout, unsigned int create_bloom);
