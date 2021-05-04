@@ -121,7 +121,7 @@ gt4_write_union (AZObject *arrays[], unsigned int n_arrays, unsigned int cutoff,
     t_e = get_time ();
 
     if (debug > 0) {
-      fprintf (stderr, "Combined %u arrays: input %llu (%.3f Mwords/s) output %llu (%.3f Mwords/s)\n", n_arrays, total, total / (1000000 * (t_e - t_s)), header->n_words, header->n_words / (1000000 * (t_e - t_s)));
+      fprintf (stderr, "Combined %u arrays: input %llu (%.3f Mwords/s) output %llu (%.3f Mwords/s)\n", n_arrays, total, total / (1000000 * (t_e - t_s)), (unsigned long long) header->n_words, header->n_words / (1000000 * (t_e - t_s)));
     }
   }
   
