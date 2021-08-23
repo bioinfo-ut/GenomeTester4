@@ -500,9 +500,10 @@ search_one_word (QueryData *qd, unsigned long long word)
   if (qd->index_impl || qd->print_all_words) {
     gt4_word_dict_lookup_mm (qd->dict_impl, qd->dict_inst, word, qd->n_mm, qd->pm_3, 1, 0, cb_print, qd);
   } else {
-    gt4_word_dict_lookup_mm (qd->dict_impl, qd->dict_inst, word, qd->n_mm, qd->pm_3, 1, 0, NULL, NULL);
-    if ((qd->dict_inst->value >= qd->min_freq) && (qd->dict_inst->value <= qd->max_freq)) {
-      fprintf (stdout, "%s\t%u\n", word_to_string (word, qd->dict_inst->word_length), qd->dict_inst->value);
+    if (gt4_word_dict_lookup_mm (qd->dict_impl, qd->dict_inst, word, qd->n_mm, qd->pm_3, 1, 0, NULL, NULL)) {
+      if ((qd->dict_inst->value >= qd->min_freq) && (qd->dict_inst->value <= qd->max_freq)) {
+        fprintf (stdout, "%s\t%u\n", word_to_string (word, qd->dict_inst->word_length), qd->dict_inst->value);
+      }
     }
   }
 }
