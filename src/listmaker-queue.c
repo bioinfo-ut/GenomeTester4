@@ -25,7 +25,7 @@
 
 unsigned int listmaker_queue_debug = 0;
 
-#define BLOCK_SIZE 1000000000ULL
+#define BLOCK_SIZE 100000000ULL
 
 #include <string.h>
 #include <sys/mman.h>

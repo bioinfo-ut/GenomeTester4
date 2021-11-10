@@ -287,7 +287,7 @@ main (int argc, const char *argv[])
   }
   gt4_queue_unlock (&mq.queue);
 
-  if (create_index) {
+  if (debug && create_index) {
     for (i = 0; i < mq.n_sources; i++) {
       fprintf (stderr, "%u: %s start %llu subseqs %u\n", i, i_files[i].name, mq.sources[i].start, mq.sources[i].n_subseqs);
     }
@@ -423,7 +423,7 @@ write_kmers (FILE *ofs, const char *loc_files[], unsigned int n_loc_files, unsig
   unsigned long long start;
   unsigned int i, n_remaining;
 
-  fprintf (stderr, "write_kmers: file %u\n", n_loc_files);
+  if (debug) fprintf (stderr, "write_kmers: file %u\n", n_loc_files);
 
   start = *pos;
 
@@ -464,7 +464,7 @@ write_kmers (FILE *ofs, const char *loc_files[], unsigned int n_loc_files, unsig
         n_read += 1;
       }
       if (feof (ifs[i])) {
-        fprintf (stderr, "closing file\n");
+        if (debug) fprintf (stderr, "closing file\n");
         fclose (ifs[i]);
         n_remaining -= 1;
         ifs[i] = ifs[n_remaining];
@@ -481,7 +481,7 @@ write_kmers (FILE *ofs, const char *loc_files[], unsigned int n_loc_files, unsig
       n_words += 1;
     }
   }
-  fprintf (stderr, "Read %llu %llu\n", n_to_read, n_read);
+  if (debug) fprintf (stderr, "Read %llu %llu\n", n_to_read, n_read);
   *n_kmers = n_words;
   *n_locations = current_pos;
   return *pos - start;
@@ -705,12 +705,12 @@ write_index (FILE *ofs, const char *loc_files[], unsigned int n_loc_files, GT4Li
   /* Kmer list */
   kmer_list_pos = pos;
   write_kmers (ofs, loc_files, n_loc_files, &n_words, &n_locs, &pos);
-  fprintf (stderr, "Kmers: %llu locations %llu\n", n_words, n_locs);
+  if (debug) fprintf (stderr, "Kmers: %llu locations %llu\n", n_words, n_locs);
 
   /* Locations */
   locations_pos = pos;
   write_locations (ofs, loc_files, n_loc_files, mq, n_subseq_bits, n_pos_bits, &pos);
-  fprintf (stderr, "Wrote %llu locations\n", n_locs);
+  if (debug) fprintf (stderr, "Wrote %llu locations\n", n_locs);
 
   /* Write positions */
   fseek (ofs, n_words_loc, SEEK_SET);

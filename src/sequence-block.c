@@ -170,13 +170,14 @@ gt4_sequence_block_split (GT4SequenceBlock *blk, GT4SequenceBlock *child_blocks[
           split += 1;
         }
         split += 1;
+        if (split >= remaining_size) break;
         if (!fastq) {
           /* Break if FastA name */
-          if ((split >= remaining_size) || (blk->cdata[current_pos + split] == '>')) break;
+          if (blk->cdata[current_pos + split] == '>') break;
         } else {
           /* If FastQ separator search for @...\n...\n+ pattern */
           if ((split < remaining_size) && (blk->cdata[current_pos + split] == '@')) {
-            unsigned int s = split + 1;
+            unsigned long long s = split + 1;
             /* Skip name */
             while ((s < remaining_size) && (blk->cdata[current_pos + s] != '\n')) s += 1;
             s += 1;

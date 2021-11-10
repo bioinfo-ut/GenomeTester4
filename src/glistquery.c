@@ -498,12 +498,18 @@ search_one_word (QueryData *qd, unsigned long long word)
     qd->reverse = 1;
   }
   if (qd->index_impl || qd->print_all_words) {
-    gt4_word_dict_lookup_mm (qd->dict_impl, qd->dict_inst, word, qd->n_mm, qd->pm_3, 1, 0, cb_print, qd);
+    if (!gt4_word_dict_lookup_mm (qd->dict_impl, qd->dict_inst, word, qd->n_mm, qd->pm_3, 1, 0, cb_print, qd) && !qd->min_freq) {
+      /* If min freq is 0 always print */
+      fprintf (stdout, "%s\t0\n", word_to_string (word, qd->dict_inst->word_length));
+    };
   } else {
     if (gt4_word_dict_lookup_mm (qd->dict_impl, qd->dict_inst, word, qd->n_mm, qd->pm_3, 1, 0, NULL, NULL)) {
       if ((qd->dict_inst->value >= qd->min_freq) && (qd->dict_inst->value <= qd->max_freq)) {
         fprintf (stdout, "%s\t%u\n", word_to_string (word, qd->dict_inst->word_length), qd->dict_inst->value);
       }
+    } else if (!qd->min_freq) {
+      /* If min freq is 0 always print */
+      fprintf (stdout, "%s\t0\n", word_to_string (word, qd->dict_inst->word_length));
     }
   }
 }
