@@ -276,6 +276,8 @@ main (int argc, const char *argv[])
 
   start_time = last_time = get_time();
 
+  GT4Scout scout = { 0 };
+
   if (db_name) {
     /* Read text database */
     const unsigned char *cdata;
@@ -285,7 +287,11 @@ main (int argc, const char *argv[])
       fprintf (stderr, "Cannot mmap database file %s\n", db_name);
       exit (1);
     }
-    if (!lowmem) scout_mmap (cdata, csize);
+    if (!lowmem) {
+      scout.cdata = cdata;
+      scout.csize = csize;
+      gt4_scout_mmap (&scout);
+    }
     if (debug) fprintf (stderr, "Loading text database %s\n", db_name);
     db = gt4_gmer_db_new_from_text (cdata, csize, max_kmers_per_node, (big) ? 32 : 16);
     if (!db) {
@@ -309,7 +315,11 @@ main (int argc, const char *argv[])
       fprintf (stderr, "Cannot mmap %s\n", dbb);
       exit (1);
     }
-    if (!lowmem) scout_mmap (cdata, csize);
+    if (!lowmem) {
+      scout.cdata = cdata;
+      scout.csize = csize;
+      gt4_scout_mmap (&scout);
+    }
     db = gt4_gmer_db_new_from_binary (cdata, csize);
     if (!db) {
       fprintf (stderr, "Cannot read binary database %s\n", dbb);
@@ -420,6 +430,9 @@ main (int argc, const char *argv[])
     }
     /* Need queue for stats */
     az_instance_finalize (&snpq.lmq, GT4_TYPE_LISTMAKER_QUEUE);
+  }
+  if (scout.running) {
+    gt4_delete_scout (&scout);
   }
   if (debug) {
     fprintf (stderr, "Total time: %.1fs\n", get_time() - start_time);

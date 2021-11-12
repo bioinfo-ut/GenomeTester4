@@ -420,8 +420,6 @@ int main (int argc, const char *argv[])
     az_object_shutdown (objs[i]);
   }
 
-  delete_scouts ();
-  
   return 0;
 }
 

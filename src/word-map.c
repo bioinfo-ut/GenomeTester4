@@ -84,6 +84,9 @@ static void
 word_map_shutdown (AZObject *object)
 {
   GT4WordMap *wmap = (GT4WordMap *) object;
+  if (wmap->scout.running) {
+    gt4_delete_scout (&wmap->scout);
+  }
   if (wmap->filename) {
     free (wmap->filename);
     wmap->filename = NULL;
@@ -211,7 +214,9 @@ gt4_word_map_new (const char *listfilename, unsigned int major_version, unsigned
     return NULL;
   }
   if (scout) {
-    scout_mmap ((const unsigned char *) cdata, csize);
+    wmap->scout.cdata = cdata;
+    wmap->scout.csize = csize;
+    gt4_scout_mmap (&wmap->scout);
   }
 
   /* Set up sorted array interface */

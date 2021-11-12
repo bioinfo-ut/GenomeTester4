@@ -69,34 +69,32 @@ gt4_munmap (const unsigned char *cdata, unsigned long long csize)
   munmap ((void *) cdata, csize);
 }
 
-static unsigned int finish = 0;
-
 static void *
 scout_map (void *arg)
 {
-  MapData *map = (MapData *) arg;
+  GT4Scout *scout = (GT4Scout *) arg;
   unsigned long long i, val = 0;
-  for (i = 0; i < map->csize; i += 1000) {
-    val += map->cdata[i];
-    if (finish) break;
+  for (i = 0; i < scout->csize; i += 1000) {
+    val += scout->cdata[i];
+    if (!scout->running) break;
   }
-  free (map);
   return (void *) val;
 }
 
 void
-scout_mmap (const unsigned char *cdata, unsigned long long csize)
+gt4_scout_mmap (GT4Scout *scout)
 {
-  pthread_t thread;
-  MapData *map = (MapData *) malloc (sizeof (MapData));
-  map->cdata = cdata;
-  map->csize = csize;
-  pthread_create (&thread, NULL, scout_map, map);
+  if (scout->running) return;
+  scout->running = 1;
+  pthread_create (&scout->thread, NULL, scout_map, scout);
 }
 
 void
-delete_scouts () {
-  finish = 1;
+gt4_delete_scout (GT4Scout *scout)
+{
+  if (!scout->running) return;
+  pthread_join (scout->thread, (void **) NULL);
+  scout->running = 0;
 }
 
 /* this implementation is based on:

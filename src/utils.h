@@ -24,6 +24,7 @@
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
+#include <pthread.h>
 #include <stdlib.h>
 
 /* Memory-map a given file */
@@ -31,15 +32,18 @@ const unsigned char *gt4_mmap (const char *filename, unsigned long long *csize);
 
 /* MMap scouting */
 
-typedef struct _MapData MapData;
-struct _MapData {
+typedef struct _GT4Scout GT4Scout;
+
+struct _GT4Scout {
   const unsigned char *cdata;
   unsigned long long csize;
+  pthread_t thread;
+  unsigned int running;
 };
 
 /* Create new thread that reads mmap into resident memory */
-void scout_mmap (const unsigned char *cdata, unsigned long long csize);
-void delete_scouts ();
+void gt4_scout_mmap (GT4Scout *scout);
+void gt4_delete_scout (GT4Scout *scout);
 
 /* Memory-unmap a previously mapped file */
 void gt4_munmap (const unsigned char *cdata, unsigned long long csize);

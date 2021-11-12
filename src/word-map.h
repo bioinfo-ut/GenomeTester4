@@ -50,6 +50,7 @@ extern unsigned int debug_wordmap;
 #include <az/object.h>
 
 #include "bloom.h"
+#include "utils.h"
 #include "word-array-sorted.h"
 #include "word-dict.h"
 #include "word-list.h"
@@ -67,6 +68,8 @@ struct _GT4WordMap {
   GT4WordSArrayInstance sarray_inst;
   /* GT4WordDict instance */
   GT4WordDictInstance dict_inst;
+  /* Background mapper */
+  GT4Scout scout;
   /* Bloom filter */
   GT4Bloom *bloom;
   unsigned long long reject;

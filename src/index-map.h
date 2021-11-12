@@ -61,6 +61,7 @@ extern unsigned int debug_index_map;
 #include <az/object.h>
 
 #include "file-array.h"
+#include "utils.h"
 #include "word-array-sorted.h"
 #include "word-dict.h"
 #include "word-index.h"
@@ -99,6 +100,8 @@ struct _GT4IndexMap {
   GT4WordDictInstance dict_inst;
   GT4WordIndexInstance index_inst;
   GT4FileArrayInstance file_array_inst;
+  /* Background mapper */
+  GT4Scout scout;
 };
 
 struct _GT4IndexMapClass {

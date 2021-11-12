@@ -96,6 +96,9 @@ static void
 index_map_shutdown (AZObject *object)
 {
   GT4IndexMap *imap = (GT4IndexMap *) object;
+  if (imap->scout.running) {
+    gt4_delete_scout (&imap->scout);
+  }
   if (imap->src_map) {
     munmap ((void *) imap->src_map, imap->src_size);
     imap->src_map = NULL;
@@ -347,7 +350,9 @@ gt4_index_map_new (const char *listfilename, unsigned int major_version, unsigne
   imap->kmers = cdata + imap->header->kmers_start;
   imap->locations = cdata + imap->header->locations_start;
   if (scout) {
-    scout_mmap ((const unsigned char *) cdata, csize);
+    imap->scout.cdata = cdata;
+    imap->scout.csize = csize;
+    gt4_scout_mmap (&imap->scout);
   }
 
   /* Set up sorted array interface */
