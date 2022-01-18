@@ -172,7 +172,7 @@ INCS = -I.
 BINS  = glistmaker glistquery glistcompare
 
 #CXXFLAGS = $(INCS) $(DEBUGFLAGS) -Wall 
-CXXFLAGS = $(INCS) $(RELEASEFLAGS) -Wall 
+CXXFLAGS = $(INCS) $(RELEASEFLAGS) -Wall -std=c99 -D_DEFAULT_SOURCE -D_GNU_SOURCE -D_POSIX_C_SOURCE=200809L -D_XOPEN_SOURCE
 
 .PHONY: all all-before all-after clean clean-custom
 
