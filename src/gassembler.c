@@ -698,6 +698,9 @@ print_usage (FILE *ofs, unsigned int advanced, int exit_value)
 static unsigned int only_chr = CHR_1;
 static unsigned int only_pos = 0;
 
+GT4Scout db_scout;
+GT4Scout seq_scout;
+
 int
 main (int argc, const char *argv[])
 {
@@ -1076,8 +1079,11 @@ main (int argc, const char *argv[])
     assemble_recursive (db, files, ref_chr, ref_start, ref_end, ref, kmers, nkmers);
   }
 
-  if (prefetch_db || prefetch_seq) {
-    delete_scouts ();
+  if (prefetch_db) {
+    gt4_delete_scout (&db_scout);
+  }
+  if (prefetch_seq) {
+    //gt4_delete_scout (&seq_scout);
   }
 
   return 0;
@@ -1098,6 +1104,9 @@ assemble_recursive (GT4GmerDB *db, SeqFile *files, unsigned int ref_chr, unsigne
   strncpy (dup, ref, len);
   adata->ref = dup;
   adata->cblock = (CallBlock *) malloc (sizeof (CallBlock));
+  memset (adata->cblock, 0, sizeof (CallBlock));
+  adata->cblock->calls = (Call *) malloc (MAX_REFERENCE_LENGTH * 2 * sizeof (Call));
+  memset (adata->cblock->calls, 0, MAX_REFERENCE_LENGTH * 2 * sizeof (Call));
   adata->cblock->chr = adata->chr;
   adata->cblock->start = adata->start;
   adata->cblock->end = adata->end;
@@ -2471,8 +2480,9 @@ load_db_or_die (const char *db_name, const char *seq_dir, const char *id)
     exit (1);
   }
   if (prefetch_db) {
-    scout_mmap (cdata, csize);
-    sleep (10);
+    db_scout.cdata = cdata;
+    db_scout.csize = csize;
+    gt4_scout_mmap (&db_scout);
   }
   db = gt4_gmer_db_new_from_binary (cdata, csize);
   if (!db) {
@@ -2533,7 +2543,7 @@ map_sequences (GT4GmerDB *db, const char *seq_dir)
         return NULL;
       }
       if (prefetch_seq) {
-        scout_mmap (files[i].cdata, files[i].csize);
+        //scout_mmap (files[i].cdata, files[i].csize);
       }
     }
   }

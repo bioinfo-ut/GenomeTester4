@@ -86,19 +86,19 @@ struct _GT4WordMapClass {
 
 unsigned int gt4_word_map_get_type (void);
 
-__inline__ uint64_t
+static __inline__ uint64_t
 gt4_word_map_get_word (const GT4WordMap *wmap, uint64_t idx)
 {
   return *((uint64_t *) (wmap->wordlist + 12 * idx));
 }
 
-__inline__ uint32_t
+static __inline__ uint32_t
 gt4_word_map_get_count (const GT4WordMap *wmap, uint64_t idx)
 {
   return *((uint32_t *) (wmap->wordlist + 12 * idx + 8));
 }
 
-__inline__ uint64_t *
+static __inline__ uint64_t *
 gt4_word_map_get_word_ptr (const GT4WordMap *wmap, uint64_t idx)
 {
   return (uint64_t *) (wmap->wordlist + 12 * idx);

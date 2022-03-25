@@ -78,6 +78,7 @@ scout_map (void *arg)
     val += scout->cdata[i];
     if (!scout->running) break;
   }
+  pthread_exit (NULL);
   return (void *) val;
 }
 
@@ -93,8 +94,8 @@ void
 gt4_delete_scout (GT4Scout *scout)
 {
   if (!scout->running) return;
-  pthread_join (scout->thread, (void **) NULL);
   scout->running = 0;
+  pthread_join (scout->thread, (void **) NULL);
 }
 
 /* this implementation is based on:

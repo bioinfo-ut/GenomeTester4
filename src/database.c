@@ -115,7 +115,7 @@ gt4_gmer_db_new_from_text (const unsigned char *cdata, unsigned long long csize,
   node_bits = get_bits (nlines + 1);
   kmer_bits = get_bits (max_kmers);
   if ((node_bits + kmer_bits) > 31) {
-    fprintf (stderr, "Too many nodes and kmers (%u (%u bits), %u (%u bits)\n", nlines + 1, max_kmers, node_bits, kmer_bits);
+    fprintf (stderr, "Too many nodes and kmers (%u (%u bits), %u (%u bits)\n", nlines + 1, node_bits, max_kmers, kmer_bits);
     return 0;
   }
   /* Set up DB */
@@ -213,7 +213,7 @@ gt4_gmer_db_new_from_text (const unsigned char *cdata, unsigned long long csize,
           kmer2 = code2 & ((1 << db->kmer_bits) - 1);
           fprintf (stderr, "KMer already present (current node %u (%s) kmer %u/%u (%s) code %u) previous %u (%s) kmer %u/%u code %u\n",
             idx, db->names + db->nodes[idx].name, i, (dir != 0), word_to_string (word, db->wordsize), code,
-            idx2, db->names + db->nodes[idx2].name, kmer2, ((code2 & 0x7fffffff) != 0), code2);
+            idx2, db->names + db->nodes[idx2].name, kmer2, ((code2 & 0x80000000) != 0), code2);
           break;
         }
       }

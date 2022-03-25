@@ -197,7 +197,7 @@ gt4_word_map_new (const char *listfilename, unsigned int major_version, unsigned
   wmap->file_size = csize;
   if (hdr->version_minor == 0) {
     memcpy (&wmap->header, hdr, sizeof (struct _GT4ListHeader_4_0));
-    wmap->header.list_start = sizeof (GT4ListHeader);
+    wmap->header.list_start = sizeof (struct _GT4ListHeader_4_0);
     wmap->header.word_bytes = 8;
     wmap->header.count_bytes = 4;
   } else if (hdr->version_minor <= 2) {
