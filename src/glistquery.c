@@ -33,6 +33,7 @@
 #include "utils.h"
 #include "sequence.h"
 #include "sequence-stream.h"
+#include "set-operations.h"
 #include "fasta.h"
 #include "version.h"
 #include "index-map.h"
@@ -70,6 +71,35 @@ enum {
   FILES,
   SEQUENCES
 };
+
+typedef struct _DumpData DumpData;
+
+struct _DumpData {
+  unsigned int n_lists;
+  unsigned int wlen;
+};
+
+static unsigned int
+dump_callback (uint64_t word, uint32_t *counts, void *data)
+{
+  DumpData *dd = (DumpData *) data;
+  unsigned int i;
+  fprintf (stdout, "%s", word_to_string (word, dd->wlen));
+  for (i = 0; i < dd->n_lists; i++) {
+    fprintf (stdout, "\t%u", counts[i]);
+  }
+  fprintf (stdout, "\n");
+  return 0;
+}
+
+static void
+dump_lists (AZObject *objs[], unsigned int n_objs, unsigned int wlen)
+{
+  DumpData dd;
+  dd.n_lists = n_objs;
+  dd.wlen = wlen;
+  gt4_union (objs, n_objs, dump_callback, &dd);
+}
   
 int main (int argc, const char *argv[])
 {
@@ -80,7 +110,7 @@ int main (int argc, const char *argv[])
   unsigned int nmm = 0;
   unsigned int pm3 = 0;
   char *end;
-  int printall = 0;
+  int printall = 0, print_header = 0;
   unsigned int minfreq = 0, maxfreq = UINT_MAX;
   unsigned int distro = 0;
   unsigned int bloom = 0;
@@ -199,6 +229,8 @@ int main (int argc, const char *argv[])
       use_3p = 1;
     } else if (!strcmp(argv[argidx], "--5p")) {
       use_5p = 1;
+    } else if (!strcmp(argv[argidx], "--header")) {
+      print_header = 1;
     } else if (!strcmp(argv[argidx], "--bloom")) {
       bloom = 1;
     } else if (!strcmp(argv[argidx], "--disable_scouts")) {  
@@ -337,8 +369,19 @@ int main (int argc, const char *argv[])
 
   /* If no options is given print all lists/indices */
   if (!seqfilename && !querylistfilename && !queryfilename && !querystring) {
-    for (i = 0; i < n_lists; i++) {
-      print_full_map (maps[i], locations);
+    if (n_lists > 1) {
+      if (print_header) {
+        fprintf (stdout, "KMER");
+        for (i = 0; i < n_lists; i++) {
+          fprintf (stdout, "\t%s", lists[i]);
+        }
+        fprintf (stdout, "\n");
+      }
+      dump_lists (maps, n_lists, wlen);
+    } else {
+      for (i = 0; i < n_lists; i++) {
+        print_full_map (maps[i], locations);
+      }
     }
     exit (0);
   }

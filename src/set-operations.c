@@ -127,3 +127,57 @@ gt4_write_union (AZObject *arrays[], unsigned int n_arrays, unsigned int cutoff,
   
   return 0;
 }
+
+unsigned int
+gt4_union (AZObject *objs[], unsigned int n_objs, unsigned int (*callback) (uint64_t, uint32_t *, void *), void *data)
+{
+  GT4WordSListImplementation *impls[GT4_MAX_SETS];
+  GT4WordSListInstance *insts[GT4_MAX_SETS];
+  unsigned int n_sources;
+  unsigned long long total = 0;
+  unsigned int j;
+
+  arikkei_return_val_if_fail (n_objs > 0, 1);
+  arikkei_return_val_if_fail (n_objs <= GT4_MAX_SETS, 1);
+  
+  n_sources = 0;
+  for (j = 0; j < n_objs; j++) {
+    impls[n_sources] = (GT4WordSListImplementation *) az_object_get_interface (AZ_OBJECT(objs[j]), GT4_TYPE_WORD_SLIST, (void **) &insts[n_sources]);
+    if (insts[n_sources]->num_words) {
+      gt4_word_slist_get_first_word (impls[n_sources], insts[n_sources]);
+      total += insts[n_sources]->num_words;
+      n_sources += 1;
+    }
+  }
+
+  if (n_sources) {
+    unsigned long long word;
+    uint32_t counts[GT4_MAX_SETS];
+    unsigned int result;
+    /* Find first word */
+    word = 0xffffffffffffffffULL;
+    for (j = 0; j < n_objs; j++) if ((insts[j]->idx < insts[j]->num_words) && (insts[j]->word < word)) word = insts[j]->word;
+    /* Iterate until all lists are exhausted */
+    while (n_sources) {
+      unsigned long long next = 0xffffffffffffffffULL;
+      for (j = 0; j < n_objs; j++) {
+        counts[j] = 0;
+        if (insts[j]->idx < insts[j]->num_words) {
+          if (insts[j]->word == word) {
+            counts[j] = insts[j]->count;
+            if (!gt4_word_slist_get_next_word (impls[j], insts[j])) {
+              n_sources -= 1;
+            }
+          }
+          if (insts[j]->word < next) next = insts[j]->word;
+        }
+      }
+      /* Now we have all freqs */
+      result = callback (word, counts, data);
+      if (result) return result;
+      word = next;
+    }
+  }
+  
+  return 0;
+}

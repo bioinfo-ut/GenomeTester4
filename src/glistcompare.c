@@ -341,8 +341,13 @@ int main (int argc, const char *argv[])
     exit (1);
   }
   
-  if (!find_intrsec && (rule == RULE_SUBTRACT || rule == RULE_MIN || rule == RULE_FIRST || rule == RULE_SECOND)) {
-    fprintf (stderr, "Error: Rules min, subtract, fist and second can only be used with finding the intersection.\n");
+  if (!find_intrsec && (rule == RULE_MIN || rule == RULE_FIRST || rule == RULE_SECOND)) {
+    fprintf (stderr, "Error: Rules min, fist and second can only be used with finding the intersection.\n");
+    exit (1);
+  }
+
+  if ((!find_intrsec && !find_diff) && (rule == RULE_SUBTRACT)) {
+    fprintf (stderr, "Error: Rule subtract can only be used with intersection and difference.\n");
     exit (1);
   }
 

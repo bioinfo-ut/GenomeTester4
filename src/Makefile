@@ -46,6 +46,7 @@ LISTQUERY_SOURCES = \
 	sequence-source.c sequence-source.h \
 	sequence-stream.c sequence-stream.h \
 	sequence-zstream.c sequence-zstream.h \
+	set-operations.c set-operations.h \
 	common.c common.h \
 	queue.c queue.h \
 	utils.c utils.h \

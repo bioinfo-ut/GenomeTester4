@@ -33,4 +33,8 @@
 
 unsigned int gt4_write_union (AZObject *arrays[], unsigned int n_arrays, unsigned int cutoff, int ofile, GT4ListHeader *header);
 
+/* Execures callback for each unique kmer */
+/* If any callback returns not 0, reading stops and result is returned */
+unsigned int gt4_union (AZObject *objs[], unsigned int n_objs, unsigned int (*callback) (uint64_t, uint32_t *, void *), void *data);
+
 #endif
