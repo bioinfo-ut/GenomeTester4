@@ -93,12 +93,16 @@ dump_callback (uint64_t word, uint32_t *counts, void *data)
 }
 
 static void
-dump_lists (AZObject *objs[], unsigned int n_objs, unsigned int wlen)
+dump_lists (AZObject *objs[], unsigned int n_objs, unsigned int wlen, unsigned int is_union)
 {
   DumpData dd;
   dd.n_lists = n_objs;
   dd.wlen = wlen;
-  gt4_union (objs, n_objs, dump_callback, &dd);
+  if (is_union) {
+    gt4_is_union (objs, n_objs, dump_callback, &dd);
+  } else {
+    gt4_union (objs, n_objs, dump_callback, &dd);
+  }
 }
   
 int main (int argc, const char *argv[])
@@ -115,6 +119,7 @@ int main (int argc, const char *argv[])
   unsigned int distro = 0;
   unsigned int bloom = 0;
   unsigned int command = QUERY;
+  unsigned int is_union = 0;
 
   for (argidx = 1; argidx < argc; argidx++) {
     if (!strcmp (argv[argidx], "-v") || !strcmp (argv[argidx], "--version")) {
@@ -233,6 +238,8 @@ int main (int argc, const char *argv[])
       print_header = 1;
     } else if (!strcmp(argv[argidx], "--bloom")) {
       bloom = 1;
+    } else if (!strcmp(argv[argidx], "--is_union")) {  
+      is_union = 1;
     } else if (!strcmp(argv[argidx], "--disable_scouts")) {  
       use_scouts = 0;
     } else if (argv[argidx][0] != '-') {
@@ -377,7 +384,7 @@ int main (int argc, const char *argv[])
         }
         fprintf (stdout, "\n");
       }
-      dump_lists (maps, n_lists, wlen);
+      dump_lists (maps, n_lists, wlen, is_union);
     } else {
       for (i = 0; i < n_lists; i++) {
         print_full_map (maps[i], locations);
