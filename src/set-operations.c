@@ -217,10 +217,10 @@ gt4_is_union (AZObject *objs[], unsigned int n_objs, unsigned int (*callback) (u
       if ((insts[j]->idx < insts[j]->num_words) && (insts[j]->word == word)) {
         counts[j] = insts[j]->count;
       }
-      /* Now we have all freqs */
-      result = callback (word, counts, data);
-      if (result) return result;
     }
+    /* Now we have all freqs */
+    result = callback (word, counts, data);
+    if (result) return result;
     gt4_word_slist_get_next_word (impls[0], insts[0]);
   }
   
