@@ -513,6 +513,8 @@ typedef struct _QueryData QueryData;
 struct _QueryData {
   GT4WordDictImplementation *dict_impl;
   GT4WordDictInstance *dict_inst;
+  GT4WordSListImplementation *slist_impl;
+  GT4WordSListInstance *slist_inst;
   GT4WordIndexImplementation *index_impl;
   GT4WordIndexInstance *index_inst;
   unsigned int n_mm;
@@ -698,6 +700,23 @@ search_fasta (AZObject *obj, const char *fname, unsigned int n_mm, unsigned int 
 }
 
 static unsigned int
+search_list_zipper (GT4WordSListImplementation *l_impl, GT4WordSListInstance *l_inst, QueryData *qd)
+{
+  gt4_word_slist_get_first_word (l_impl, l_inst);
+  gt4_word_slist_get_first_word (qd->slist_impl, qd->slist_inst);
+  while ((qd->slist_inst->idx < qd->slist_inst->num_words) && (l_inst->idx < l_inst->num_words)) {
+    while (qd->slist_inst->word < l_inst->word) {
+      gt4_word_slist_get_next_word (qd->slist_impl, qd->slist_inst);
+    }
+    if (qd->slist_inst->word == l_inst->word) {
+      cb_print (l_inst->word, l_inst->count, qd);
+    }
+    gt4_word_slist_get_next_word (l_impl, l_inst);
+  }
+  return 0;
+}
+
+static unsigned int
 search_list (AZObject *obj, const char *fname, unsigned int n_mm, unsigned int pm_3, unsigned int min_freq, unsigned int max_freq, int print_all_words)
 {
   GT4WordSListImplementation *s_impl;
@@ -708,6 +727,7 @@ search_list (AZObject *obj, const char *fname, unsigned int n_mm, unsigned int p
   unsigned int code = 0;
 
   qd.dict_impl = (GT4WordDictImplementation *) az_object_get_interface (obj, GT4_TYPE_WORD_DICT, (void **) &qd.dict_inst);
+  qd.slist_impl = (GT4WordSListImplementation *) az_object_get_interface (obj, GT4_TYPE_WORD_SLIST, (void **) &qd.slist_inst);
   if (GT4_IS_INDEX_MAP (obj) && locations) {
     qd.index_impl = (GT4WordIndexImplementation *) az_object_get_interface (obj, GT4_TYPE_WORD_INDEX, (void **) &qd.index_inst);
   }
@@ -738,12 +758,16 @@ search_list (AZObject *obj, const char *fname, unsigned int n_mm, unsigned int p
     az_object_shutdown (s_obj);
     return GT_INCOMPATIBLE_WORDLENGTH_ERROR;
   }
-  
-  gt4_word_slist_get_first_word (s_impl, s_inst);
-  while (s_inst->idx < s_inst->num_words) {
-    uint64_t word = s_inst->word;
-    search_one_word (&qd, word);
-    if (!gt4_word_slist_get_next_word (s_impl, s_inst)) break;
+
+  if (!n_mm) {
+    search_list_zipper (s_impl, s_inst, &qd);
+  } else {
+    gt4_word_slist_get_first_word (s_impl, s_inst);
+    while (s_inst->idx < s_inst->num_words) {
+      uint64_t word = s_inst->word;
+      search_one_word (&qd, word);
+      if (!gt4_word_slist_get_next_word (s_impl, s_inst)) break;
+    }
   }
   az_object_shutdown (s_obj);
   return 0;
@@ -896,12 +920,15 @@ print_gc (AZObject *obj)
     unsigned long long word = inst->word;
     unsigned int j;
     for (j = 0; j < inst->word_length; j++) {
+      //unsigned int n = (unsigned int) (word & 3);
+      //n = (n ^ (n >> 1)) & 1;
+      //if ((n == 1) || (n == 2)) count += inst->count;
       count += inst->count * ((word ^ (word >> 1)) & 1);
       word = word >> 2;
     }
     gt4_word_slist_get_next_word (impl, inst);
   }
-  printf ("GC\t%g\n", (double) count / (inst->num_words * inst->word_length));
+  printf ("GC\t%g\n", (double) count / (inst->sum_counts * inst->word_length));
 }
 
 void print_help (int exit_value)
