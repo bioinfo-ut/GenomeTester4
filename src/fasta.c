@@ -252,13 +252,15 @@ fasta_reader_read_nwords (GT4FastaReader *reader, unsigned long long maxwords,
 	    nwords += 1;
 	  }
 	  /* We increase nucleotide position for N too */
-	  if (cval > ' ') {
-	    reader->seq_npos += 1;
-	  }
+	  //if (cval > ' ') {
+	  reader->seq_npos += 1;
+	  //}
 	} else if (cval >= ' ') {
 	  reader->wordfw = 0;
 	  reader->wordrv = 0;
 	  reader->currentlength = 0;
+	  /* We increase nucleotide position for N too */
+	  reader->seq_npos += 1;
 	}
       }
       reader->cpos += 1;
