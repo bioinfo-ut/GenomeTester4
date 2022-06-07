@@ -42,6 +42,12 @@ count_lines_from_text (const unsigned char *cdata, size_t csize, unsigned int *w
     unsigned int lengths[4];
     unsigned int ntokenz;
 
+    /* Skip comments */
+    if (cdata[cpos] == '#') {
+      while ((cpos < csize) && (cdata[cpos] != '\n')) cpos += 1;
+      if (cpos < csize) cpos += 1;
+      continue;
+    }
     ntokenz = split_line (cdata + cpos, csize - cpos, tokenz, lengths, 3);
     if (ntokenz < 2) {
       fprintf (stderr, "Line %u has <2 (%u) tokens\n", n_lines, ntokenz);
@@ -162,6 +168,12 @@ gt4_gmer_db_new_from_text (const unsigned char *cdata, unsigned long long csize,
     unsigned int lengths[65536];
     unsigned int ntokenz, n_kmers;
     unsigned int i;
+    /* Skip comments */
+    if (cdata[cpos] == '#') {
+      while ((cpos < csize) && (cdata[cpos] != '\n')) cpos += 1;
+      if (cpos < csize) cpos += 1;
+      continue;
+    }
     /* Initialize */
     memset (db->nodes + idx, 0, sizeof (Node));
     /* Parse ID + number of kmers */
