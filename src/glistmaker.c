@@ -278,6 +278,15 @@ main (int argc, const char *argv[])
     exit (1);
   }
 
+  if (debug && create_index) {
+    for (i = 0; i < mq.n_sources; i++) {
+      fprintf (stderr, "%u: %s start %llu subseqs %u\n", i, i_files[mq.sources[i].file_idx].name, mq.sources[i].start, mq.sources[i].n_subseqs);
+      //for (j = 0; j < mq.sources[i].n_subseqs; j++) {
+      //  fprintf (stderr, "%llu %u\n", i_files[i].subseqs[j]->name_pos, i_files[i].subseqs[j]->name_len);
+      //}
+    }
+  }
+
   /* Do work */
   process (&mq.queue, 0, &mq);
   gt4_queue_lock (&mq.queue);
@@ -626,6 +635,27 @@ write_index (FILE *ofs, const char *loc_files[], unsigned int n_loc_files, GT4Li
   unsigned int version;
   unsigned long long n_words_loc, n_words, n_locations_loc, n_locs, file_block_loc, file_block_pos, kmer_list_loc, kmer_list_pos, locations_loc, locations_pos;
   unsigned char zero[16] = { 0 };
+
+  if (debug) {
+    for (i = 0; i < mq->n_sources; i++) {
+      unsigned int j;
+      GT4LMQSource *src = &mq->sources[i];
+      for (j = 0; j < src->n_subseqs; j++) {
+        GT4SubSequence *ss = &src->subseqs[j];
+        fprintf (stderr, "Src %u subseq %u np %llu nl %u ss %u sl %u\n", i, j, ss->name_pos, ss->name_len, ss->seq_pos, ss->seq_len);
+        unsigned long long np = src->start + ss->name_pos;
+        IFile *ifile = &i_files[src->file_idx];
+        FILE *f = fopen(ifile->name, "r");
+        fseek (f, np, SEEK_SET);
+        char b[256];
+        fread (b, ss->name_len, 1, f);
+        b[ss->name_len] = 0;
+        fclose (f);
+        fprintf (stderr, "%s\n", b);
+      }
+    }
+  }
+
   /* Determine file data */
   for (i = 0; i < n_i_files; i++) {
     GT4LMQSource *sources[1024];
@@ -652,10 +682,34 @@ write_index (FILE *ofs, const char *loc_files[], unsigned int n_loc_files, GT4Li
     for (j = 0; j < n_sources; j++) {
       unsigned int k;
       for (k = 0; k < sources[j]->n_subseqs; k++) {
-        i_files[i].subseqs[sources[j]->first_subseq + k] = &sources[j]->subseqs[k];
+        GT4SubSequence *ss = &sources[j]->subseqs[k];
+        i_files[i].subseqs[sources[j]->first_subseq + k] = ss;
+        // Adjust positions
+        ss->name_pos += sources[j]->start;
+        //fprintf (stderr, "%u %u start %llu np %llu\n", j, k, sources[j]->start, ss->name_pos);
       }
     }
   }
+
+  if (debug) {
+    for (i = 0; i < n_i_files; i++) {
+      unsigned int j;
+      IFile *ifile = &i_files[i];
+      FILE *f = fopen(ifile->name, "r");
+      for (j = 0; j < ifile->n_subseqs; j++) {
+        GT4SubSequence *ss = ifile->subseqs[j];
+        fprintf (stderr, "Src %u subseq %u np %llu nl %u ss %u sl %u\n", i, j, ss->name_pos, ss->name_len, ss->seq_pos, ss->seq_len);
+        unsigned long long np = ss->name_pos;
+        fseek (f, np, SEEK_SET);
+        char b[256];
+        fread (b, ss->name_len, 1, f);
+        b[ss->name_len] = 0;
+        fprintf (stderr, "%s\n", b);
+      }
+      fclose (f);
+    }
+  }
+
   /* Determine bitsizes */
   for (i = 0; i < mq->n_sources; i++) {
     unsigned int last_subseq = mq->sources[i].first_subseq + mq->sources[i].n_subseqs - 1;

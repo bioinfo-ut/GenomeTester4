@@ -39,6 +39,9 @@ struct _SNPTable {
   unsigned long long *words;
   unsigned int *alleles;
   /* Stats */
+  /* Number of N-s */
+  unsigned long long n_n;
+  /* Nucleotide length (excludes N) */
   unsigned long long n_nucl;
   unsigned long long n_gc;
   /* Index */
@@ -69,6 +72,9 @@ struct _SNPQueue {
   unsigned int n_full_tables;
   SNPTable **full_tables;
   /* Stats */
+  /* Sequence length (includes N) */
+  unsigned long long n_seq;
+  /* Nucleotide length (excludes N) */
   unsigned long long n_nucl;
   unsigned long long n_gc;
   unsigned long long n_kmers_total;
@@ -86,6 +92,7 @@ static void print_counts (SNPQueue *snpq, GT4GmerDB *db);
 static void process (GT4Queue *queue, unsigned int idx, void *arg);
 static int start_sequence (GT4FastaReader *reader, void *data);
 static int end_sequence (GT4FastaReader *reader, void *data);
+static int read_character (GT4FastaReader *reader, unsigned int ch, void *data);
 static int read_nucleotide (GT4FastaReader *reader, unsigned int nucleotide, void *data);
 static int read_word (GT4FastaReader *reader, unsigned long long word, void *data);
 static int compare_counts (const void *lhs, const void *rhs);
@@ -403,7 +410,8 @@ main (int argc, const char *argv[])
       }
 
       if (stats) {
-        fprintf (stdout, "#LENGTH\t%llu\n", snpq.n_nucl);
+        fprintf (stdout, "#LENGTH\t%llu\n", snpq.n_seq);
+        fprintf (stdout, "#LENGTH_ACGT\t%llu\n", snpq.n_nucl);
         fprintf (stdout, "#GC\t%.3f\n", (double) snpq.n_gc / snpq.n_nucl);
         fprintf (stdout, "#TOTAL_KMERS\t%llu\n", snpq.n_kmers_total);
         fprintf (stdout, "#LIST_KMERS\t%llu\n", snpq.n_kmers);
@@ -713,11 +721,12 @@ read_file (SNPQueue *snpq, TaskRead *tr)
   SNPTable *tbl = snpq->free_tables[--snpq->n_free_tables];
   gt4_queue_unlock (&snpq->lmq.queue);
   tbl->nwords = 0;
+  tbl->n_n = 0;
   tbl->n_nucl = 0;
   tbl->n_gc = 0;
   tr->data = tbl;
   /* if (debug > 0) fprintf (stderr, "Thread %d: reading file %s from %llu\n", idx, tt->_seqfile->path, tf->task_read.reader.cpos); */
-  result = fasta_reader_read_nwords (&tr->reader, BLOCK_SIZE, start_sequence, end_sequence, NULL, (stats) ? read_nucleotide : NULL, read_word, tr);
+  result = fasta_reader_read_nwords (&tr->reader, BLOCK_SIZE, start_sequence, end_sequence, (stats) ? read_character : NULL, (stats) ? read_nucleotide : NULL, read_word, tr);
   if (result) {
     fprintf (stderr, "read_file: Fasta reader %s returned %u\n", tr->reader.id, result);
     if (!recover) exit (1);
@@ -756,6 +765,8 @@ process_table (SNPQueue *snpq, TaskTable *tt, unsigned int thread_idx)
   gt4_queue_lock (&snpq->lmq.queue);
   /* fixme: Create separate task / mutex */
   if (stats) {
+    snpq->n_seq += tbl->n_nucl;
+    snpq->n_seq += tbl->n_n;
     snpq->n_nucl += tbl->n_nucl;
     snpq->n_gc += tbl->n_gc;
     snpq->n_kmers_total += tbl->nwords;
@@ -911,6 +922,16 @@ read_nucleotide (GT4FastaReader *reader, unsigned int nucl, void *data)
 
   tbl->n_nucl += 1;
   tbl->n_gc += ((nucl ^ (nucl >> 1)) & 1);
+  return 0;
+}
+
+static int
+read_character (GT4FastaReader *reader, unsigned int ch, void *data)
+{
+  TaskRead *tt = (TaskRead *) data;
+  SNPTable *tbl = (SNPTable *) tt->data;
+
+  if ((ch == 'N') || (ch == 'n')) tbl->n_n += 1;
   return 0;
 }
 

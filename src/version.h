@@ -26,7 +26,7 @@
 
 #define VERSION_MAJOR 4
 #define VERSION_MINOR 2
-#define VERSION_MICRO 14
+#define VERSION_MICRO 16
 #define VERSION_QUALIFIER "stable"
 
 #endif
